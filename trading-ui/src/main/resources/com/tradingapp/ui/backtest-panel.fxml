@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.chart.*?>
+
+<VBox xmlns="http://javafx.com/javafx"
+      xmlns:fx="http://javafx.com/fxml"
+      fx:controller="com.tradingapp.ui.BacktestController"
+      style="-fx-background-color: #1a1a2e;">
+
+    <!-- Row 1: Config controls -->
+    <HBox spacing="10" style="-fx-background-color: #16213e; -fx-padding: 10;" alignment="CENTER_LEFT">
+        <Label text="Start:" style="-fx-font-size: 12px; -fx-text-fill: #e0e0e0;"/>
+        <DatePicker fx:id="backtestStartDate" prefWidth="130"/>
+        <Label text="End:" style="-fx-font-size: 12px; -fx-text-fill: #e0e0e0;"/>
+        <DatePicker fx:id="backtestEndDate" prefWidth="130"/>
+        <Label text="Symbols:" style="-fx-font-size: 12px; -fx-text-fill: #e0e0e0;"/>
+        <TextField fx:id="backtestSymbols" prefWidth="200" promptText="AAPL,MSFT,GOOGL"/>
+        <Button fx:id="runBacktestButton" text="Run Backtest" onAction="#runBacktest"
+                style="-fx-background-color: #00aa55; -fx-text-fill: white; -fx-font-weight: bold;"/>
+        <ProgressIndicator fx:id="backtestProgress" visible="false" prefWidth="20" prefHeight="20"/>
+    </HBox>
+
+    <!-- Row 2: Stats labels -->
+    <HBox spacing="30" style="-fx-background-color: #16213e; -fx-padding: 8;">
+        <Label fx:id="btReturnLabel" text="Return: —"
+               style="-fx-font-size: 14px; -fx-text-fill: #e0e0e0;"/>
+        <Label fx:id="btMaxDrawdownLabel" text="Max Drawdown: —"
+               style="-fx-font-size: 14px; -fx-text-fill: #e0e0e0;"/>
+        <Label fx:id="btWinRateLabel" text="Win Rate: —"
+               style="-fx-font-size: 14px; -fx-text-fill: #e0e0e0;"/>
+        <Label fx:id="btTradeCountLabel" text="Trades: —"
+               style="-fx-font-size: 14px; -fx-text-fill: #e0e0e0;"/>
+    </HBox>
+
+    <!-- Row 3: Equity curve chart -->
+    <LineChart fx:id="backtestChart"
+               VBox.vgrow="ALWAYS"
+               animated="false"
+               createSymbols="false"
+               legendVisible="false"
+               style="-fx-background-color: #1a1a2e;">
+        <xAxis>
+            <CategoryAxis side="BOTTOM" tickLabelRotation="90"/>
+        </xAxis>
+        <yAxis>
+            <NumberAxis label="Portfolio ($)" forceZeroInRange="false"/>
+        </yAxis>
+    </LineChart>
+
+</VBox>
