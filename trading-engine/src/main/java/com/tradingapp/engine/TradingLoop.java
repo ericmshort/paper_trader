@@ -150,6 +150,7 @@ public class TradingLoop implements Runnable {
                 double weightedSells = weightEvaluator != null
                         ? weightEvaluator.weightedSellScore(signals) : (double) sells;
                 String signalStr = signals.stream().map(SignalResult::toString).collect(Collectors.joining(", "));
+                String featureCsv = extractFeatureCsv(signals);
                 boolean hasPosition = account.getPositions().containsKey(symbol);
                 if (trailingStop.check(symbol, price) && hasPosition) {
                     Position pos = account.getPositions().get(symbol);
@@ -162,7 +163,6 @@ public class TradingLoop implements Runnable {
                 } else if (weightedBuys >= SIGNAL_THRESHOLD && !hasPosition) {
                     int shares = fees.maxShares(account.getBalance(), price);
                     if (shares > 0) {
-                        String featureCsv = extractFeatureCsv(signals);
                         orderExecutor.buy(symbol, shares, price, signalStr,
                                 "Signals: " + buys + "/" + signals.size() + " BUY", featureCsv);
                         uiRefreshCallback.run();
@@ -170,7 +170,7 @@ public class TradingLoop implements Runnable {
                 }
                 trailingStop.updatePeak(symbol, price);
                 if (optionsEvaluator != null) {
-                    optionsEvaluator.evaluate(symbol, price, buys, sells, signalStr);
+                    optionsEvaluator.evaluate(symbol, price, buys, sells, signalStr, featureCsv);
                 }
                 researchCallback.accept(time + " | " + symbol + " $" + String.format("%.2f", price)
                         + " | " + signalStr + " | BUY=" + buys + " SELL=" + sells);

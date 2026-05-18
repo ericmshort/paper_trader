@@ -22,7 +22,7 @@ public class OptionsOrderExecutor {
     }
 
     public void buyCall(String symbol, double strike, LocalDate expiry, int contracts,
-                        double premium, String signalStr) {
+                        double premium, String signalStr, String featureCsv) {
         double fee = CONTRACT_FEE * contracts;
         double totalCost = premium * 100 * contracts + fee;
         if (account.getBalance() < totalCost) return;
@@ -31,11 +31,12 @@ public class OptionsOrderExecutor {
         account.addOptionsPosition(symbol + "_CALL", pos);
         TransactionRecord rec = new TransactionRecord(symbol, TransactionAction.CALL_BUY,
                 contracts, premium, fee, account.getBalance(), "CALL K=" + strike + " exp=" + expiry, signalStr);
+        rec.setFeatures(featureCsv);
         transactionLog.insert(rec);
     }
 
     public void buyPut(String symbol, double strike, LocalDate expiry, int contracts,
-                       double premium, String signalStr) {
+                       double premium, String signalStr, String featureCsv) {
         double fee = CONTRACT_FEE * contracts;
         double totalCost = premium * 100 * contracts + fee;
         if (account.getBalance() < totalCost) return;
@@ -44,6 +45,7 @@ public class OptionsOrderExecutor {
         account.addOptionsPosition(symbol + "_PUT", pos);
         TransactionRecord rec = new TransactionRecord(symbol, TransactionAction.PUT_BUY,
                 contracts, premium, fee, account.getBalance(), "PUT K=" + strike + " exp=" + expiry, signalStr);
+        rec.setFeatures(featureCsv);
         transactionLog.insert(rec);
     }
 

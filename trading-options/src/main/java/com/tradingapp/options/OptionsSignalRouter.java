@@ -31,7 +31,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     }
 
     @Override
-    public void evaluate(String symbol, double price, int buySignals, int sellSignals, String signalStr) {
+    public void evaluate(String symbol, double price, int buySignals, int sellSignals, String signalStr, String featureCsv) {
         String callKey = symbol + "_CALL";
         String putKey  = symbol + "_PUT";
         Map<String, OptionsPosition> opts = account.getOptionsPositions();
@@ -84,7 +84,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             if (premium <= 0) return;
             int contracts = Math.min(5, (int) (account.getBalance() * 0.05 / (premium * 100)));
             if (contracts >= 1) {
-                optExec.buyCall(symbol, K, expiry, contracts, premium, signalStr);
+                optExec.buyCall(symbol, K, expiry, contracts, premium, signalStr, featureCsv);
                 GreeksResult g = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, true);
                 researchCallback.accept(symbol + " CALL K=" + K + " exp=" + expiry
                         + " x" + contracts + " prem=" + String.format("%.2f", premium)
@@ -97,7 +97,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             if (premium <= 0) return;
             int contracts = Math.min(5, (int) (account.getBalance() * 0.05 / (premium * 100)));
             if (contracts >= 1) {
-                optExec.buyPut(symbol, K, expiry, contracts, premium, signalStr);
+                optExec.buyPut(symbol, K, expiry, contracts, premium, signalStr, featureCsv);
                 GreeksResult g = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, false);
                 researchCallback.accept(symbol + " PUT K=" + K + " exp=" + expiry
                         + " x" + contracts + " prem=" + String.format("%.2f", premium)

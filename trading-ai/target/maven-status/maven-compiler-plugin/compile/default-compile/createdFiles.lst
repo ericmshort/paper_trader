@@ -1,7 +1,0 @@
-com/tradingapp/ai/MLSignalEvaluator.class
-com/tradingapp/ai/FeatureVector.class
-com/tradingapp/ai/SignalWeights.class
-com/tradingapp/ai/TradeFeatureExtractor.class
-com/tradingapp/ai/SignalWeightTrainer.class
-com/tradingapp/ai/LabeledTrade.class
-com/tradingapp/ai/WekaModelTrainer.class

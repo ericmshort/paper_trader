@@ -1,7 +1,0 @@
-/Users/ericshort/AIProjects/TradingApp/trading-data/src/main/java/com/tradingapp/data/DataUnavailableException.java
-/Users/ericshort/AIProjects/TradingApp/trading-data/src/main/java/com/tradingapp/data/HistoricalBar.java
-/Users/ericshort/AIProjects/TradingApp/trading-data/src/main/java/com/tradingapp/data/HistoricalBarFetcher.java
-/Users/ericshort/AIProjects/TradingApp/trading-data/src/main/java/com/tradingapp/data/LargeCapWatchList.java
-/Users/ericshort/AIProjects/TradingApp/trading-data/src/main/java/com/tradingapp/data/PriceHistory.java
-/Users/ericshort/AIProjects/TradingApp/trading-data/src/main/java/com/tradingapp/data/QuoteModel.java
-/Users/ericshort/AIProjects/TradingApp/trading-data/src/main/java/com/tradingapp/data/YahooFinanceClient.java

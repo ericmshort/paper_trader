@@ -46,7 +46,7 @@ public class OptionsSignalRouterTest {
         TransactionLog log = new TransactionLog(tempDir.resolve("call.db").toString());
         OptionsSignalRouter router = buildRouter(account, log);
 
-        router.evaluate(SYMBOL, PRICE, 2, 0, "test signals");
+        router.evaluate(SYMBOL, PRICE, 2, 0, "test signals", "");
 
         assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
                 "CALL position should be opened on 2 buy signals");
@@ -58,7 +58,7 @@ public class OptionsSignalRouterTest {
         TransactionLog log = new TransactionLog(tempDir.resolve("put.db").toString());
         OptionsSignalRouter router = buildRouter(account, log);
 
-        router.evaluate(SYMBOL, PRICE, 0, 2, "test signals");
+        router.evaluate(SYMBOL, PRICE, 0, 2, "test signals", "");
 
         assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_PUT"),
                 "PUT position should be opened on 2 sell signals");
@@ -71,11 +71,11 @@ public class OptionsSignalRouterTest {
         OptionsSignalRouter router = buildRouter(account, log);
 
         // Open call
-        router.evaluate(SYMBOL, PRICE, 2, 0, "buy");
+        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
         assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"));
 
         // Reverse: sell signal closes the call
-        router.evaluate(SYMBOL, PRICE, 0, 2, "sell");
+        router.evaluate(SYMBOL, PRICE, 0, 2, "sell", "");
         assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
                 "CALL position should be closed on sell reversal");
     }
@@ -92,7 +92,7 @@ public class OptionsSignalRouterTest {
         List<String> msgs = new ArrayList<>();
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, ph, msgs::add);
 
-        router.evaluate(SYMBOL, PRICE, 2, 0, "buy");
+        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
 
         assertTrue(account.getOptionsPositions().isEmpty(),
                 "No position should be opened when vol = 0");
@@ -109,7 +109,7 @@ public class OptionsSignalRouterTest {
         List<String> msgs = new ArrayList<>();
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, ph, msgs::add);
 
-        router.evaluate(SYMBOL, PRICE, 2, 0, "buy");
+        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
 
         assertTrue(account.getOptionsPositions().isEmpty(),
                 "No position should open with only 1 price in history");

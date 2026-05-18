@@ -18,12 +18,14 @@ public class TradeFeatureExtractor {
 
         for (int i = 0; i < all.size(); i++) {
             TransactionRecord buy = all.get(i);
-            if (buy.getAction() != TransactionRecord.TransactionAction.BUY) continue;
             if (buy.getFeatures() == null || buy.getFeatures().isBlank()) continue;
+
+            TransactionRecord.TransactionAction closeAction = matchingCloseAction(buy.getAction());
+            if (closeAction == null) continue;
 
             for (int j = i + 1; j < all.size(); j++) {
                 TransactionRecord sell = all.get(j);
-                if (sell.getAction() != TransactionRecord.TransactionAction.SELL) continue;
+                if (sell.getAction() != closeAction) continue;
                 if (!sell.getSymbol().equals(buy.getSymbol())) continue;
 
                 boolean win = sell.getPricePerUnit() > buy.getPricePerUnit();
@@ -37,5 +39,14 @@ public class TradeFeatureExtractor {
             }
         }
         return result;
+    }
+
+    private TransactionRecord.TransactionAction matchingCloseAction(TransactionRecord.TransactionAction open) {
+        return switch (open) {
+            case BUY       -> TransactionRecord.TransactionAction.SELL;
+            case CALL_BUY  -> TransactionRecord.TransactionAction.CALL_SELL;
+            case PUT_BUY   -> TransactionRecord.TransactionAction.PUT_SELL;
+            default        -> null;
+        };
     }
 }

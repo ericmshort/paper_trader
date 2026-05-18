@@ -29,7 +29,7 @@ public class OptionsOrderExecutorTest {
         TransactionLog log = new TransactionLog(tempDir.resolve("test.db").toString());
         OptionsOrderExecutor exec = build(account, log);
 
-        exec.buyCall("AAPL", 150.0, EXPIRY, 1, 5.0, "test signals");
+        exec.buyCall("AAPL", 150.0, EXPIRY, 1, 5.0, "test signals", "");
 
         // totalCost = 5.0 * 100 * 1 + 0.65 = 500.65
         assertEquals(100_000.0 - 500.65, account.getBalance(), 0.001);
@@ -45,7 +45,7 @@ public class OptionsOrderExecutorTest {
         TransactionLog log = new TransactionLog(tempDir.resolve("insuf.db").toString());
         OptionsOrderExecutor exec = build(account, log);
 
-        exec.buyCall("AAPL", 150.0, EXPIRY, 1, 5.0, "test");
+        exec.buyCall("AAPL", 150.0, EXPIRY, 1, 5.0, "test", "");
 
         assertEquals(0.0, account.getBalance(), 0.001);
         assertTrue(account.getOptionsPositions().isEmpty());
@@ -59,7 +59,7 @@ public class OptionsOrderExecutorTest {
         OptionsOrderExecutor exec = build(account, log);
 
         // Buy 1 call at premium 5.0: balance = 100_000 - 500.65 = 99_499.35
-        exec.buyCall("AAPL", 150.0, EXPIRY, 1, 5.0, "buy signals");
+        exec.buyCall("AAPL", 150.0, EXPIRY, 1, 5.0, "buy signals", "");
         double balanceAfterBuy = account.getBalance();
         assertEquals(99_499.35, balanceAfterBuy, 0.001);
 
@@ -80,7 +80,7 @@ public class OptionsOrderExecutorTest {
         TransactionLog log = new TransactionLog(tempDir.resolve("put.db").toString());
         OptionsOrderExecutor exec = build(account, log);
 
-        exec.buyPut("AAPL", 145.0, EXPIRY, 1, 3.0, "sell signals");
+        exec.buyPut("AAPL", 145.0, EXPIRY, 1, 3.0, "sell signals", "");
 
         assertTrue(account.getOptionsPositions().containsKey("AAPL_PUT"));
         assertEquals("PUT", account.getOptionsPositions().get("AAPL_PUT").getType());

@@ -1,7 +1,0 @@
-com/tradingapp/data/DataUnavailableException.class
-com/tradingapp/data/QuoteModel.class
-com/tradingapp/data/HistoricalBarFetcher.class
-com/tradingapp/data/LargeCapWatchList.class
-com/tradingapp/data/YahooFinanceClient.class
-com/tradingapp/data/PriceHistory.class
-com/tradingapp/data/HistoricalBar.class
