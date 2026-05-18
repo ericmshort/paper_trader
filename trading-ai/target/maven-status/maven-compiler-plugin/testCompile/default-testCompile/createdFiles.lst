@@ -1,0 +1,3 @@
+com/tradingapp/ai/TradeFeatureExtractorTest.class
+com/tradingapp/ai/SignalWeightTrainerTest.class
+com/tradingapp/ai/MLSignalEvaluatorTest.class

@@ -1,0 +1,7 @@
+/Users/ericshort/AIProjects/TradingApp/trading-ai/src/main/java/com/tradingapp/ai/FeatureVector.java
+/Users/ericshort/AIProjects/TradingApp/trading-ai/src/main/java/com/tradingapp/ai/LabeledTrade.java
+/Users/ericshort/AIProjects/TradingApp/trading-ai/src/main/java/com/tradingapp/ai/MLSignalEvaluator.java
+/Users/ericshort/AIProjects/TradingApp/trading-ai/src/main/java/com/tradingapp/ai/SignalWeightTrainer.java
+/Users/ericshort/AIProjects/TradingApp/trading-ai/src/main/java/com/tradingapp/ai/SignalWeights.java
+/Users/ericshort/AIProjects/TradingApp/trading-ai/src/main/java/com/tradingapp/ai/TradeFeatureExtractor.java
+/Users/ericshort/AIProjects/TradingApp/trading-ai/src/main/java/com/tradingapp/ai/WekaModelTrainer.java
