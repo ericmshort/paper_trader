@@ -425,9 +425,10 @@ public class DashboardController implements Initializable {
                     int prev = openShares.getOrDefault(r.getSymbol(), 0);
                     double prevAvg = avgCost.getOrDefault(r.getSymbol(), 0.0);
                     int newTotal = prev + r.getQuantity();
+                    // Include buy fee in cost basis so it's reflected in the sell P&L
                     double newAvg = newTotal > 0
-                            ? (prev * prevAvg + r.getQuantity() * r.getPricePerUnit()) / newTotal
-                            : r.getPricePerUnit();
+                            ? (prev * prevAvg + r.getQuantity() * r.getPricePerUnit() + r.getFeeCharged()) / newTotal
+                            : r.getPricePerUnit() + r.getFeeCharged() / r.getQuantity();
                     openShares.put(r.getSymbol(), newTotal);
                     avgCost.put(r.getSymbol(), newAvg);
                 }
@@ -444,10 +445,15 @@ public class DashboardController implements Initializable {
                         openShares.put(r.getSymbol(), remaining);
                     }
                 }
-                case CALL_BUY -> openOptionPremiums.put(r.getSymbol() + "_CALL",
-                        new double[]{r.getPricePerUnit(), r.getQuantity()});
-                case PUT_BUY -> openOptionPremiums.put(r.getSymbol() + "_PUT",
-                        new double[]{r.getPricePerUnit(), r.getQuantity()});
+                case CALL_BUY -> {
+                    // Include buy fee in effective premium so it rolls into the close P&L
+                    double effectivePremium = r.getPricePerUnit() + r.getFeeCharged() / (r.getQuantity() * 100.0);
+                    openOptionPremiums.put(r.getSymbol() + "_CALL", new double[]{effectivePremium, r.getQuantity()});
+                }
+                case PUT_BUY -> {
+                    double effectivePremium = r.getPricePerUnit() + r.getFeeCharged() / (r.getQuantity() * 100.0);
+                    openOptionPremiums.put(r.getSymbol() + "_PUT", new double[]{effectivePremium, r.getQuantity()});
+                }
                 case CALL_SELL -> {
                     double[] entry = openOptionPremiums.getOrDefault(r.getSymbol() + "_CALL",
                             new double[]{r.getPricePerUnit(), r.getQuantity()});
