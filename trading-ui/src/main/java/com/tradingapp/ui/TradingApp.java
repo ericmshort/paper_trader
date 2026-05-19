@@ -30,6 +30,11 @@ public class TradingApp extends Application {
     }
 
     public static void main(String[] args) {
+        // Force pure-Java netlib implementations; native JARs are excluded by the JavaFX
+        // module plugin because "native" is not a valid Java identifier in a module name.
+        System.setProperty("com.github.fommil.netlib.ARPACK", "com.github.fommil.netlib.F2jARPACK");
+        System.setProperty("com.github.fommil.netlib.BLAS",   "com.github.fommil.netlib.F2jBLAS");
+        System.setProperty("com.github.fommil.netlib.LAPACK",  "com.github.fommil.netlib.F2jLAPACK");
         launch(args);
     }
 }

@@ -60,7 +60,7 @@ public class SignalWeightTrainer {
             }
 
             return new SignalWeights(weights);
-        } catch (Exception e) {
+        } catch (Throwable e) {
             LOG.warning("Weka training failed, returning default weights: " + e.getMessage());
             return new SignalWeights();
         }
