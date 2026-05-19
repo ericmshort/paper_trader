@@ -27,12 +27,12 @@ public class OrderExecutorTest {
         TransactionRecord record = executor.buy("AAPL", 10, 150.0, "RSI=28", "RSI oversold");
 
         assertNotNull(record);
-        assertEquals(98499.90, account.getBalance(), 0.01);
+        assertEquals(98499.70, account.getBalance(), 0.01);
         assertEquals(1, log.findAll().size());
         assertEquals(TransactionRecord.TransactionAction.BUY, record.getAction());
         assertEquals("AAPL", record.getSymbol());
         assertEquals(10, record.getQuantity());
-        assertEquals(150.0, record.getPricePerUnit(), 0.001);
+        assertEquals(150.02, record.getPricePerUnit(), 0.001);
         assertEquals(0.10, record.getFeeCharged(), 0.001);
     }
 
@@ -46,7 +46,7 @@ public class OrderExecutorTest {
         executor.buy("AAPL", 10, 150.0, "RSI=28", "RSI oversold");
         executor.sell("AAPL", 10, 160.0, "RSI=72", "RSI overbought");
 
-        assertEquals(100099.80, account.getBalance(), 0.01);
+        assertEquals(100099.60, account.getBalance(), 0.01);
         assertEquals(2, log.findAll().size());
     }
 

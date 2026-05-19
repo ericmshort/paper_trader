@@ -159,7 +159,7 @@ public class DashboardController implements Initializable {
         Runnable uiRefresh = () -> Platform.runLater(this::refreshUi);
 
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, transactionLog);
-        OptionsSignalRouter optionsRouter = new OptionsSignalRouter(bsEngine, optExec, account, priceHistory, researchCb);
+        OptionsSignalRouter optionsRouter = new OptionsSignalRouter(bsEngine, optExec, account, priceHistory, researchCb, dataClient);
 
         Path weightsPath = Path.of(System.getProperty("user.home"), ".tradingapp", "signal-weights.json");
         SignalWeights initialWeights;

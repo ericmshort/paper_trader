@@ -31,8 +31,8 @@ public class OptionsOrderExecutorTest {
 
         exec.buyCall("AAPL", 150.0, EXPIRY, 1, 5.0, "test signals", "");
 
-        // totalCost = 5.0 * 100 * 1 + 0.65 = 500.65
-        assertEquals(100_000.0 - 500.65, account.getBalance(), 0.001);
+        // fillPremium = 5.05, totalCost = 5.05 * 100 * 1 + 0.65 = 505.65
+        assertEquals(100_000.0 - 505.65, account.getBalance(), 0.001);
         List<TransactionRecord> records = log.findAll();
         assertEquals(1, records.size());
         assertEquals(TransactionRecord.TransactionAction.CALL_BUY, records.get(0).getAction());
@@ -58,14 +58,14 @@ public class OptionsOrderExecutorTest {
         TransactionLog log = new TransactionLog(tempDir.resolve("close.db").toString());
         OptionsOrderExecutor exec = build(account, log);
 
-        // Buy 1 call at premium 5.0: balance = 100_000 - 500.65 = 99_499.35
+        // Buy 1 call at premium 5.0: fillPremium = 5.05, balance = 100_000 - 505.65 = 99_494.35
         exec.buyCall("AAPL", 150.0, EXPIRY, 1, 5.0, "buy signals", "");
         double balanceAfterBuy = account.getBalance();
-        assertEquals(99_499.35, balanceAfterBuy, 0.001);
+        assertEquals(99_494.35, balanceAfterBuy, 0.001);
 
         // Close at premium 8.0: net = 8.0*100 - 0.65 = 799.35
         exec.closePosition("AAPL_CALL", 8.0, "sell signals");
-        assertEquals(99_499.35 + 799.35, account.getBalance(), 0.001); // 100_298.70
+        assertEquals(99_494.35 + 799.35, account.getBalance(), 0.001); // 100_293.70
 
         List<TransactionRecord> records = log.findAll();
         assertEquals(2, records.size());

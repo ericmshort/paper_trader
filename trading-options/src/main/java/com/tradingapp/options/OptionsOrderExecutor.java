@@ -12,6 +12,8 @@ import java.util.Map;
 public class OptionsOrderExecutor {
 
     private static final double CONTRACT_FEE = 0.65;
+    // Simulates crossing the bid/ask spread; options use Black-Scholes theoretical prices, not real market bid/ask
+    static final double OPTION_BUY_SLIPPAGE = 0.05;
 
     private final Account account;
     private final TransactionLog transactionLog;
@@ -23,28 +25,30 @@ public class OptionsOrderExecutor {
 
     public void buyCall(String symbol, double strike, LocalDate expiry, int contracts,
                         double premium, String signalStr, String featureCsv) {
+        double fillPremium = premium + OPTION_BUY_SLIPPAGE;
         double fee = CONTRACT_FEE * contracts;
-        double totalCost = premium * 100 * contracts + fee;
+        double totalCost = fillPremium * 100 * contracts + fee;
         if (account.getBalance() < totalCost) return;
         account.setBalance(account.getBalance() - totalCost);
-        OptionsPosition pos = new OptionsPosition(symbol, "CALL", strike, expiry, contracts, premium);
+        OptionsPosition pos = new OptionsPosition(symbol, "CALL", strike, expiry, contracts, fillPremium);
         account.addOptionsPosition(symbol + "_CALL", pos);
         TransactionRecord rec = new TransactionRecord(symbol, TransactionAction.CALL_BUY,
-                contracts, premium, fee, account.getBalance(), "CALL K=" + strike + " exp=" + expiry, signalStr);
+                contracts, fillPremium, fee, account.getBalance(), "CALL K=" + strike + " exp=" + expiry, signalStr);
         rec.setFeatures(featureCsv);
         transactionLog.insert(rec);
     }
 
     public void buyPut(String symbol, double strike, LocalDate expiry, int contracts,
                        double premium, String signalStr, String featureCsv) {
+        double fillPremium = premium + OPTION_BUY_SLIPPAGE;
         double fee = CONTRACT_FEE * contracts;
-        double totalCost = premium * 100 * contracts + fee;
+        double totalCost = fillPremium * 100 * contracts + fee;
         if (account.getBalance() < totalCost) return;
         account.setBalance(account.getBalance() - totalCost);
-        OptionsPosition pos = new OptionsPosition(symbol, "PUT", strike, expiry, contracts, premium);
+        OptionsPosition pos = new OptionsPosition(symbol, "PUT", strike, expiry, contracts, fillPremium);
         account.addOptionsPosition(symbol + "_PUT", pos);
         TransactionRecord rec = new TransactionRecord(symbol, TransactionAction.PUT_BUY,
-                contracts, premium, fee, account.getBalance(), "PUT K=" + strike + " exp=" + expiry, signalStr);
+                contracts, fillPremium, fee, account.getBalance(), "PUT K=" + strike + " exp=" + expiry, signalStr);
         rec.setFeatures(featureCsv);
         transactionLog.insert(rec);
     }

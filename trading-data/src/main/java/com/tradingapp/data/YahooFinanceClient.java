@@ -9,12 +9,17 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class YahooFinanceClient {
 
     private static final String BASE_URL = "https://query1.finance.yahoo.com/v8/finance/chart/";
+    private static final String OPTIONS_URL = "https://query2.finance.yahoo.com/v7/finance/options/";
     private static final String USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36";
     private static final int MAX_RETRIES = 3;
     private static final long[] BACKOFF_MS = {500L, 1000L, 2000L};
@@ -90,6 +95,60 @@ public class YahooFinanceClient {
             }
         }
         return results;
+    }
+
+    public OptionsChain getOptionsChain(String symbol, LocalDate expiry) {
+        long expiryTs = expiry.atStartOfDay(ZoneId.of("America/New_York")).toEpochSecond();
+        String url = OPTIONS_URL + symbol + "?date=" + expiryTs;
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("User-Agent", USER_AGENT)
+                    .header("Accept", "application/json")
+                    .timeout(Duration.ofSeconds(15))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                System.err.println("Options chain HTTP " + response.statusCode() + " for " + symbol);
+                return OptionsChain.empty();
+            }
+            return parseOptionsChain(response.body());
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+            System.err.println("Options chain fetch failed for " + symbol + ": " + e.getMessage());
+            return OptionsChain.empty();
+        }
+    }
+
+    private OptionsChain parseOptionsChain(String json) {
+        Map<Double, OptionsQuote> calls = new HashMap<>();
+        Map<Double, OptionsQuote> puts = new HashMap<>();
+        try {
+            JSONObject root = new JSONObject(json);
+            JSONArray results = root.getJSONObject("optionChain").getJSONArray("result");
+            if (results.isEmpty()) return OptionsChain.empty();
+            JSONArray options = results.getJSONObject(0).getJSONArray("options");
+            if (options.isEmpty()) return OptionsChain.empty();
+            JSONObject expiry = options.getJSONObject(0);
+            parseContracts(expiry.optJSONArray("calls"), calls);
+            parseContracts(expiry.optJSONArray("puts"), puts);
+        } catch (Exception e) {
+            System.err.println("Options chain parse error: " + e.getMessage());
+        }
+        return new OptionsChain(calls, puts);
+    }
+
+    private void parseContracts(JSONArray contracts, Map<Double, OptionsQuote> target) {
+        if (contracts == null) return;
+        for (int i = 0; i < contracts.length(); i++) {
+            JSONObject c = contracts.getJSONObject(i);
+            double strike = c.optDouble("strike", 0.0);
+            double bid = c.optDouble("bid", 0.0);
+            double ask = c.optDouble("ask", 0.0);
+            double lastPrice = c.optDouble("lastPrice", 0.0);
+            if (strike > 0) target.put(strike, new OptionsQuote(bid, ask, lastPrice));
+        }
     }
 
     private QuoteModel parseChartResponse(String symbol, String json) {

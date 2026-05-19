@@ -4,6 +4,9 @@ import com.tradingapp.account.*;
 
 public class OrderExecutor {
 
+    // Simulates crossing the bid/ask spread on a market buy order
+    static final double STOCK_BUY_SLIPPAGE = 0.02;
+
     private final Account account;
     private final SafetyStop safetyStop;
     private final TransactionLog log;
@@ -26,13 +29,14 @@ public class OrderExecutor {
 
     public TransactionRecord buy(String symbol, int shares, double price, String signals, String reason, String features) {
         if (safetyStop.check() || account.isTradingHalted()) return null;
+        double fillPrice = price + STOCK_BUY_SLIPPAGE;
         double fee = fees.calculateFee(shares);
-        double totalCost = shares * price + fee;
+        double totalCost = shares * fillPrice + fee;
         if (account.getBalance() < totalCost) return null;
         account.setBalance(account.getBalance() - totalCost);
-        account.addOrUpdatePosition(symbol, shares, price, Position.PositionType.STOCK);
+        account.addOrUpdatePosition(symbol, shares, fillPrice, Position.PositionType.STOCK);
         TransactionRecord r = new TransactionRecord(symbol, TransactionRecord.TransactionAction.BUY,
-                shares, price, fee, account.getBalance(), reason, signals);
+                shares, fillPrice, fee, account.getBalance(), reason, signals);
         r.setFeatures(features);
         log.insert(r);
         return r;

@@ -2,7 +2,10 @@ package com.tradingapp.options;
 
 import com.tradingapp.account.Account;
 import com.tradingapp.account.OptionsPosition;
+import com.tradingapp.data.OptionsChain;
+import com.tradingapp.data.OptionsQuote;
 import com.tradingapp.data.PriceHistory;
+import com.tradingapp.data.YahooFinanceClient;
 import com.tradingapp.engine.OptionsEvaluator;
 
 import java.time.LocalDate;
@@ -17,17 +20,25 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private final Account account;
     private final PriceHistory priceHistory;
     private final Consumer<String> researchCallback;
+    private final YahooFinanceClient dataClient;
 
     private static final double RISK_FREE_RATE = 0.04;
 
     public OptionsSignalRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
                                Account account, PriceHistory priceHistory,
                                Consumer<String> researchCallback) {
+        this(bsEngine, optExec, account, priceHistory, researchCallback, null);
+    }
+
+    public OptionsSignalRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
+                               Account account, PriceHistory priceHistory,
+                               Consumer<String> researchCallback, YahooFinanceClient dataClient) {
         this.bsEngine = bsEngine;
         this.optExec = optExec;
         this.account = account;
         this.priceHistory = priceHistory;
         this.researchCallback = researchCallback;
+        this.dataClient = dataClient;
     }
 
     @Override
@@ -80,27 +91,47 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (T <= 0) return;
 
         if (buySignals >= 2 && !opts.containsKey(callKey)) {
-            double premium = bsEngine.callPrice(price, K, RISK_FREE_RATE, T, sigma);
-            if (premium <= 0) return;
+            double bsPremium = bsEngine.callPrice(price, K, RISK_FREE_RATE, T, sigma);
+            if (bsPremium <= 0) return;
+            double premium = bsPremium;
+            String priceSource = "BS";
+            if (dataClient != null) {
+                OptionsChain chain = dataClient.getOptionsChain(symbol, expiry);
+                OptionsQuote quote = chain.getCall(K);
+                if (quote != null && quote.isValid()) {
+                    premium = quote.getAsk();
+                    priceSource = "mkt";
+                }
+            }
             int contracts = Math.min(5, (int) (account.getBalance() * 0.05 / (premium * 100)));
             if (contracts >= 1) {
                 optExec.buyCall(symbol, K, expiry, contracts, premium, signalStr, featureCsv);
                 GreeksResult g = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, true);
                 researchCallback.accept(symbol + " CALL K=" + K + " exp=" + expiry
-                        + " x" + contracts + " prem=" + String.format("%.2f", premium)
+                        + " x" + contracts + " ask=" + String.format("%.2f", premium) + " [" + priceSource + "]"
                         + " | " + g.toString());
             }
         }
 
         if (sellSignals >= 2 && !opts.containsKey(putKey)) {
-            double premium = bsEngine.putPrice(price, K, RISK_FREE_RATE, T, sigma);
-            if (premium <= 0) return;
+            double bsPremium = bsEngine.putPrice(price, K, RISK_FREE_RATE, T, sigma);
+            if (bsPremium <= 0) return;
+            double premium = bsPremium;
+            String priceSource = "BS";
+            if (dataClient != null) {
+                OptionsChain chain = dataClient.getOptionsChain(symbol, expiry);
+                OptionsQuote quote = chain.getPut(K);
+                if (quote != null && quote.isValid()) {
+                    premium = quote.getAsk();
+                    priceSource = "mkt";
+                }
+            }
             int contracts = Math.min(5, (int) (account.getBalance() * 0.05 / (premium * 100)));
             if (contracts >= 1) {
                 optExec.buyPut(symbol, K, expiry, contracts, premium, signalStr, featureCsv);
                 GreeksResult g = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, false);
                 researchCallback.accept(symbol + " PUT K=" + K + " exp=" + expiry
-                        + " x" + contracts + " prem=" + String.format("%.2f", premium)
+                        + " x" + contracts + " ask=" + String.format("%.2f", premium) + " [" + priceSource + "]"
                         + " | " + g.toString());
             }
         }
