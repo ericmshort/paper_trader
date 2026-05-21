@@ -114,7 +114,14 @@ public class AlpacaBroker implements BrokerClient {
     /** Submits an options order to Alpaca using OCC symbol format. Used as an OptionsSubmitter lambda. */
     public String submitOptionsOrder(String symbol, String optionType, double strike, LocalDate expiry, int contracts, String side) {
         try {
-            String occSymbol = buildOccSymbol(symbol, optionType, strike, expiry);
+            String occSymbol = lookupBestContract(symbol, optionType, strike, expiry);
+            if (occSymbol == null) {
+                System.err.println("Alpaca options: no listed contract found near " + symbol
+                        + " " + optionType + " K=" + strike + " exp=" + expiry);
+                return null;
+            }
+            LOG.info("Alpaca options: resolved contract " + occSymbol + " (target K=" + strike + " exp=" + expiry + ")");
+
             JSONObject body = new JSONObject()
                     .put("symbol", occSymbol)
                     .put("qty", contracts)
@@ -132,6 +139,62 @@ public class AlpacaBroker implements BrokerClient {
             return order.optString("id");
         } catch (Exception e) {
             System.err.println("Alpaca options order failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Queries Alpaca's listed options contracts and returns the OCC symbol of the contract
+     * whose strike is closest to {@code targetStrike} and whose expiry is within 14 days of
+     * {@code targetExpiry}. Returns null if no contract is found.
+     */
+    private String lookupBestContract(String symbol, String optionType, double targetStrike, LocalDate targetExpiry) {
+        try {
+            String type = optionType.equalsIgnoreCase("CALL") ? "call" : "put";
+            LocalDate expiryFrom = targetExpiry.minusDays(14);
+            LocalDate expiryTo   = targetExpiry.plusDays(14);
+            double strikeFrom = targetStrike * 0.85;
+            double strikeTo   = targetStrike * 1.15;
+
+            String path = "/options/contracts"
+                    + "?underlying_symbols=" + symbol
+                    + "&type=" + type
+                    + "&status=active"
+                    + "&expiration_date_gte=" + expiryFrom
+                    + "&expiration_date_lte=" + expiryTo
+                    + "&strike_price_gte=" + String.format("%.2f", strikeFrom)
+                    + "&strike_price_lte=" + String.format("%.2f", strikeTo)
+                    + "&limit=50";
+
+            JSONObject resp = getJson(path);
+            JSONArray contracts = resp != null ? resp.optJSONArray("option_contracts") : null;
+            if (contracts == null || contracts.length() == 0) {
+                // Widen to full strike range in case price has moved significantly
+                path = "/options/contracts?underlying_symbols=" + symbol
+                        + "&type=" + type + "&status=active"
+                        + "&expiration_date_gte=" + expiryFrom
+                        + "&expiration_date_lte=" + expiryTo
+                        + "&limit=50";
+                resp = getJson(path);
+                contracts = resp != null ? resp.optJSONArray("option_contracts") : null;
+            }
+            if (contracts == null || contracts.length() == 0) return null;
+
+            // Pick the contract with the closest strike to targetStrike
+            String bestSymbol = null;
+            double bestDist = Double.MAX_VALUE;
+            for (int i = 0; i < contracts.length(); i++) {
+                JSONObject c = contracts.getJSONObject(i);
+                double k = c.optDouble("strike_price", Double.MAX_VALUE);
+                double dist = Math.abs(k - targetStrike);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestSymbol = c.optString("symbol");
+                }
+            }
+            return bestSymbol;
+        } catch (Exception e) {
+            LOG.warning("lookupBestContract failed: " + e.getMessage());
             return null;
         }
     }
