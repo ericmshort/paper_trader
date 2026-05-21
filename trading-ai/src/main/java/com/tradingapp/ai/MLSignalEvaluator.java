@@ -61,6 +61,10 @@ public class MLSignalEvaluator implements SignalWeightEvaluator {
 
     public void retrain(TransactionLog log) {
         List<LabeledTrade> trades = new TradeFeatureExtractor().extract(log);
+        if (trades.size() < SignalWeightTrainer.MIN_TRADES) {
+            LOG.info("Not enough trades to retrain (" + trades.size() + "); keeping existing weights.");
+            return;
+        }
         SignalWeights updated = new SignalWeightTrainer().train(trades);
         for (int i = 0; i < SignalWeights.NUM_FEATURES; i++) {
             weights.setWeight(i, updated.getWeight(i));

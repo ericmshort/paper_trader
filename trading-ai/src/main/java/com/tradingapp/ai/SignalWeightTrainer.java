@@ -13,7 +13,7 @@ import java.util.logging.Logger;
 public class SignalWeightTrainer {
 
     private static final Logger LOG = Logger.getLogger(SignalWeightTrainer.class.getName());
-    private static final int MIN_TRADES = 10;
+    static final int MIN_TRADES = 10;
 
     public SignalWeights train(List<LabeledTrade> trades) {
         if (trades.size() < MIN_TRADES) {
