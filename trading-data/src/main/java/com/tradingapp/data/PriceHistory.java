@@ -35,4 +35,24 @@ public class PriceHistory {
         prices.remove(symbol);
         volumes.remove(symbol);
     }
+
+    /** Seeds price/volume history from historical bars (oldest-first). Replaces any existing data. */
+    public void seed(String symbol, List<HistoricalBar> bars) {
+        if (bars == null || bars.isEmpty()) return;
+        ArrayDeque<Double> p = new ArrayDeque<>();
+        ArrayDeque<Double> v = new ArrayDeque<>();
+        int start = Math.max(0, bars.size() - MAX_BARS);
+        for (int i = start; i < bars.size(); i++) {
+            HistoricalBar bar = bars.get(i);
+            double close = bar.getClose();
+            if (Double.isFinite(close) && close > 0) {
+                p.addLast(close);
+                v.addLast((double) bar.getVolume());
+            }
+        }
+        if (!p.isEmpty()) {
+            prices.put(symbol, p);
+            volumes.put(symbol, v);
+        }
+    }
 }

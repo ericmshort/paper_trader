@@ -38,6 +38,7 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -197,6 +198,31 @@ public class DashboardController implements Initializable {
             return t;
         });
         scheduler.scheduleAtFixedRate(tradingLoop, 0, 60, TimeUnit.SECONDS);
+
+        // Seed price history from 200 days of daily bars so MACrossover is immediately usable.
+        // Runs in background — does not block the trading loop or the UI.
+        QuoteProvider seedProvider = quoteProvider;
+        Thread seedThread = new Thread(() -> {
+            LocalDate end = LocalDate.now();
+            LocalDate start = end.minusDays(280); // extra buffer for weekends/holidays
+            int seeded = 0;
+            for (String sym : LargeCapWatchList.SYMBOLS) {
+                try {
+                    var bars = seedProvider.getHistoricalBars(sym, start, end);
+                    if (bars != null && !bars.isEmpty()) {
+                        priceHistory.seed(sym, bars);
+                        seeded++;
+                    }
+                } catch (Exception e) {
+                    // Non-fatal: symbol will build history organically from live ticks
+                }
+            }
+            int finalSeeded = seeded;
+            Platform.runLater(() -> researchCb.accept(
+                    "Price history seeded for " + finalSeeded + "/" + LargeCapWatchList.SYMBOLS.size() + " symbols."));
+        }, "price-history-seed");
+        seedThread.setDaemon(true);
+        seedThread.start();
     }
 
     private void handleBrokerReset(AppConfig newConfig) {
