@@ -147,7 +147,9 @@ public class YahooFinanceClient {
             double bid = c.optDouble("bid", 0.0);
             double ask = c.optDouble("ask", 0.0);
             double lastPrice = c.optDouble("lastPrice", 0.0);
-            if (strike > 0) target.put(strike, new OptionsQuote(bid, ask, lastPrice));
+            long volume = c.optLong("volume", 0L);
+            long openInterest = c.optLong("openInterest", 0L);
+            if (strike > 0) target.put(strike, new OptionsQuote(bid, ask, lastPrice, volume, openInterest));
         }
     }
 

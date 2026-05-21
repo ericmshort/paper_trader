@@ -103,8 +103,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                 OptionsChain chain = dataClient.getOptionsChain(symbol, expiry);
                 OptionsQuote quote = chain.getCall(K);
                 if (quote != null && quote.isValid()) {
+                    if (!quote.isLiquid()) {
+                        researchCallback.accept(symbol + " CALL skip: illiquid " + quote.liquidityInfo());
+                        return;
+                    }
                     premium = quote.getAsk();
-                    priceSource = "mkt";
+                    priceSource = "mkt " + quote.liquidityInfo();
                 }
             }
             if (premium < MIN_PREMIUM) {
@@ -133,8 +137,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                 OptionsChain chain = dataClient.getOptionsChain(symbol, expiry);
                 OptionsQuote quote = chain.getPut(K);
                 if (quote != null && quote.isValid()) {
+                    if (!quote.isLiquid()) {
+                        researchCallback.accept(symbol + " PUT skip: illiquid " + quote.liquidityInfo());
+                        return;
+                    }
                     premium = quote.getAsk();
-                    priceSource = "mkt";
+                    priceSource = "mkt " + quote.liquidityInfo();
                 }
             }
             if (premium < MIN_PREMIUM) {
