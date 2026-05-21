@@ -226,7 +226,7 @@ public class AlpacaBroker implements BrokerClient {
                             com.tradingapp.account.OptionsPosition optPos =
                                     new com.tradingapp.account.OptionsPosition(
                                             occ.underlying, occ.type, occ.strike, occ.expiry, qty, avgCost);
-                            account.addOptionsPosition(symbol, optPos);
+                            account.addOptionsPosition(occ.underlying + "_" + occ.type, optPos);
                         }
                     } else {
                         account.addOrUpdatePosition(symbol, qty, avgCost, Position.PositionType.STOCK);
