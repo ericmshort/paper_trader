@@ -23,6 +23,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private final QuoteProvider dataClient;
 
     private static final double RISK_FREE_RATE = 0.04;
+    private static final double MIN_PREMIUM = 0.10; // $0.10/share minimum; below this the contract is junk
 
     public OptionsSignalRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
                                Account account, PriceHistory priceHistory,
@@ -92,7 +93,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         if (buySignals >= 2 && !opts.containsKey(callKey)) {
             double bsPremium = bsEngine.callPrice(price, K, RISK_FREE_RATE, T, sigma);
-            if (bsPremium <= 0) return;
+            if (bsPremium < MIN_PREMIUM) {
+                researchCallback.accept(symbol + " CALL skip: premium too low (" + String.format("%.4f", bsPremium) + ")");
+                return;
+            }
             double premium = bsPremium;
             String priceSource = "BS";
             if (dataClient != null) {
@@ -102,6 +106,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                     premium = quote.getAsk();
                     priceSource = "mkt";
                 }
+            }
+            if (premium < MIN_PREMIUM) {
+                researchCallback.accept(symbol + " CALL skip: market ask too low (" + String.format("%.4f", premium) + ")");
+                return;
             }
             int contracts = Math.min(5, (int) (account.getBalance() * 0.05 / (premium * 100)));
             if (contracts >= 1) {
@@ -115,7 +123,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         if (sellSignals >= 2 && !opts.containsKey(putKey)) {
             double bsPremium = bsEngine.putPrice(price, K, RISK_FREE_RATE, T, sigma);
-            if (bsPremium <= 0) return;
+            if (bsPremium < MIN_PREMIUM) {
+                researchCallback.accept(symbol + " PUT skip: premium too low (" + String.format("%.4f", bsPremium) + ")");
+                return;
+            }
             double premium = bsPremium;
             String priceSource = "BS";
             if (dataClient != null) {
@@ -125,6 +136,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                     premium = quote.getAsk();
                     priceSource = "mkt";
                 }
+            }
+            if (premium < MIN_PREMIUM) {
+                researchCallback.accept(symbol + " PUT skip: market ask too low (" + String.format("%.4f", premium) + ")");
+                return;
             }
             int contracts = Math.min(5, (int) (account.getBalance() * 0.05 / (premium * 100)));
             if (contracts >= 1) {

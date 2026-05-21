@@ -181,15 +181,10 @@ public class DashboardController implements Initializable {
             initialWeights = new SignalWeights();
         }
         MLSignalEvaluator mlEval = new MLSignalEvaluator(initialWeights, weightsPath);
-        Runnable trainingCallback = () -> {
-            Thread t = new Thread(() -> {
-                mlEval.retrain(transactionLog);
-                Platform.runLater(() -> researchArea.appendText(
-                        "ML weights updated: " + mlEval.getWeightsSummary() + "\n"));
-            }, "ml-training");
-            t.setDaemon(true);
-            t.start();
-        };
+        // Auto-retraining disabled: early trade history was corrupted by the options position
+        // key-mismatch bug (excessive contract accumulation). Re-enable once we have a clean
+        // history of at least 50 trades placed under correct conditions.
+        Runnable trainingCallback = null;
 
         TradingLoop tradingLoop = new TradingLoop(quoteProvider, priceHistory,
                 new IndicatorEngine(), new TrailingStopMonitor(), brokerClient, feeCalc,
