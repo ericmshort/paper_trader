@@ -15,6 +15,7 @@ public class TransactionRecord {
     private String reason;
     private String signals;
     private String features;
+    private String externalId;
 
     public TransactionRecord() {}
 
@@ -55,4 +56,6 @@ public class TransactionRecord {
     public void setReason(String reason) { this.reason = reason; }
     public void setSignals(String signals) { this.signals = signals; }
     public void setFeatures(String features) { this.features = features; }
+    public String getExternalId() { return externalId; }
+    public void setExternalId(String externalId) { this.externalId = externalId; }
 }

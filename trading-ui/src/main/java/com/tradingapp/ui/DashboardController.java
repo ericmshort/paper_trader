@@ -165,7 +165,10 @@ public class DashboardController implements Initializable {
         Consumer<String> researchCb = msg -> Platform.runLater(() -> researchArea.appendText(msg + "\n"));
         Runnable uiRefresh = () -> Platform.runLater(this::refreshUi);
 
-        OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, transactionLog, appConfig.isAlpacaBroker());
+        OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, transactionLog,
+                appConfig.isAlpacaBroker()
+                        ? ((AlpacaBroker) brokerClient)::submitOptionsOrder
+                        : null);
         OptionsSignalRouter optionsRouter = new OptionsSignalRouter(
                 bsEngine, optExec, account, priceHistory, researchCb, quoteProvider);
 

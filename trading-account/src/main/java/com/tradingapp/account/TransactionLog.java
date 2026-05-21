@@ -54,11 +54,14 @@ public class TransactionLog {
                         signals TEXT
                     )
                     """);
-            try {
-                stmt.execute("ALTER TABLE transactions ADD COLUMN features TEXT");
-            } catch (SQLException e) {
-                if (!e.getMessage().contains("duplicate column name")) {
-                    throw e;
+            for (String migration : new String[]{
+                    "ALTER TABLE transactions ADD COLUMN features TEXT",
+                    "ALTER TABLE transactions ADD COLUMN external_id TEXT"
+            }) {
+                try {
+                    stmt.execute(migration);
+                } catch (SQLException e) {
+                    if (!e.getMessage().contains("duplicate column name")) throw e;
                 }
             }
         } catch (SQLException e) {
@@ -69,8 +72,8 @@ public class TransactionLog {
     public void insert(TransactionRecord record) {
         String sql = """
                 INSERT INTO transactions
-                    (timestamp, symbol, action, quantity, price_per_unit, fee_charged, balance_after, reason, signals, features)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (timestamp, symbol, action, quantity, price_per_unit, fee_charged, balance_after, reason, signals, features, external_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
         try (Connection conn = connect();
              PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
@@ -84,6 +87,7 @@ public class TransactionLog {
             ps.setString(8, record.getReason());
             ps.setString(9, record.getSignals());
             ps.setString(10, record.getFeatures());
+            ps.setString(11, record.getExternalId());
             ps.executeUpdate();
             try (ResultSet keys = ps.getGeneratedKeys()) {
                 if (keys.next()) {
@@ -92,6 +96,20 @@ public class TransactionLog {
             }
         } catch (SQLException e) {
             throw new RuntimeException("Failed to insert transaction record", e);
+        }
+    }
+
+    public boolean existsByExternalId(String externalId) {
+        if (externalId == null || externalId.isBlank()) return false;
+        try (Connection conn = connect();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT 1 FROM transactions WHERE external_id = ? LIMIT 1")) {
+            ps.setString(1, externalId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to query by external_id", e);
         }
     }
 
@@ -114,6 +132,7 @@ public class TransactionLog {
                 r.setReason(rs.getString("reason"));
                 r.setSignals(rs.getString("signals"));
                 r.setFeatures(rs.getString("features"));
+                r.setExternalId(rs.getString("external_id"));
                 records.add(r);
             }
         } catch (SQLException e) {
