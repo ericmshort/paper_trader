@@ -500,36 +500,49 @@ public class DashboardController implements Initializable {
                         openShares.put(r.getSymbol(), remaining);
                     }
                 }
-                case CALL_BUY -> {
-                    // Include buy fee in effective premium so it rolls into the close P&L
-                    double effectivePremium = r.getPricePerUnit() + r.getFeeCharged() / (r.getQuantity() * 100.0);
-                    openOptionPremiums.put(r.getSymbol() + "_CALL", new double[]{effectivePremium, r.getQuantity()});
-                }
-                case PUT_BUY -> {
-                    double effectivePremium = r.getPricePerUnit() + r.getFeeCharged() / (r.getQuantity() * 100.0);
-                    openOptionPremiums.put(r.getSymbol() + "_PUT", new double[]{effectivePremium, r.getQuantity()});
-                }
+                case CALL_BUY -> accumulateOption(openOptionPremiums, r, "_CALL");
+                case PUT_BUY  -> accumulateOption(openOptionPremiums, r, "_PUT");
                 case CALL_SELL -> {
                     double[] entry = openOptionPremiums.getOrDefault(r.getSymbol() + "_CALL",
                             new double[]{r.getPricePerUnit(), r.getQuantity()});
-                    double pnl = (r.getPricePerUnit() - entry[0]) * 100 * (int) entry[1] - r.getFeeCharged();
-                    closed.add(new ClosedTradeRecord(r.getSymbol(), "Call Option", (int) entry[1],
+                    int sellQty = r.getQuantity();
+                    double pnl = (r.getPricePerUnit() - entry[0]) * 100 * sellQty - r.getFeeCharged();
+                    closed.add(new ClosedTradeRecord(r.getSymbol(), "Call Option", sellQty,
                             entry[0], r.getPricePerUnit(), pnl, r.getTimestamp()));
-                    openOptionPremiums.remove(r.getSymbol() + "_CALL");
+                    reduceOptionPosition(openOptionPremiums, r.getSymbol() + "_CALL", entry, sellQty);
                 }
                 case PUT_SELL -> {
                     double[] entry = openOptionPremiums.getOrDefault(r.getSymbol() + "_PUT",
                             new double[]{r.getPricePerUnit(), r.getQuantity()});
-                    double pnl = (r.getPricePerUnit() - entry[0]) * 100 * (int) entry[1] - r.getFeeCharged();
-                    closed.add(new ClosedTradeRecord(r.getSymbol(), "Put Option", (int) entry[1],
+                    int sellQty = r.getQuantity();
+                    double pnl = (r.getPricePerUnit() - entry[0]) * 100 * sellQty - r.getFeeCharged();
+                    closed.add(new ClosedTradeRecord(r.getSymbol(), "Put Option", sellQty,
                             entry[0], r.getPricePerUnit(), pnl, r.getTimestamp()));
-                    openOptionPremiums.remove(r.getSymbol() + "_PUT");
+                    reduceOptionPosition(openOptionPremiums, r.getSymbol() + "_PUT", entry, sellQty);
                 }
             }
         }
 
         Collections.reverse(closed); // most recent first
         return closed;
+    }
+
+    /** Accumulates multiple BUY records for the same option key into a weighted-average position. */
+    private static void accumulateOption(Map<String, double[]> map, TransactionRecord r, String suffix) {
+        double effectivePremium = r.getPricePerUnit() + r.getFeeCharged() / (r.getQuantity() * 100.0);
+        double[] existing = map.getOrDefault(r.getSymbol() + suffix, new double[]{0.0, 0.0});
+        double totalContracts = existing[1] + r.getQuantity();
+        double weightedAvg = totalContracts > 0
+                ? (existing[0] * existing[1] + effectivePremium * r.getQuantity()) / totalContracts
+                : effectivePremium;
+        map.put(r.getSymbol() + suffix, new double[]{weightedAvg, totalContracts});
+    }
+
+    /** Reduces an open option position after a partial or full close. */
+    private static void reduceOptionPosition(Map<String, double[]> map, String key, double[] entry, int sellQty) {
+        double remaining = entry[1] - sellQty;
+        if (remaining <= 0) map.remove(key);
+        else map.put(key, new double[]{entry[0], remaining});
     }
 
     private void showPnlBreakdown() {
