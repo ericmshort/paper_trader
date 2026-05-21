@@ -155,6 +155,7 @@ public class DashboardController implements Initializable {
         if (appConfig.isAlpacaBroker()) {
             AlpacaBroker alpaca = new AlpacaBroker(appConfig, account, transactionLog);
             alpaca.syncAccount(account);
+            alpaca.reconcileTransactionLog();
             brokerClient = alpaca;
         } else {
             SafetyStop safetyStop = new SafetyStop(account);

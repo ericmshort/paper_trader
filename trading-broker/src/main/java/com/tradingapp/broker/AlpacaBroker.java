@@ -15,7 +15,8 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.logging.Logger;
 
 public class AlpacaBroker implements BrokerClient {
@@ -148,13 +149,23 @@ public class AlpacaBroker implements BrokerClient {
             JSONArray positions = getJsonArray("/positions");
             if (positions != null) {
                 account.getPositions().keySet().stream().toList().forEach(account::removePosition);
+                account.getOptionsPositions().keySet().stream().toList().forEach(account::removeOptionsPosition);
                 for (int i = 0; i < positions.length(); i++) {
                     JSONObject pos = positions.getJSONObject(i);
                     String symbol = pos.getString("symbol");
                     int qty = (int) pos.optDouble("qty", 0);
                     double avgCost = pos.optDouble("avg_entry_price", 0.0);
                     double currentPrice = pos.optDouble("current_price", avgCost);
-                    if (qty > 0) {
+                    if (qty <= 0) continue;
+                    if (isOccSymbol(symbol)) {
+                        OccComponents occ = parseOcc(symbol);
+                        if (occ != null) {
+                            com.tradingapp.account.OptionsPosition optPos =
+                                    new com.tradingapp.account.OptionsPosition(
+                                            occ.underlying, occ.type, occ.strike, occ.expiry, qty, avgCost);
+                            account.addOptionsPosition(symbol, optPos);
+                        }
+                    } else {
                         account.addOrUpdatePosition(symbol, qty, avgCost, Position.PositionType.STOCK);
                         account.updatePositionPrice(symbol, currentPrice);
                     }
@@ -165,6 +176,36 @@ public class AlpacaBroker implements BrokerClient {
         }
 
         if (log != null) syncOrderHistory();
+    }
+
+    /**
+     * Fetches all Alpaca order IDs and removes any local transaction records
+     * that have no matching broker order. Should be called once at broker setup,
+     * not on every sync tick.
+     */
+    public void reconcileTransactionLog() {
+        if (log == null) return;
+        Set<String> knownIds = fetchAllOrderIds();
+        log.purgeUnmatched(knownIds);
+        LOG.info("Reconciled transaction log — " + knownIds.size() + " known Alpaca order IDs retained.");
+    }
+
+    private Set<String> fetchAllOrderIds() {
+        Set<String> ids = new HashSet<>();
+        String after = null;
+        for (int page = 0; page < 20; page++) { // cap at 10 000 orders (500 × 20)
+            String path = "/orders?status=all&limit=500&direction=desc"
+                    + (after != null ? "&after=" + after : "");
+            JSONArray batch = getJsonArray(path);
+            if (batch == null || batch.length() == 0) break;
+            for (int i = 0; i < batch.length(); i++) {
+                ids.add(batch.getJSONObject(i).optString("id"));
+            }
+            if (batch.length() < 500) break;
+            // Use the last order's submitted_at for the next page cursor
+            after = batch.getJSONObject(batch.length() - 1).optString("submitted_at");
+        }
+        return ids;
     }
 
     /**
@@ -179,10 +220,6 @@ public class AlpacaBroker implements BrokerClient {
             JSONObject o = orders.getJSONObject(i);
             String orderId = o.optString("id");
             String symbol = o.optString("symbol");
-
-            // Skip options (OCC symbols are longer and contain a date+type pattern)
-            if (isOccSymbol(symbol)) continue;
-
             if (log.existsByExternalId(orderId)) continue;
 
             String side = o.optString("side");
@@ -191,21 +228,38 @@ public class AlpacaBroker implements BrokerClient {
             if (qty <= 0 || fillPrice <= 0) continue;
 
             long ts = parseAlpacaTimestamp(o.optString("filled_at", o.optString("submitted_at")));
-            TransactionRecord.TransactionAction action = "buy".equals(side)
-                    ? TransactionRecord.TransactionAction.BUY
-                    : TransactionRecord.TransactionAction.SELL;
 
             TransactionRecord r = new TransactionRecord();
             r.setTimestamp(ts);
-            r.setSymbol(symbol);
-            r.setAction(action);
             r.setQuantity(qty);
             r.setPricePerUnit(fillPrice);
             r.setFeeCharged(0.0);
-            r.setBalanceAfter(account.getBalance());
-            r.setReason("Imported from Alpaca history");
+            r.setBalanceAfter(account != null ? account.getBalance() : 0.0);
             r.setSignals("");
             r.setExternalId(orderId);
+
+            if (isOccSymbol(symbol)) {
+                OccComponents occ = parseOcc(symbol);
+                if (occ == null) continue;
+                r.setSymbol(occ.underlying);
+                r.setReason(occ.type + " K=" + occ.strike + " exp=" + occ.expiry + " (imported)");
+                if ("buy".equals(side)) {
+                    r.setAction(occ.type.equals("CALL")
+                            ? TransactionRecord.TransactionAction.CALL_BUY
+                            : TransactionRecord.TransactionAction.PUT_BUY);
+                } else {
+                    r.setAction(occ.type.equals("CALL")
+                            ? TransactionRecord.TransactionAction.CALL_SELL
+                            : TransactionRecord.TransactionAction.PUT_SELL);
+                }
+            } else {
+                r.setSymbol(symbol);
+                r.setReason("Imported from Alpaca history");
+                r.setAction("buy".equals(side)
+                        ? TransactionRecord.TransactionAction.BUY
+                        : TransactionRecord.TransactionAction.SELL);
+            }
+
             tryInsertLog(r);
         }
     }
@@ -237,8 +291,33 @@ public class AlpacaBroker implements BrokerClient {
     }
 
     private static boolean isOccSymbol(String symbol) {
-        // OCC symbols are e.g. AAPL260619C00200000 — underlying + 6 digits + C/P + 8 digits
-        return symbol != null && symbol.length() > 10 && symbol.matches(".*\\d{6}[CP]\\d{8}");
+        return symbol != null && symbol.matches("[A-Z.]+\\d{6}[CP]\\d{8}");
+    }
+
+    private record OccComponents(String underlying, String type, double strike, LocalDate expiry) {}
+
+    private static OccComponents parseOcc(String symbol) {
+        try {
+            // Find where the 6-digit date begins (first run of digits)
+            int dateStart = -1;
+            for (int i = 0; i < symbol.length(); i++) {
+                if (Character.isDigit(symbol.charAt(i))) { dateStart = i; break; }
+            }
+            if (dateStart < 0 || dateStart + 15 > symbol.length()) return null;
+            String underlying = symbol.substring(0, dateStart);
+            int yy = Integer.parseInt(symbol.substring(dateStart, dateStart + 2));
+            int mm = Integer.parseInt(symbol.substring(dateStart + 2, dateStart + 4));
+            int dd = Integer.parseInt(symbol.substring(dateStart + 4, dateStart + 6));
+            char typeChar = symbol.charAt(dateStart + 6);
+            long strikeRaw = Long.parseLong(symbol.substring(dateStart + 7));
+            return new OccComponents(
+                    underlying,
+                    typeChar == 'C' ? "CALL" : "PUT",
+                    strikeRaw / 1000.0,
+                    LocalDate.of(2000 + yy, mm, dd));
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static long parseAlpacaTimestamp(String iso) {
