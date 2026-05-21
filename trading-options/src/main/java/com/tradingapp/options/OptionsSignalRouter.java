@@ -5,7 +5,7 @@ import com.tradingapp.account.OptionsPosition;
 import com.tradingapp.data.OptionsChain;
 import com.tradingapp.data.OptionsQuote;
 import com.tradingapp.data.PriceHistory;
-import com.tradingapp.data.YahooFinanceClient;
+import com.tradingapp.data.QuoteProvider;
 import com.tradingapp.engine.OptionsEvaluator;
 
 import java.time.LocalDate;
@@ -20,7 +20,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private final Account account;
     private final PriceHistory priceHistory;
     private final Consumer<String> researchCallback;
-    private final YahooFinanceClient dataClient;
+    private final QuoteProvider dataClient;
 
     private static final double RISK_FREE_RATE = 0.04;
 
@@ -32,7 +32,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
     public OptionsSignalRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
                                Account account, PriceHistory priceHistory,
-                               Consumer<String> researchCallback, YahooFinanceClient dataClient) {
+                               Consumer<String> researchCallback, QuoteProvider dataClient) {
         this.bsEngine = bsEngine;
         this.optExec = optExec;
         this.account = account;

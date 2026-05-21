@@ -18,6 +18,7 @@
         <module>trading-engine</module>
         <module>trading-options</module>
         <module>trading-ai</module>
+        <module>trading-broker</module>
         <module>trading-ui</module>
     </modules>
 
@@ -95,6 +96,11 @@
             <dependency>
                 <groupId>com.tradingapp</groupId>
                 <artifactId>trading-ai</artifactId>
+                <version>1.0-SNAPSHOT</version>
+            </dependency>
+            <dependency>
+                <groupId>com.tradingapp</groupId>
+                <artifactId>trading-broker</artifactId>
                 <version>1.0-SNAPSHOT</version>
             </dependency>
         </dependencies>

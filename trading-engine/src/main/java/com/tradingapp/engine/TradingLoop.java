@@ -4,7 +4,7 @@ import com.tradingapp.account.Account;
 import com.tradingapp.account.Position;
 import com.tradingapp.data.PriceHistory;
 import com.tradingapp.data.QuoteModel;
-import com.tradingapp.data.YahooFinanceClient;
+import com.tradingapp.data.QuoteProvider;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -22,11 +22,11 @@ public class TradingLoop implements Runnable {
     private static final LocalTime MARKET_CLOSE = LocalTime.of(16, 0);
     private static final ZoneId ET = ZoneId.of("America/New_York");
 
-    private final YahooFinanceClient dataClient;
+    private final QuoteProvider dataClient;
     private final PriceHistory priceHistory;
     private final IndicatorEngine indicators;
     private final TrailingStopMonitor trailingStop;
-    private final OrderExecutor orderExecutor;
+    private final BrokerClient brokerClient;
     private final FeeCalculator fees;
     private final List<String> watchList;
     private final Consumer<String> researchCallback;
@@ -38,63 +38,63 @@ public class TradingLoop implements Runnable {
     private final Runnable afterMarketCallback;
     private LocalDate lastTrainingDate;
 
-    public TradingLoop(YahooFinanceClient dataClient, PriceHistory priceHistory,
+    public TradingLoop(QuoteProvider dataClient, PriceHistory priceHistory,
                        IndicatorEngine indicators, TrailingStopMonitor trailingStop,
-                       OrderExecutor orderExecutor, FeeCalculator fees,
+                       BrokerClient brokerClient, FeeCalculator fees,
                        List<String> watchList, Consumer<String> researchCallback,
                        Runnable uiRefreshCallback, Account account) {
-        this(dataClient, priceHistory, indicators, trailingStop, orderExecutor, fees,
+        this(dataClient, priceHistory, indicators, trailingStop, brokerClient, fees,
              watchList, researchCallback, uiRefreshCallback, account,
              () -> ZonedDateTime.now(ET), null, null, null);
     }
 
-    public TradingLoop(YahooFinanceClient dataClient, PriceHistory priceHistory,
+    public TradingLoop(QuoteProvider dataClient, PriceHistory priceHistory,
                        IndicatorEngine indicators, TrailingStopMonitor trailingStop,
-                       OrderExecutor orderExecutor, FeeCalculator fees,
+                       BrokerClient brokerClient, FeeCalculator fees,
                        List<String> watchList, Consumer<String> researchCallback,
                        Runnable uiRefreshCallback, Account account,
                        OptionsEvaluator optionsEvaluator) {
-        this(dataClient, priceHistory, indicators, trailingStop, orderExecutor, fees,
+        this(dataClient, priceHistory, indicators, trailingStop, brokerClient, fees,
              watchList, researchCallback, uiRefreshCallback, account,
              () -> ZonedDateTime.now(ET), optionsEvaluator, null, null);
     }
 
-    public TradingLoop(YahooFinanceClient dataClient, PriceHistory priceHistory,
+    public TradingLoop(QuoteProvider dataClient, PriceHistory priceHistory,
                        IndicatorEngine indicators, TrailingStopMonitor trailingStop,
-                       OrderExecutor orderExecutor, FeeCalculator fees,
+                       BrokerClient brokerClient, FeeCalculator fees,
                        List<String> watchList, Consumer<String> researchCallback,
                        Runnable uiRefreshCallback, Account account,
                        OptionsEvaluator optionsEvaluator,
                        SignalWeightEvaluator weightEvaluator,
                        Runnable afterMarketCallback) {
-        this(dataClient, priceHistory, indicators, trailingStop, orderExecutor, fees,
+        this(dataClient, priceHistory, indicators, trailingStop, brokerClient, fees,
              watchList, researchCallback, uiRefreshCallback, account,
              () -> ZonedDateTime.now(ET), optionsEvaluator, weightEvaluator, afterMarketCallback);
     }
 
-    TradingLoop(YahooFinanceClient dataClient, PriceHistory priceHistory,
+    TradingLoop(QuoteProvider dataClient, PriceHistory priceHistory,
                 IndicatorEngine indicators, TrailingStopMonitor trailingStop,
-                OrderExecutor orderExecutor, FeeCalculator fees,
+                BrokerClient brokerClient, FeeCalculator fees,
                 List<String> watchList, Consumer<String> researchCallback,
                 Runnable uiRefreshCallback, Account account,
                 Supplier<ZonedDateTime> clock) {
-        this(dataClient, priceHistory, indicators, trailingStop, orderExecutor, fees,
+        this(dataClient, priceHistory, indicators, trailingStop, brokerClient, fees,
              watchList, researchCallback, uiRefreshCallback, account, clock, null, null, null);
     }
 
-    TradingLoop(YahooFinanceClient dataClient, PriceHistory priceHistory,
+    TradingLoop(QuoteProvider dataClient, PriceHistory priceHistory,
                 IndicatorEngine indicators, TrailingStopMonitor trailingStop,
-                OrderExecutor orderExecutor, FeeCalculator fees,
+                BrokerClient brokerClient, FeeCalculator fees,
                 List<String> watchList, Consumer<String> researchCallback,
                 Runnable uiRefreshCallback, Account account,
                 Supplier<ZonedDateTime> clock, OptionsEvaluator optionsEvaluator) {
-        this(dataClient, priceHistory, indicators, trailingStop, orderExecutor, fees,
+        this(dataClient, priceHistory, indicators, trailingStop, brokerClient, fees,
              watchList, researchCallback, uiRefreshCallback, account, clock, optionsEvaluator, null, null);
     }
 
-    TradingLoop(YahooFinanceClient dataClient, PriceHistory priceHistory,
+    TradingLoop(QuoteProvider dataClient, PriceHistory priceHistory,
                 IndicatorEngine indicators, TrailingStopMonitor trailingStop,
-                OrderExecutor orderExecutor, FeeCalculator fees,
+                BrokerClient brokerClient, FeeCalculator fees,
                 List<String> watchList, Consumer<String> researchCallback,
                 Runnable uiRefreshCallback, Account account,
                 Supplier<ZonedDateTime> clock, OptionsEvaluator optionsEvaluator,
@@ -103,7 +103,7 @@ public class TradingLoop implements Runnable {
         this.priceHistory = priceHistory;
         this.indicators = indicators;
         this.trailingStop = trailingStop;
-        this.orderExecutor = orderExecutor;
+        this.brokerClient = brokerClient;
         this.fees = fees;
         this.watchList = watchList;
         this.researchCallback = researchCallback;
@@ -134,6 +134,7 @@ public class TradingLoop implements Runnable {
                 researchCallback.accept("TRADING HALTED — balance below $100.");
                 return;
             }
+            brokerClient.syncAccount(account);
             List<QuoteModel> quotes = dataClient.getQuotes(watchList);
             for (QuoteModel quote : quotes) {
                 String symbol = quote.getSymbol();
@@ -154,16 +155,16 @@ public class TradingLoop implements Runnable {
                 boolean hasPosition = account.getPositions().containsKey(symbol);
                 if (trailingStop.check(symbol, price) && hasPosition) {
                     Position pos = account.getPositions().get(symbol);
-                    orderExecutor.sell(symbol, pos.getQuantity(), price, signalStr, "Trailing stop: 5% drawdown from peak");
+                    brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Trailing stop: 5% drawdown from peak");
                     uiRefreshCallback.run();
                 } else if (weightedSells >= SIGNAL_THRESHOLD && hasPosition) {
                     Position pos = account.getPositions().get(symbol);
-                    orderExecutor.sell(symbol, pos.getQuantity(), price, signalStr, "Signals: " + sells + "/" + signals.size() + " SELL");
+                    brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Signals: " + sells + "/" + signals.size() + " SELL");
                     uiRefreshCallback.run();
                 } else if (weightedBuys >= SIGNAL_THRESHOLD && !hasPosition) {
                     int shares = fees.maxShares(account.getBalance(), price);
                     if (shares > 0) {
-                        orderExecutor.buy(symbol, shares, price, signalStr,
+                        brokerClient.submitBuy(symbol, shares, price, signalStr,
                                 "Signals: " + buys + "/" + signals.size() + " BUY", featureCsv);
                         uiRefreshCallback.run();
                     }

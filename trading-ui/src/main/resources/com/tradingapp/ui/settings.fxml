@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.geometry.Insets?>
+
+<VBox xmlns="http://javafx.com/javafx"
+      xmlns:fx="http://javafx.com/fxml"
+      fx:controller="com.tradingapp.ui.SettingsController"
+      style="-fx-background-color: #1a1a2e; -fx-padding: 20;"
+      spacing="16">
+
+    <Label text="Broker &amp; Data Source Settings"
+           style="-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #e0e0e0;"/>
+    <Separator/>
+
+    <!-- Broker section -->
+    <Label text="Broker"
+           style="-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #aaaaaa;"/>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Broker Type:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <ComboBox fx:id="brokerTypeCombo" prefWidth="200"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT" fx:id="alpacaRow">
+        <Label text="API Key:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="apiKeyField" prefWidth="340"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="PKXXXXXXXXXXXXXXXXXXXXXXXX"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT" fx:id="alpacaSecretRow">
+        <Label text="API Secret:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <PasswordField fx:id="apiSecretField" prefWidth="340"
+                       style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                       promptText="••••••••••••••••••••••••••••••••••••••••"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT" fx:id="alpacaUrlRow">
+        <Label text="Base URL:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="baseUrlField" prefWidth="340"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #888888;"
+                   editable="false"/>
+    </HBox>
+
+    <Separator/>
+
+    <!-- Quote provider section -->
+    <Label text="Market Data"
+           style="-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #aaaaaa;"/>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Quote Provider:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <ComboBox fx:id="quoteProviderCombo" prefWidth="200"/>
+    </HBox>
+
+    <Label fx:id="quoteProviderNote"
+           text=""
+           wrapText="true"
+           style="-fx-font-size: 11px; -fx-text-fill: #888888;"
+           maxWidth="520"/>
+
+    <Separator/>
+
+    <!-- Actions -->
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Button fx:id="testConnectionButton" text="Test Connection"
+                onAction="#onTestConnection"
+                style="-fx-background-color: #16213e; -fx-text-fill: #00ff88; -fx-border-color: #00ff88; -fx-border-radius: 4; -fx-cursor: hand;"/>
+        <Button text="Save Settings"
+                onAction="#onSaveSettings"
+                style="-fx-background-color: #00ff88; -fx-text-fill: #1a1a2e; -fx-font-weight: bold; -fx-border-radius: 4; -fx-cursor: hand;"/>
+        <Label fx:id="statusLabel" text="" style="-fx-font-size: 12px; -fx-text-fill: #00ff88;"/>
+    </HBox>
+
+    <Label text="Settings are stored in ~/.tradingapp/app.properties and are never committed to git."
+           style="-fx-font-size: 11px; -fx-text-fill: #555555;"
+           wrapText="true" maxWidth="520"/>
+
+</VBox>

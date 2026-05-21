@@ -181,6 +181,13 @@
             </content>
         </Tab>
 
+        <!-- Settings tab -->
+        <Tab text="Settings">
+            <content>
+                <fx:include fx:id="settingsPanel" source="settings.fxml"/>
+            </content>
+        </Tab>
+
     </tabs>
 
 </TabPane>

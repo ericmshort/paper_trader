@@ -215,6 +215,14 @@ public class TransactionLog {
         }
     }
 
+    public void clearAll() {
+        try (Connection conn = connect(); Statement stmt = conn.createStatement()) {
+            stmt.execute("DELETE FROM transactions");
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to clear transaction log", e);
+        }
+    }
+
     public int countLosses() {
         String sql = "SELECT COUNT(*) FROM transactions WHERE action='SELL' AND (price_per_unit * quantity) <= fee_charged";
         try (Connection conn = connect();

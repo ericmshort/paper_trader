@@ -1,3 +1,10 @@
 target/
 *.class
 *.jar
+
+# AI assistant session state
+.claude/
+
+# Local config files that may contain API keys or credentials
+*.properties
+*.db

@@ -6,9 +6,13 @@ import com.tradingapp.account.Position;
 import com.tradingapp.account.SafetyStop;
 import com.tradingapp.account.TransactionLog;
 import com.tradingapp.account.TransactionRecord;
+import com.tradingapp.broker.AlpacaBroker;
+import com.tradingapp.broker.AlpacaQuoteProvider;
+import com.tradingapp.broker.AppConfig;
 import com.tradingapp.data.LargeCapWatchList;
 import com.tradingapp.data.PriceHistory;
-import com.tradingapp.data.YahooFinanceClient;
+import com.tradingapp.data.QuoteProvider;
+import com.tradingapp.data.YahooFinanceQuoteProvider;
 import com.tradingapp.ai.MLSignalEvaluator;
 import com.tradingapp.ai.SignalWeights;
 import com.tradingapp.engine.*;
@@ -90,6 +94,8 @@ public class DashboardController implements Initializable {
     @FXML private TableColumn<TransactionRecord, Double> colBalance;
     @FXML private TableColumn<TransactionRecord, String> colReason;
 
+    @FXML private SettingsController settingsPanelController;
+
     private Account account;
     private TransactionLog transactionLog;
     private PriceHistory priceHistory;
@@ -117,49 +123,51 @@ public class DashboardController implements Initializable {
         setupOptionsTableColumns();
         setupStockTableColumns();
 
-        List<TransactionRecord> history = transactionLog.findAll();
-        tradeHistoryTable.setItems(FXCollections.observableArrayList(history));
+        refreshUi();
 
-        double cash = account.getBalance();
-        double stockHoldings = computeStockHoldings();
-        double optionHoldings = computeOptionHoldings();
-        totalPortfolioLabel.setText(String.format("Total Portfolio: $%,.2f", cash + stockHoldings + optionHoldings));
-        stockHoldingsLabel.setText(String.format("Stocks: $%,.2f", stockHoldings));
-        optionHoldingsLabel.setText(String.format("Options: $%,.2f", optionHoldings));
-        availableCashLabel.setText(String.format("Cash: $%,.2f", cash));
+        AppConfig appConfig = AppConfig.load();
+        startTradingComponents(appConfig);
 
-        List<ClosedTradeRecord> closedTrades = computeClosedTrades();
-        int wins = (int) closedTrades.stream().filter(t -> t.getPnlRaw() > 0).count();
-        int losses = (int) closedTrades.stream().filter(t -> t.getPnlRaw() <= 0).count();
-        int total = wins + losses;
-        double winRate = total > 0 ? (wins * 100.0 / total) : 0.0;
-        double totalRealizedPnL = closedTrades.stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
-        winsLabel.setText("Wins: " + wins);
-        lossesLabel.setText("Losses: " + losses);
-        winRateLabel.setText(String.format("Win Rate: %.1f%%", winRate));
-        pnlButton.setText(String.format("P&L: $%,.2f", totalRealizedPnL));
+        if (settingsPanelController != null) {
+            settingsPanelController.setActiveBrokerType(appConfig.getBrokerType());
+            settingsPanelController.setOnSettingsSaved(cfg ->
+                    Platform.runLater(() -> researchArea.appendText(
+                            "\nSettings saved. Broker/quote changes take effect on next restart.\n")));
+            settingsPanelController.setOnBrokerReset(this::handleBrokerReset);
+        }
+    }
 
-        // Populate position tables with data restored from the transaction log
-        double optTotalUnrealized = populateOptionsTable();
-        double stkTotalUnrealized = populateStockTable();
-        unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", optTotalUnrealized + stkTotalUnrealized));
-        optionsTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", optTotalUnrealized));
-        stockTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", stkTotalUnrealized));
+    private void startTradingComponents(AppConfig appConfig) {
+        researchArea.setText("Waiting for market data...\n\nMarket hours: 9:30 AM – 4:00 PM ET"
+                + "\nWatching 50 large-cap US stocks."
+                + "\nBroker: " + SettingsController.brokerTypeLabel(appConfig.getBrokerType())
+                + " | Quotes: " + appConfig.getQuoteProviderType().name());
 
-        researchArea.setText("Waiting for market data...\n\nMarket hours: 9:30 AM – 4:00 PM ET\nWatching 50 large-cap US stocks.");
+        QuoteProvider quoteProvider;
+        if (appConfig.getQuoteProviderType() == AppConfig.QuoteProviderType.ALPACA && appConfig.isAlpacaBroker()) {
+            quoteProvider = new AlpacaQuoteProvider(appConfig);
+        } else {
+            quoteProvider = new YahooFinanceQuoteProvider();
+        }
 
-        YahooFinanceClient dataClient = new YahooFinanceClient();
-        IndicatorEngine indicatorEngine = new IndicatorEngine();
-        TrailingStopMonitor trailingStop = new TrailingStopMonitor();
         FeeCalculator feeCalc = new FeeCalculator();
-        SafetyStop safetyStop = new SafetyStop(account);
-        OrderExecutor orderExecutor = new OrderExecutor(account, safetyStop, transactionLog, feeCalc);
+        BrokerClient brokerClient;
+        if (appConfig.isAlpacaBroker()) {
+            AlpacaBroker alpaca = new AlpacaBroker(appConfig, account, transactionLog);
+            alpaca.syncAccount(account);
+            brokerClient = alpaca;
+        } else {
+            SafetyStop safetyStop = new SafetyStop(account);
+            OrderExecutor orderExecutor = new OrderExecutor(account, safetyStop, transactionLog, feeCalc);
+            brokerClient = new SimulatedBroker(orderExecutor);
+        }
 
         Consumer<String> researchCb = msg -> Platform.runLater(() -> researchArea.appendText(msg + "\n"));
         Runnable uiRefresh = () -> Platform.runLater(this::refreshUi);
 
-        OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, transactionLog);
-        OptionsSignalRouter optionsRouter = new OptionsSignalRouter(bsEngine, optExec, account, priceHistory, researchCb, dataClient);
+        OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, transactionLog, appConfig.isAlpacaBroker());
+        OptionsSignalRouter optionsRouter = new OptionsSignalRouter(
+                bsEngine, optExec, account, priceHistory, researchCb, quoteProvider);
 
         Path weightsPath = Path.of(System.getProperty("user.home"), ".tradingapp", "signal-weights.json");
         SignalWeights initialWeights;
@@ -172,15 +180,17 @@ public class DashboardController implements Initializable {
         Runnable trainingCallback = () -> {
             Thread t = new Thread(() -> {
                 mlEval.retrain(transactionLog);
-                Platform.runLater(() -> researchArea.appendText("ML weights updated: " + mlEval.getWeightsSummary() + "\n"));
+                Platform.runLater(() -> researchArea.appendText(
+                        "ML weights updated: " + mlEval.getWeightsSummary() + "\n"));
             }, "ml-training");
             t.setDaemon(true);
             t.start();
         };
 
-        TradingLoop tradingLoop = new TradingLoop(dataClient, priceHistory, indicatorEngine,
-                trailingStop, orderExecutor, feeCalc, LargeCapWatchList.SYMBOLS,
-                researchCb, uiRefresh, account, optionsRouter, mlEval, trainingCallback);
+        TradingLoop tradingLoop = new TradingLoop(quoteProvider, priceHistory,
+                new IndicatorEngine(), new TrailingStopMonitor(), brokerClient, feeCalc,
+                LargeCapWatchList.SYMBOLS, researchCb, uiRefresh, account,
+                optionsRouter, mlEval, trainingCallback);
 
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "trading-loop");
@@ -188,6 +198,47 @@ public class DashboardController implements Initializable {
             return t;
         });
         scheduler.scheduleAtFixedRate(tradingLoop, 0, 60, TimeUnit.SECONDS);
+    }
+
+    private void handleBrokerReset(AppConfig newConfig) {
+        Platform.runLater(() -> {
+            // Stop the current trading loop
+            if (scheduler != null) {
+                scheduler.shutdownNow();
+                try { scheduler.awaitTermination(5, TimeUnit.SECONDS); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            }
+
+            // Wipe all historical data
+            transactionLog.clearAll();
+
+            // Reset account state
+            if (newConfig.isAlpacaBroker()) {
+                account.reset(0.0);
+            } else {
+                account.reset(100_000.0);
+            }
+
+            // Reset chart and price history
+            priceHistory = new PriceHistory();
+            equitySeries.getData().clear();
+            tickCount = 0;
+
+            // Refresh UI to show cleared state
+            refreshUi();
+            researchArea.setText("Broker switched to "
+                    + SettingsController.brokerTypeLabel(newConfig.getBrokerType())
+                    + ". Historical data cleared.\n"
+                    + "Waiting for market data...\n");
+
+            // Restart the trading loop with new config
+            startTradingComponents(newConfig);
+
+            // Update settings controller so it knows the new active broker
+            if (settingsPanelController != null) {
+                settingsPanelController.setActiveBrokerType(newConfig.getBrokerType());
+            }
+        });
     }
 
     private void setupTableColumns() {

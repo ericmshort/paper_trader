@@ -61,4 +61,12 @@ public class Account {
     public void removeOptionsPosition(String key) {
         optionsPositions.remove(key);
     }
+
+    public synchronized void reset(double startingBalance) {
+        this.balance = startingBalance;
+        this.positions.clear();
+        this.optionsPositions.clear();
+        this.totalRealizedPnL = 0.0;
+        this.tradingHalted = false;
+    }
 }

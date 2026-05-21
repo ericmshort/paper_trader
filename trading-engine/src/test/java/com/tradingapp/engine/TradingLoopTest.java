@@ -4,7 +4,6 @@ import com.tradingapp.account.Account;
 import com.tradingapp.account.SafetyStop;
 import com.tradingapp.account.TransactionLog;
 import com.tradingapp.data.PriceHistory;
-import com.tradingapp.data.YahooFinanceClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -30,9 +29,9 @@ public class TradingLoopTest {
         SafetyStop safety = new SafetyStop(account);
         TransactionLog log = new TransactionLog(tempDir.resolve("wt.db").toString());
         FeeCalculator fees = new FeeCalculator();
-        OrderExecutor executor = new OrderExecutor(account, safety, log, fees);
+        BrokerClient broker = new SimulatedBroker(new OrderExecutor(account, safety, log, fees));
         return new TradingLoop(null, new PriceHistory(), new IndicatorEngine(), new TrailingStopMonitor(),
-                executor, fees, List.of(),
+                broker, fees, List.of(),
                 research::add, () -> {}, account,
                 () -> fixedTime, null, weightEval, afterMarket);
     }
@@ -42,10 +41,10 @@ public class TradingLoopTest {
         SafetyStop safety = new SafetyStop(account);
         TransactionLog log = new TransactionLog(tempDir.resolve("test.db").toString());
         FeeCalculator fees = new FeeCalculator();
-        OrderExecutor executor = new OrderExecutor(account, safety, log, fees);
+        BrokerClient broker = new SimulatedBroker(new OrderExecutor(account, safety, log, fees));
         return new TradingLoop(
                 null, new PriceHistory(), new IndicatorEngine(), new TrailingStopMonitor(),
-                executor, fees, List.of("AAPL"),
+                broker, fees, List.of("AAPL"),
                 research::add, () -> {}, account,
                 () -> fixedTime);
     }
@@ -79,10 +78,10 @@ public class TradingLoopTest {
         SafetyStop safety = new SafetyStop(account);
         TransactionLog log = new TransactionLog(tempDir.resolve("halt.db").toString());
         FeeCalculator fees = new FeeCalculator();
-        OrderExecutor executor = new OrderExecutor(account, safety, log, fees);
+        BrokerClient broker = new SimulatedBroker(new OrderExecutor(account, safety, log, fees));
         TradingLoop loop = new TradingLoop(
                 null, new PriceHistory(), new IndicatorEngine(), new TrailingStopMonitor(),
-                executor, fees, List.of("AAPL"),
+                broker, fees, List.of("AAPL"),
                 research::add, () -> {}, account,
                 () -> marketOpen);
         loop.run();
@@ -134,12 +133,10 @@ public class TradingLoopTest {
         SafetyStop safety = new SafetyStop(account);
         TransactionLog log = new TransactionLog(tempDir.resolve("nosig.db").toString());
         FeeCalculator fees = new FeeCalculator();
-        OrderExecutor executor = new OrderExecutor(account, safety, log, fees);
-        // YahooFinanceClient is null — the loop will catch the NPE and emit an error message
-        // or we pass an empty watch list to avoid the API call
+        BrokerClient broker = new SimulatedBroker(new OrderExecutor(account, safety, log, fees));
         TradingLoop loop = new TradingLoop(
                 null, new PriceHistory(), new IndicatorEngine(), new TrailingStopMonitor(),
-                executor, fees, List.of(),  // empty watchlist: no API call, no trades
+                broker, fees, List.of(),  // empty watchlist: no API call, no trades
                 research::add, () -> {}, account,
                 () -> marketOpen);
         loop.run();

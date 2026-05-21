@@ -17,16 +17,22 @@ public class OptionsOrderExecutor {
 
     private final Account account;
     private final TransactionLog transactionLog;
+    private final boolean brokerMode;
 
     public OptionsOrderExecutor(Account account, TransactionLog transactionLog) {
+        this(account, transactionLog, false);
+    }
+
+    public OptionsOrderExecutor(Account account, TransactionLog transactionLog, boolean brokerMode) {
         this.account = account;
         this.transactionLog = transactionLog;
+        this.brokerMode = brokerMode;
     }
 
     public void buyCall(String symbol, double strike, LocalDate expiry, int contracts,
                         double premium, String signalStr, String featureCsv) {
-        double fillPremium = premium + OPTION_BUY_SLIPPAGE;
-        double fee = CONTRACT_FEE * contracts;
+        double fillPremium = brokerMode ? premium : premium + OPTION_BUY_SLIPPAGE;
+        double fee = brokerMode ? 0.0 : CONTRACT_FEE * contracts;
         double totalCost = fillPremium * 100 * contracts + fee;
         if (account.getBalance() < totalCost) return;
         account.setBalance(account.getBalance() - totalCost);
@@ -40,8 +46,8 @@ public class OptionsOrderExecutor {
 
     public void buyPut(String symbol, double strike, LocalDate expiry, int contracts,
                        double premium, String signalStr, String featureCsv) {
-        double fillPremium = premium + OPTION_BUY_SLIPPAGE;
-        double fee = CONTRACT_FEE * contracts;
+        double fillPremium = brokerMode ? premium : premium + OPTION_BUY_SLIPPAGE;
+        double fee = brokerMode ? 0.0 : CONTRACT_FEE * contracts;
         double totalCost = fillPremium * 100 * contracts + fee;
         if (account.getBalance() < totalCost) return;
         account.setBalance(account.getBalance() - totalCost);
@@ -58,7 +64,7 @@ public class OptionsOrderExecutor {
         OptionsPosition pos = opts.get(positionKey);
         if (pos == null) return;
         double proceeds = currentPremium * 100 * pos.getContracts();
-        double fee = CONTRACT_FEE * pos.getContracts();
+        double fee = brokerMode ? 0.0 : CONTRACT_FEE * pos.getContracts();
         double net = proceeds - fee;
         account.setBalance(account.getBalance() + net);
         account.removeOptionsPosition(positionKey);
