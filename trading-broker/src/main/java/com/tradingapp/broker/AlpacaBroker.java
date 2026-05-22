@@ -278,58 +278,66 @@ public class AlpacaBroker implements BrokerClient {
      * keyed by the Alpaca order ID stored in external_id.
      */
     private void syncOrderHistory() {
-        JSONArray orders = getJsonArray("/orders?status=filled&limit=50&direction=desc");
-        if (orders == null) return;
+        String after = null;
+        for (int page = 0; page < 20; page++) {
+            String path = "/orders?status=filled&limit=500&direction=desc"
+                    + (after != null ? "&after=" + after : "");
+            JSONArray orders = getJsonArray(path);
+            if (orders == null || orders.length() == 0) break;
 
-        for (int i = 0; i < orders.length(); i++) {
-            JSONObject o = orders.getJSONObject(i);
-            String orderId = o.optString("id");
-            String symbol = o.optString("symbol");
-            String side = o.optString("side");
-            int qty = (int) o.optDouble("filled_qty", 0);
-            double fillPrice = o.optDouble("filled_avg_price", 0.0);
-            if (qty <= 0 || fillPrice <= 0) continue;
+            for (int i = 0; i < orders.length(); i++) {
+                JSONObject o = orders.getJSONObject(i);
+                String orderId = o.optString("id");
+                String symbol = o.optString("symbol");
+                String side = o.optString("side");
+                int qty = (int) o.optDouble("filled_qty", 0);
+                double fillPrice = o.optDouble("filled_avg_price", 0.0);
+                if (qty <= 0 || fillPrice <= 0) continue;
 
-            if (log.existsByExternalId(orderId)) {
-                // Correct any buy records that were logged at theoretical (BS) price instead of actual fill
-                if ("buy".equals(side)) log.updateFillPrice(orderId, fillPrice);
-                continue;
-            }
-
-            long ts = parseAlpacaTimestamp(o.optString("filled_at", o.optString("submitted_at")));
-
-            TransactionRecord r = new TransactionRecord();
-            r.setTimestamp(ts);
-            r.setQuantity(qty);
-            r.setPricePerUnit(fillPrice);
-            r.setFeeCharged(0.0);
-            r.setBalanceAfter(account != null ? account.getBalance() : 0.0);
-            r.setSignals("");
-            r.setExternalId(orderId);
-
-            if (isOccSymbol(symbol)) {
-                OccComponents occ = parseOcc(symbol);
-                if (occ == null) continue;
-                r.setSymbol(occ.underlying);
-                r.setReason(occ.type + " K=" + occ.strike + " exp=" + occ.expiry + " (imported)");
-                if ("buy".equals(side)) {
-                    r.setAction(occ.type.equals("CALL")
-                            ? TransactionRecord.TransactionAction.CALL_BUY
-                            : TransactionRecord.TransactionAction.PUT_BUY);
-                } else {
-                    r.setAction(occ.type.equals("CALL")
-                            ? TransactionRecord.TransactionAction.CALL_SELL
-                            : TransactionRecord.TransactionAction.PUT_SELL);
+                if (log.existsByExternalId(orderId)) {
+                    // Correct any records logged at theoretical (BS) price instead of actual fill
+                    log.updateFillPrice(orderId, fillPrice);
+                    continue;
                 }
-            } else {
-                r.setSymbol(symbol);
-                r.setReason("Imported from Alpaca history");
-                r.setAction("buy".equals(side)
-                        ? TransactionRecord.TransactionAction.BUY
-                        : TransactionRecord.TransactionAction.SELL);
+
+                long ts = parseAlpacaTimestamp(o.optString("filled_at", o.optString("submitted_at")));
+
+                TransactionRecord r = new TransactionRecord();
+                r.setTimestamp(ts);
+                r.setQuantity(qty);
+                r.setPricePerUnit(fillPrice);
+                r.setFeeCharged(0.0);
+                r.setBalanceAfter(account != null ? account.getBalance() : 0.0);
+                r.setSignals("");
+                r.setExternalId(orderId);
+
+                if (isOccSymbol(symbol)) {
+                    OccComponents occ = parseOcc(symbol);
+                    if (occ == null) continue;
+                    r.setSymbol(occ.underlying);
+                    r.setReason(occ.type + " K=" + occ.strike + " exp=" + occ.expiry + " (imported)");
+                    if ("buy".equals(side)) {
+                        r.setAction(occ.type.equals("CALL")
+                                ? TransactionRecord.TransactionAction.CALL_BUY
+                                : TransactionRecord.TransactionAction.PUT_BUY);
+                    } else {
+                        r.setAction(occ.type.equals("CALL")
+                                ? TransactionRecord.TransactionAction.CALL_SELL
+                                : TransactionRecord.TransactionAction.PUT_SELL);
+                    }
+                } else {
+                    r.setSymbol(symbol);
+                    r.setReason("Imported from Alpaca history");
+                    r.setAction("buy".equals(side)
+                            ? TransactionRecord.TransactionAction.BUY
+                            : TransactionRecord.TransactionAction.SELL);
+                }
+
+                tryInsertLog(r);
             }
 
-            tryInsertLog(r);
+            if (orders.length() < 500) break;
+            after = orders.getJSONObject(orders.length() - 1).optString("submitted_at");
         }
     }
 

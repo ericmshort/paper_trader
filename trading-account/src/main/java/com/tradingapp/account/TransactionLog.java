@@ -100,7 +100,7 @@ public class TransactionLog {
     }
 
     public void updateFillPrice(String externalId, double fillPrice) {
-        String sql = "UPDATE transactions SET price_per_unit = ? WHERE external_id = ? AND action IN ('BUY','CALL_BUY','PUT_BUY')";
+        String sql = "UPDATE transactions SET price_per_unit = ? WHERE external_id = ?";
         try (Connection conn = connect(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setDouble(1, fillPrice);
             ps.setString(2, externalId);

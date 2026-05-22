@@ -436,6 +436,12 @@ public class DashboardController implements Initializable {
             buyingPowerLabel.setText(String.format("Available Cash: $%,.2f", account.getBuyingPower()));
         }
 
+        double optTotalUnrealized = populateOptionsTable();
+        double stkTotalUnrealized = populateStockTable();
+        unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", optTotalUnrealized + stkTotalUnrealized));
+        optionsTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", optTotalUnrealized));
+        stockTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", stkTotalUnrealized));
+
         List<ClosedTradeRecord> closedTrades = computeClosedTrades();
         int wins = (int) closedTrades.stream().filter(t -> t.getPnlRaw() > 0).count();
         int losses = (int) closedTrades.stream().filter(t -> t.getPnlRaw() <= 0).count();
@@ -444,18 +450,15 @@ public class DashboardController implements Initializable {
         winsLabel.setText("Wins: " + wins);
         lossesLabel.setText("Losses: " + losses);
         winRateLabel.setText(String.format("Win Rate: %.1f%%", winRate));
-        pnlButton.setText(String.format("P&L: $%,.2f", totalPortfolio - Account.STARTING_BALANCE));
+        // Derive realized P&L from actual Alpaca cash/positions rather than transaction log prices,
+        // which may have stale BS-computed buy prices that haven't been corrected yet.
+        double realizedPnl = totalPortfolio - Account.STARTING_BALANCE - (optTotalUnrealized + stkTotalUnrealized);
+        pnlButton.setText(String.format("P&L: $%,.2f", realizedPnl));
 
         equitySeries.getData().add(new XYChart.Data<>(tickCount++, totalPortfolio));
         if (equitySeries.getData().size() > 200) {
             equitySeries.getData().remove(0);
         }
-
-        double optTotalUnrealized = populateOptionsTable();
-        double stkTotalUnrealized = populateStockTable();
-        unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", optTotalUnrealized + stkTotalUnrealized));
-        optionsTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", optTotalUnrealized));
-        stockTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", stkTotalUnrealized));
 
         if (account.isTradingHalted()) {
             haltedLabel.setText("⛔ TRADING HALTED — portfolio exhausted");
@@ -477,8 +480,10 @@ public class DashboardController implements Initializable {
         if (alpacaMode) {
             buyingPowerLabel.setText(String.format("Available Cash: $%,.2f", account.getBuyingPower()));
         }
-        pnlButton.setText(String.format("P&L: $%,.2f", totalPortfolio - Account.STARTING_BALANCE));
-        unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", computeStockUnrealizedPnL() + computeOptionsUnrealizedPnL()));
+        double unrealizedPnl = computeStockUnrealizedPnL() + computeOptionsUnrealizedPnL();
+        double realizedPnl = totalPortfolio - Account.STARTING_BALANCE - unrealizedPnl;
+        pnlButton.setText(String.format("P&L: $%,.2f", realizedPnl));
+        unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", unrealizedPnl));
 
         if (account.isTradingHalted()) {
             haltedLabel.setText("⛔ TRADING HALTED — portfolio exhausted");
@@ -627,7 +632,10 @@ public class DashboardController implements Initializable {
         table.setItems(FXCollections.observableArrayList(trades));
         VBox.setVgrow(table, Priority.ALWAYS);
 
-        double totalPnl = trades.stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
+        double availableCash = account.getBalance();
+        double totalPortfolio = availableCash + computeStockHoldings() + computeOptionHoldings();
+        double unrealizedPnl = computeStockUnrealizedPnL() + computeOptionsUnrealizedPnL();
+        double totalPnl = totalPortfolio - Account.STARTING_BALANCE - unrealizedPnl;
         String totalText = totalPnl >= 0
                 ? String.format("Total Realised P&L:  +$%,.2f", totalPnl)
                 : String.format("Total Realised P&L:  -$%,.2f", Math.abs(totalPnl));
