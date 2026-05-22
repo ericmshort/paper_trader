@@ -9,4 +9,7 @@ public interface QuoteProvider {
     OptionsChain getOptionsChain(String symbol, LocalDate expiry);
     List<HistoricalBar> getHistoricalBars(String symbol, LocalDate start, LocalDate end);
     String getName();
+
+    /** Earliest date for which this provider can supply data suitable for backtesting. */
+    LocalDate getEarliestBacktestDate();
 }

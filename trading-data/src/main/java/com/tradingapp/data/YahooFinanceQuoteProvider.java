@@ -18,4 +18,7 @@ public class YahooFinanceQuoteProvider implements QuoteProvider {
     @Override public OptionsChain getOptionsChain(String symbol, LocalDate expiry) { return client.getOptionsChain(symbol, expiry); }
     @Override public List<HistoricalBar> getHistoricalBars(String symbol, LocalDate start, LocalDate end) { return barFetcher.fetchDailyBars(symbol, start, end); }
     @Override public String getName() { return "Yahoo Finance"; }
+
+    /** Yahoo only provides current options chains — no historical options data. */
+    @Override public LocalDate getEarliestBacktestDate() { return LocalDate.now().minusYears(1); }
 }

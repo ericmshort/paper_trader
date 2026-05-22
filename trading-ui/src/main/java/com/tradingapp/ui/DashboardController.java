@@ -97,6 +97,7 @@ public class DashboardController implements Initializable {
     @FXML private TableColumn<TransactionRecord, String> colReason;
 
     @FXML private SettingsController settingsPanelController;
+    @FXML private BacktestController backtestPanelController;
 
     private Account account;
     private TransactionLog transactionLog;
@@ -151,6 +152,10 @@ public class DashboardController implements Initializable {
             quoteProvider = new AlpacaQuoteProvider(appConfig);
         } else {
             quoteProvider = new YahooFinanceQuoteProvider();
+        }
+
+        if (backtestPanelController != null) {
+            backtestPanelController.setContext(appConfig, quoteProvider);
         }
 
         FeeCalculator feeCalc = new FeeCalculator();

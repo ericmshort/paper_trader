@@ -11,6 +11,8 @@
 
     <!-- Row 1: Config controls -->
     <HBox spacing="10" style="-fx-background-color: #16213e; -fx-padding: 10;" alignment="CENTER_LEFT">
+        <Label text="Source:" style="-fx-font-size: 12px; -fx-text-fill: #e0e0e0;"/>
+        <ComboBox fx:id="quoteSourceCombo" prefWidth="150"/>
         <Label text="Start:" style="-fx-font-size: 12px; -fx-text-fill: #e0e0e0;"/>
         <DatePicker fx:id="backtestStartDate" prefWidth="130"/>
         <Label text="End:" style="-fx-font-size: 12px; -fx-text-fill: #e0e0e0;"/>

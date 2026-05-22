@@ -117,4 +117,8 @@ public class AlpacaQuoteProvider implements QuoteProvider {
 
     @Override
     public String getName() { return "Alpaca"; }
+
+    /** Alpaca historical market data is available from roughly the start of 2016. */
+    @Override
+    public LocalDate getEarliestBacktestDate() { return LocalDate.of(2016, 1, 4); }
 }

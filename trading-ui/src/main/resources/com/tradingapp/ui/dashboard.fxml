@@ -180,7 +180,7 @@
         <!-- Backtest tab -->
         <Tab text="Backtest">
             <content>
-                <fx:include source="backtest-panel.fxml"/>
+                <fx:include fx:id="backtestPanel" source="backtest-panel.fxml"/>
             </content>
         </Tab>
 
