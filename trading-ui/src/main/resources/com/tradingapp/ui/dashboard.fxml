@@ -34,6 +34,9 @@
                             <Label fx:id="availableCashLabel"
                                    text="Cash: $100,000.00"
                                    style="-fx-font-size: 14px; -fx-text-fill: #e0e0e0;"/>
+                            <Label fx:id="buyingPowerLabel"
+                                   text=""
+                                   style="-fx-font-size: 14px; -fx-text-fill: #ffcc44;"/>
                             <Label fx:id="haltedLabel"
                                    text=""
                                    style="-fx-font-size: 14px; -fx-font-weight: bold; -fx-text-fill: #ff4444;"/>

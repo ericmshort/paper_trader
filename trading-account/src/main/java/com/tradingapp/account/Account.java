@@ -6,14 +6,17 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class Account {
 
+    public static final double STARTING_BALANCE = 100_000.0;
+
     private volatile double balance;
+    private volatile double buyingPower;
     private final Map<String, Position> positions;
     private final Map<String, OptionsPosition> optionsPositions;
     private volatile double totalRealizedPnL;
     private volatile boolean tradingHalted;
 
     public Account() {
-        this.balance = 100_000.0;
+        this.balance = STARTING_BALANCE;
         this.positions = new ConcurrentHashMap<>();
         this.optionsPositions = new ConcurrentHashMap<>();
         this.totalRealizedPnL = 0.0;
@@ -21,12 +24,14 @@ public class Account {
     }
 
     public double getBalance() { return balance; }
+    public double getBuyingPower() { return buyingPower; }
     public Map<String, Position> getPositions() { return Collections.unmodifiableMap(positions); }
     public Map<String, OptionsPosition> getOptionsPositions() { return Collections.unmodifiableMap(optionsPositions); }
     public double getTotalRealizedPnL() { return totalRealizedPnL; }
     public boolean isTradingHalted() { return tradingHalted; }
 
     public void setBalance(double balance) { this.balance = balance; }
+    public void setBuyingPower(double buyingPower) { this.buyingPower = buyingPower; }
     public void setTradingHalted(boolean tradingHalted) { this.tradingHalted = tradingHalted; }
 
     public synchronized void addRealizedPnL(double amount) { this.totalRealizedPnL += amount; }

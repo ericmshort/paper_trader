@@ -99,6 +99,17 @@ public class TransactionLog {
         }
     }
 
+    public void updateFillPrice(String externalId, double fillPrice) {
+        String sql = "UPDATE transactions SET price_per_unit = ? WHERE external_id = ? AND action IN ('BUY','CALL_BUY','PUT_BUY')";
+        try (Connection conn = connect(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setDouble(1, fillPrice);
+            ps.setString(2, externalId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to update fill price", e);
+        }
+    }
+
     public void purgeUnmatched(java.util.Set<String> knownExternalIds) {
         // Delete every record whose external_id is NULL (never sent to broker)
         // or whose external_id is not in the set of known broker order IDs.

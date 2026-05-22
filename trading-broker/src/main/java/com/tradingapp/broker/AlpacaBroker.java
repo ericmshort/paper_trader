@@ -207,6 +207,8 @@ public class AlpacaBroker implements BrokerClient {
                 double cash = alpacaAccount.optDouble("cash", account.getBalance());
                 account.setBalance(cash);
                 if (cash <= 100.0) account.setTradingHalted(true);
+                double bp = alpacaAccount.optDouble("buying_power", cash);
+                account.setBuyingPower(bp);
             }
 
             JSONArray positions = getJsonArray("/positions");
@@ -283,12 +285,16 @@ public class AlpacaBroker implements BrokerClient {
             JSONObject o = orders.getJSONObject(i);
             String orderId = o.optString("id");
             String symbol = o.optString("symbol");
-            if (log.existsByExternalId(orderId)) continue;
-
             String side = o.optString("side");
             int qty = (int) o.optDouble("filled_qty", 0);
             double fillPrice = o.optDouble("filled_avg_price", 0.0);
             if (qty <= 0 || fillPrice <= 0) continue;
+
+            if (log.existsByExternalId(orderId)) {
+                // Correct any buy records that were logged at theoretical (BS) price instead of actual fill
+                if ("buy".equals(side)) log.updateFillPrice(orderId, fillPrice);
+                continue;
+            }
 
             long ts = parseAlpacaTimestamp(o.optString("filled_at", o.optString("submitted_at")));
 

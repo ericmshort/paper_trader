@@ -59,6 +59,7 @@ public class DashboardController implements Initializable {
     @FXML private Label stockHoldingsLabel;
     @FXML private Label optionHoldingsLabel;
     @FXML private Label availableCashLabel;
+    @FXML private Label buyingPowerLabel;
     @FXML private Label haltedLabel;
     @FXML private Label winsLabel;
     @FXML private Label lossesLabel;
@@ -104,6 +105,7 @@ public class DashboardController implements Initializable {
     private ScheduledExecutorService scheduler;
     private XYChart.Series<Number, Number> equitySeries;
     private int tickCount = 0;
+    private boolean alpacaMode = false;
 
     private static final Logger LOG = Logger.getLogger(DashboardController.class.getName());
     private static final DateTimeFormatter TIME_FMT =
@@ -152,6 +154,7 @@ public class DashboardController implements Initializable {
         }
 
         FeeCalculator feeCalc = new FeeCalculator();
+        alpacaMode = appConfig.isAlpacaBroker();
         BrokerClient brokerClient;
         if (appConfig.isAlpacaBroker()) {
             AlpacaBroker alpaca = new AlpacaBroker(appConfig, account, transactionLog);
@@ -429,17 +432,19 @@ public class DashboardController implements Initializable {
         stockHoldingsLabel.setText(String.format("Stocks: $%,.2f", stockHoldings));
         optionHoldingsLabel.setText(String.format("Options: $%,.2f", optionHoldings));
         availableCashLabel.setText(String.format("Cash: $%,.2f", availableCash));
+        if (alpacaMode) {
+            buyingPowerLabel.setText(String.format("Available Cash: $%,.2f", account.getBuyingPower()));
+        }
 
         List<ClosedTradeRecord> closedTrades = computeClosedTrades();
         int wins = (int) closedTrades.stream().filter(t -> t.getPnlRaw() > 0).count();
         int losses = (int) closedTrades.stream().filter(t -> t.getPnlRaw() <= 0).count();
         int total = wins + losses;
         double winRate = total > 0 ? (wins * 100.0 / total) : 0.0;
-        double totalRealizedPnL = closedTrades.stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
         winsLabel.setText("Wins: " + wins);
         lossesLabel.setText("Losses: " + losses);
         winRateLabel.setText(String.format("Win Rate: %.1f%%", winRate));
-        pnlButton.setText(String.format("P&L: $%,.2f", totalRealizedPnL));
+        pnlButton.setText(String.format("P&L: $%,.2f", totalPortfolio - Account.STARTING_BALANCE));
 
         equitySeries.getData().add(new XYChart.Data<>(tickCount++, totalPortfolio));
         if (equitySeries.getData().size() > 200) {
@@ -469,8 +474,10 @@ public class DashboardController implements Initializable {
         stockHoldingsLabel.setText(String.format("Stocks: $%,.2f", stockHoldings));
         optionHoldingsLabel.setText(String.format("Options: $%,.2f", optionHoldings));
         availableCashLabel.setText(String.format("Cash: $%,.2f", availableCash));
-        double totalRealizedPnL = computeClosedTrades().stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
-        pnlButton.setText(String.format("P&L: $%,.2f", totalRealizedPnL));
+        if (alpacaMode) {
+            buyingPowerLabel.setText(String.format("Available Cash: $%,.2f", account.getBuyingPower()));
+        }
+        pnlButton.setText(String.format("P&L: $%,.2f", totalPortfolio - Account.STARTING_BALANCE));
         unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", computeStockUnrealizedPnL() + computeOptionsUnrealizedPnL()));
 
         if (account.isTradingHalted()) {
