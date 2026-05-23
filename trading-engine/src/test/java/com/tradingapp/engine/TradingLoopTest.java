@@ -1,18 +1,24 @@
 package com.tradingapp.engine;
 
 import com.tradingapp.account.Account;
+import com.tradingapp.account.Position;
 import com.tradingapp.account.SafetyStop;
 import com.tradingapp.account.TransactionLog;
+import com.tradingapp.data.OptionsChain;
 import com.tradingapp.data.PriceHistory;
+import com.tradingapp.data.QuoteModel;
+import com.tradingapp.data.QuoteProvider;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -121,6 +127,50 @@ public class TradingLoopTest {
         assertEquals(25.0, Double.parseDouble(parts[0]), 0.001); // RSI
         assertEquals(0.5, Double.parseDouble(parts[1]), 0.001);  // MACD
         assertEquals(102.0, Double.parseDouble(parts[2]), 0.001); // BollingerBands
+    }
+
+    @Test
+    void testBuySkippedWhenPortfolioAtCapacity() throws Exception {
+        List<String> research = new ArrayList<>();
+        ZonedDateTime marketOpen = ZonedDateTime.of(2026, 5, 15, 10, 0, 0, 0, ET);
+
+        Account account = new Account();
+        // 300 shares of MSFT at $210 = $63,000 = 63% of $100k starting balance — exceeds 60% cap
+        account.addOrUpdatePosition("MSFT", 300, 210.0, Position.PositionType.STOCK);
+
+        SafetyStop safety = new SafetyStop(account);
+        TransactionLog log = new TransactionLog(tempDir.resolve("cap.db").toString());
+        FeeCalculator fees = new FeeCalculator();
+        BrokerClient broker = new SimulatedBroker(new OrderExecutor(account, safety, log, fees));
+
+        QuoteProvider quotes = new QuoteProvider() {
+            @Override public QuoteModel getQuote(String symbol) {
+                return QuoteModel.fromLive(symbol, 150.0, 1_000_000L, System.currentTimeMillis());
+            }
+            @Override public List<QuoteModel> getQuotes(List<String> symbols) {
+                return symbols.stream().map(this::getQuote).collect(Collectors.toList());
+            }
+            @Override public OptionsChain getOptionsChain(String symbol, LocalDate expiry) { return null; }
+            @Override public List<com.tradingapp.data.HistoricalBar> getHistoricalBars(String symbol, LocalDate start, LocalDate end) { return List.of(); }
+            @Override public String getName() { return "test"; }
+            @Override public LocalDate getEarliestBacktestDate() { return LocalDate.of(2020, 1, 1); }
+        };
+
+        // Force buy signal for AAPL via weightEvaluator
+        SignalWeightEvaluator alwaysBuy = new SignalWeightEvaluator() {
+            @Override public double weightedBuyScore(List<SignalResult> signals) { return 2.0; }
+            @Override public double weightedSellScore(List<SignalResult> signals) { return 0.0; }
+        };
+
+        TradingLoop loop = new TradingLoop(quotes, new PriceHistory(), new IndicatorEngine(),
+                new TrailingStopMonitor(), broker, fees, List.of("AAPL"),
+                research::add, () -> {}, account, () -> marketOpen, null, alwaysBuy, null);
+        loop.run();
+
+        assertFalse(account.getPositions().containsKey("AAPL"),
+                "AAPL buy should be blocked when portfolio is at 63% capacity");
+        assertTrue(research.stream().anyMatch(m -> m.contains("portfolio at capacity")),
+                "Should log 'portfolio at capacity' skip message");
     }
 
     @Test

@@ -1,12 +1,15 @@
 package com.tradingapp.options;
 
 import com.tradingapp.account.Account;
+import com.tradingapp.account.OptionsPosition;
+import com.tradingapp.account.Position;
 import com.tradingapp.account.TransactionLog;
 import com.tradingapp.data.PriceHistory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -96,6 +99,119 @@ public class OptionsSignalRouterTest {
 
         assertTrue(account.getOptionsPositions().isEmpty(),
                 "No position should be opened when vol = 0");
+    }
+
+    @Test
+    void testCallClosedOnPremiumStopLoss() {
+        Account account = new Account();
+        TransactionLog log = new TransactionLog(tempDir.resolve("call_stop.db").toString());
+        OptionsSignalRouter router = buildRouter(account, log);
+
+        // Open a call ATM at $150
+        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"));
+
+        // Price collapses to $100 — the call is now deep OTM; premium drops well below 50% of paid
+        // No directional signals, so only the premium stop-loss should trigger the close
+        router.evaluate(SYMBOL, 100.0, 0, 0, "neutral", "");
+        assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
+                "CALL position should be closed when premium falls to 50% of cost");
+    }
+
+    @Test
+    void testPutClosedOnPremiumStopLoss() {
+        Account account = new Account();
+        TransactionLog log = new TransactionLog(tempDir.resolve("put_stop.db").toString());
+        OptionsSignalRouter router = buildRouter(account, log);
+
+        // Open a put ATM at $150
+        router.evaluate(SYMBOL, PRICE, 0, 2, "sell", "");
+        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_PUT"));
+
+        // Price surges to $200 — put is now deep OTM; premium drops well below 50% of paid
+        // No directional signals, so only the premium stop-loss should trigger the close
+        router.evaluate(SYMBOL, 200.0, 0, 0, "neutral", "");
+        assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_PUT"),
+                "PUT position should be closed when premium falls to 50% of cost");
+    }
+
+    @Test
+    void testCallNotClosedWhenPremiumAboveStop() {
+        Account account = new Account();
+        TransactionLog log = new TransactionLog(tempDir.resolve("call_hold.db").toString());
+        OptionsSignalRouter router = buildRouter(account, log);
+
+        // Open a call ATM at $150
+        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"));
+
+        // Price moves slightly against the position but not enough to trigger the 50% stop
+        router.evaluate(SYMBOL, 148.0, 0, 0, "neutral", "");
+        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
+                "CALL position should remain open when premium has not fallen 50%");
+    }
+
+    @Test
+    void testCallSkippedWhenPortfolioAtCapacity() {
+        Account account = new Account();
+        // 300 shares at $210 = $63,000 = 63% of $100k — exceeds 60% cap
+        account.addOrUpdatePosition("MSFT", 300, 210.0, Position.PositionType.STOCK);
+
+        TransactionLog log = new TransactionLog(tempDir.resolve("cap_opt.db").toString());
+        List<String> msgs = new ArrayList<>();
+        BlackScholesEngine bsEngine = new BlackScholesEngine();
+        OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, log);
+        OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, buildPriceHistory(), msgs::add);
+
+        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+
+        assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
+                "CALL should not open when portfolio is at 42% capacity");
+        assertTrue(msgs.stream().anyMatch(m -> m.contains("portfolio at capacity")),
+                "Should log portfolio at capacity message");
+    }
+
+    @Test
+    void testCallSkippedOnIVSurge() {
+        Account account = new Account();
+        TransactionLog log = new TransactionLog(tempDir.resolve("iv_surge.db").toString());
+        List<String> msgs = new ArrayList<>();
+        BlackScholesEngine bsEngine = new BlackScholesEngine();
+        OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, log);
+
+        // Build price history: 60 stable prices followed by 20 highly volatile prices.
+        // The recent-20 vol will be far above the full-history baseline, triggering the IV surge filter.
+        PriceHistory ph = new PriceHistory();
+        for (int i = 0; i < 60; i++) ph.record(SYMBOL, i % 2 == 0 ? 148.0 : 152.0, 1_000_000.0);
+        for (int i = 0; i < 20; i++) ph.record(SYMBOL, i % 2 == 0 ? 100.0 : 200.0, 1_000_000.0);
+
+        OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, ph, msgs::add);
+        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+
+        assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
+                "CALL should not open when IV is surging");
+        assertTrue(msgs.stream().anyMatch(m -> m.contains("IV surge")),
+                "Should log IV surge skip message");
+    }
+
+    @Test
+    void testCallNotSkippedWhenVolNormal() {
+        Account account = new Account();
+        TransactionLog log = new TransactionLog(tempDir.resolve("iv_normal.db").toString());
+        List<String> msgs = new ArrayList<>();
+        BlackScholesEngine bsEngine = new BlackScholesEngine();
+        OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, log);
+
+        // Uniform zigzag throughout — recent vol matches full-history baseline, no IV surge
+        PriceHistory ph = new PriceHistory();
+        for (int i = 0; i < 40; i++) ph.record(SYMBOL, i % 2 == 0 ? 148.0 : 152.0, 1_000_000.0);
+
+        OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, ph, msgs::add);
+        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+
+        // Should open (or be skipped for premium reasons), but never for IV surge
+        assertFalse(msgs.stream().anyMatch(m -> m.contains("IV surge")),
+                "IV surge filter should not fire when volatility is stable");
     }
 
     @Test

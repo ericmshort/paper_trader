@@ -36,6 +36,13 @@ public class Account {
 
     public synchronized void addRealizedPnL(double amount) { this.totalRealizedPnL += amount; }
 
+    public double totalExposureFraction() {
+        double equity = positions.values().stream().mapToDouble(Position::getMarketValue).sum();
+        double options = optionsPositions.values().stream()
+                .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts()).sum();
+        return (equity + options) / STARTING_BALANCE;
+    }
+
     public double getTotalUnrealizedPnL() {
         return positions.values().stream()
                 .mapToDouble(Position::getUnrealizedPnL)

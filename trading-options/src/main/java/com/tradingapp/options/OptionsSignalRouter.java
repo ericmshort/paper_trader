@@ -24,6 +24,9 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
     private static final double RISK_FREE_RATE = 0.04;
     private static final double MIN_PREMIUM = 0.10; // $0.10/share minimum; below this the contract is junk
+    private static final double MAX_PORTFOLIO_EXPOSURE = 0.60;
+    private static final double IV_SURGE_THRESHOLD = 1.5;
+    private static final int IV_WINDOW = 20;
 
     public OptionsSignalRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
                                Account account, PriceHistory priceHistory,
@@ -48,29 +51,37 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         String putKey  = symbol + "_PUT";
         Map<String, OptionsPosition> opts = account.getOptionsPositions();
 
-        // Close positions that have reversed or are near expiry
+        // Close positions that have reversed, are near expiry, or have lost 50% of premium
         if (opts.containsKey(callKey)) {
             OptionsPosition pos = opts.get(callKey);
-            if (sellSignals >= 2 || pos.daysToExpiry() < 3) {
-                double T = bsEngine.timeToExpiry(pos.getExpiry());
-                double sigma = computeVol(symbol);
-                double currentPremium = sigma > 0 && T > 0
-                        ? bsEngine.callPrice(price, pos.getStrike(), RISK_FREE_RATE, T, sigma)
-                        : 0.0;
-                String reason = pos.daysToExpiry() < 3 ? "Expiry <3 days" : "Signal reversal: SELL";
+            double T = bsEngine.timeToExpiry(pos.getExpiry());
+            double sigma = computeVol(symbol);
+            double currentPremium = sigma > 0 && T > 0
+                    ? bsEngine.callPrice(price, pos.getStrike(), RISK_FREE_RATE, T, sigma)
+                    : 0.0;
+            boolean premiumStop = currentPremium > 0 && currentPremium <= pos.getPremiumPaid() * 0.50;
+            if (sellSignals >= 2 || pos.daysToExpiry() < 3 || premiumStop) {
+                String reason;
+                if (pos.daysToExpiry() < 3) reason = "Expiry <3 days";
+                else if (premiumStop) reason = String.format("Premium stop-loss: %.2f <= 50%% of %.2f", currentPremium, pos.getPremiumPaid());
+                else reason = "Signal reversal: SELL";
                 optExec.closePosition(callKey, currentPremium, reason);
                 researchCallback.accept(symbol + " CALL closed: " + reason + " prem=" + String.format("%.2f", currentPremium));
             }
         }
         if (opts.containsKey(putKey)) {
             OptionsPosition pos = opts.get(putKey);
-            if (buySignals >= 2 || pos.daysToExpiry() < 3) {
-                double T = bsEngine.timeToExpiry(pos.getExpiry());
-                double sigma = computeVol(symbol);
-                double currentPremium = sigma > 0 && T > 0
-                        ? bsEngine.putPrice(price, pos.getStrike(), RISK_FREE_RATE, T, sigma)
-                        : 0.0;
-                String reason = pos.daysToExpiry() < 3 ? "Expiry <3 days" : "Signal reversal: BUY";
+            double T = bsEngine.timeToExpiry(pos.getExpiry());
+            double sigma = computeVol(symbol);
+            double currentPremium = sigma > 0 && T > 0
+                    ? bsEngine.putPrice(price, pos.getStrike(), RISK_FREE_RATE, T, sigma)
+                    : 0.0;
+            boolean premiumStop = currentPremium > 0 && currentPremium <= pos.getPremiumPaid() * 0.50;
+            if (buySignals >= 2 || pos.daysToExpiry() < 3 || premiumStop) {
+                String reason;
+                if (pos.daysToExpiry() < 3) reason = "Expiry <3 days";
+                else if (premiumStop) reason = String.format("Premium stop-loss: %.2f <= 50%% of %.2f", currentPremium, pos.getPremiumPaid());
+                else reason = "Signal reversal: BUY";
                 optExec.closePosition(putKey, currentPremium, reason);
                 researchCallback.accept(symbol + " PUT closed: " + reason + " prem=" + String.format("%.2f", currentPremium));
             }
@@ -81,10 +92,25 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         List<Double> prices = priceHistory.getPrices(symbol);
         if (prices.size() < 2) return;
 
+        if (account.totalExposureFraction() >= MAX_PORTFOLIO_EXPOSURE) {
+            researchCallback.accept(symbol + " options skip: portfolio at capacity ("
+                    + String.format("%.0f%%", account.totalExposureFraction() * 100) + " deployed)");
+            return;
+        }
+
         double sigma = bsEngine.historicalVol(prices);
         if (sigma == 0.0) {
             researchCallback.accept(symbol + " options skip: vol=0");
             return;
+        }
+
+        if (prices.size() >= IV_WINDOW + 2) {
+            double recentVol = bsEngine.historicalVol(prices.subList(prices.size() - IV_WINDOW, prices.size()));
+            if (recentVol > sigma * IV_SURGE_THRESHOLD) {
+                researchCallback.accept(symbol + " options skip: IV surge " + String.format("%.2f", recentVol)
+                        + " > " + String.format("%.2f", sigma * IV_SURGE_THRESHOLD));
+                return;
+            }
         }
         LocalDate expiry = bsEngine.nextMonthlyExpiry();
         double K = bsEngine.roundStrike(price);
