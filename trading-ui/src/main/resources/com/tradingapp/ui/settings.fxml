@@ -63,6 +63,21 @@
 
     <Separator/>
 
+    <!-- Risk settings section -->
+    <Label text="Risk Controls"
+           style="-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #aaaaaa;"/>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Daily Loss Limit:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="dailyLossLimitField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="5.0"/>
+        <Label text="% of portfolio value (0 = disabled)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+    </HBox>
+
+    <Separator/>
+
     <!-- Actions -->
     <HBox spacing="12" alignment="CENTER_LEFT">
         <Button fx:id="testConnectionButton" text="Test Connection"

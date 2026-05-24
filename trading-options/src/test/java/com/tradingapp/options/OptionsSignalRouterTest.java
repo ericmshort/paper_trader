@@ -215,6 +215,59 @@ public class OptionsSignalRouterTest {
     }
 
     @Test
+    void testCallClosedOnProfitTarget() {
+        Account account = new Account();
+        TransactionLog log = new TransactionLog(tempDir.resolve("call_profit.db").toString());
+        OptionsSignalRouter router = buildRouter(account, log);
+
+        // Open a call ATM at $150
+        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"));
+
+        // Price surges to $250 — deeply ITM; premium is far above 2x of original
+        // No directional signals, so only the profit target should close it
+        router.evaluate(SYMBOL, 250.0, 0, 0, "neutral", "");
+        assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
+                "CALL position should be closed when premium reaches 2x of cost");
+    }
+
+    @Test
+    void testPutClosedOnProfitTarget() {
+        Account account = new Account();
+        TransactionLog log = new TransactionLog(tempDir.resolve("put_profit.db").toString());
+        OptionsSignalRouter router = buildRouter(account, log);
+
+        // Open a put ATM at $150
+        router.evaluate(SYMBOL, PRICE, 0, 2, "sell", "");
+        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_PUT"));
+
+        // Price collapses to $50 — deeply ITM put; premium far above 2x of original
+        // No directional signals, so only the profit target should close it
+        router.evaluate(SYMBOL, 50.0, 0, 0, "neutral", "");
+        assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_PUT"),
+                "PUT position should be closed when premium reaches 2x of cost");
+    }
+
+    @Test
+    void testOptionsSkippedWhenDailyLossHalted() {
+        Account account = new Account();
+        account.setDailyLossHalted(true);
+
+        TransactionLog log = new TransactionLog(tempDir.resolve("daily_loss_opt.db").toString());
+        List<String> msgs = new ArrayList<>();
+        BlackScholesEngine bsEngine = new BlackScholesEngine();
+        OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, log);
+        OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, buildPriceHistory(), msgs::add);
+
+        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+
+        assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
+                "CALL should not open when daily loss limit is active");
+        assertTrue(msgs.stream().anyMatch(m -> m.contains("daily loss limit active")),
+                "Should log daily loss limit skip message");
+    }
+
+    @Test
     void testNoTradeInsufficientPriceHistory() {
         Account account = new Account();
         TransactionLog log = new TransactionLog(tempDir.resolve("hist.db").toString());

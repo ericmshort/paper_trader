@@ -199,6 +199,7 @@ public class DashboardController implements Initializable {
                 new IndicatorEngine(), new TrailingStopMonitor(), brokerClient, feeCalc,
                 LargeCapWatchList.SYMBOLS, researchCb, uiRefresh, account,
                 optionsRouter, mlEval, trainingCallback);
+        tradingLoop.setDailyLossLimitPct(appConfig.getDailyLossLimitPct() / 100.0);
 
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "trading-loop");

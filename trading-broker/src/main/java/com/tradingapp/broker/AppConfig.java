@@ -19,6 +19,7 @@ public class AppConfig {
     private String alpacaApiKey = "";
     private String alpacaApiSecret = "";
     private QuoteProviderType quoteProviderType = QuoteProviderType.YAHOO;
+    private double dailyLossLimitPct = 5.0;
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
@@ -34,6 +35,10 @@ public class AppConfig {
             try {
                 config.quoteProviderType = QuoteProviderType.valueOf(props.getProperty("quote.provider", "YAHOO"));
             } catch (IllegalArgumentException ignored) {}
+            try {
+                config.dailyLossLimitPct = Double.parseDouble(
+                        props.getProperty("risk.daily_loss_limit_pct", "5.0"));
+            } catch (NumberFormatException ignored) {}
         } catch (IOException ignored) {}
         return config;
     }
@@ -46,6 +51,7 @@ public class AppConfig {
             props.setProperty("broker.alpaca.api_key", alpacaApiKey);
             props.setProperty("broker.alpaca.api_secret", alpacaApiSecret);
             props.setProperty("quote.provider", quoteProviderType.name());
+            props.setProperty("risk.daily_loss_limit_pct", String.valueOf(dailyLossLimitPct));
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
             }
@@ -65,6 +71,9 @@ public class AppConfig {
 
     public QuoteProviderType getQuoteProviderType() { return quoteProviderType; }
     public void setQuoteProviderType(QuoteProviderType type) { this.quoteProviderType = type; }
+
+    public double getDailyLossLimitPct() { return dailyLossLimitPct; }
+    public void setDailyLossLimitPct(double pct) { this.dailyLossLimitPct = pct; }
 
     public boolean isAlpacaBroker() {
         return brokerType == BrokerType.ALPACA_PAPER || brokerType == BrokerType.ALPACA_LIVE;

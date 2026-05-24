@@ -174,6 +174,55 @@ public class TradingLoopTest {
     }
 
     @Test
+    void testBuySkippedWhenDailyLossLimitReached() throws Exception {
+        List<String> research = new ArrayList<>();
+        ZonedDateTime marketOpen = ZonedDateTime.of(2026, 5, 15, 10, 0, 0, 0, ET);
+
+        Account account = new Account();
+        // 100 shares of MSFT at avg cost $200 — no balance deducted (manual setup)
+        account.addOrUpdatePosition("MSFT", 100, 200.0, Position.PositionType.STOCK);
+        // Day-start value = $100,000 balance + $0 unrealized = $100,000
+        // When MSFT drops to $100: unrealized = (100-200)*100 = -$10,000 → 10% loss → exceeds 5% limit
+
+        SafetyStop safety = new SafetyStop(account);
+        TransactionLog log = new TransactionLog(tempDir.resolve("daily_loss.db").toString());
+        FeeCalculator fees = new FeeCalculator();
+        BrokerClient broker = new SimulatedBroker(new OrderExecutor(account, safety, log, fees));
+
+        QuoteProvider quotes = new QuoteProvider() {
+            @Override public QuoteModel getQuote(String symbol) {
+                double price = symbol.equals("MSFT") ? 100.0 : 150.0;
+                return QuoteModel.fromLive(symbol, price, 1_000_000L, System.currentTimeMillis());
+            }
+            @Override public List<QuoteModel> getQuotes(List<String> symbols) {
+                return symbols.stream().map(this::getQuote).collect(Collectors.toList());
+            }
+            @Override public OptionsChain getOptionsChain(String symbol, LocalDate expiry) { return null; }
+            @Override public List<com.tradingapp.data.HistoricalBar> getHistoricalBars(String symbol, LocalDate start, LocalDate end) { return List.of(); }
+            @Override public String getName() { return "test"; }
+            @Override public LocalDate getEarliestBacktestDate() { return LocalDate.of(2020, 1, 1); }
+        };
+
+        SignalWeightEvaluator alwaysBuy = new SignalWeightEvaluator() {
+            @Override public double weightedBuyScore(List<SignalResult> signals) { return 2.0; }
+            @Override public double weightedSellScore(List<SignalResult> signals) { return 0.0; }
+        };
+
+        TradingLoop loop = new TradingLoop(quotes, new PriceHistory(), new IndicatorEngine(),
+                new TrailingStopMonitor(), broker, fees, List.of("MSFT", "AAPL"),
+                research::add, () -> {}, account, () -> marketOpen, null, alwaysBuy, null);
+        loop.setDailyLossLimitPct(0.05);
+        loop.run();
+
+        assertFalse(account.getPositions().containsKey("AAPL"),
+                "AAPL buy should be blocked after MSFT triggers the daily loss limit");
+        assertTrue(research.stream().anyMatch(m -> m.contains("DAILY LOSS LIMIT")),
+                "Should log daily loss limit message");
+        assertTrue(research.stream().anyMatch(m -> m.contains("daily loss limit active")),
+                "Should log buy-skipped message for subsequent symbols");
+    }
+
+    @Test
     void testNoTradeWhenOnlyOneBuySignal() throws Exception {
         List<String> research = new ArrayList<>();
         ZonedDateTime marketOpen = ZonedDateTime.of(2026, 5, 15, 10, 0, 0, 0, ET);

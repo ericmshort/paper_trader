@@ -80,6 +80,29 @@ public class AccountTest {
     }
 
     @Test
+    void testDailyLossHaltedDefaultsFalse() {
+        Account account = new Account();
+        assertFalse(account.isDailyLossHalted(), "Daily loss halt should be false on a new account");
+    }
+
+    @Test
+    void testDailyLossHaltedSetAndClear() {
+        Account account = new Account();
+        account.setDailyLossHalted(true);
+        assertTrue(account.isDailyLossHalted());
+        account.setDailyLossHalted(false);
+        assertFalse(account.isDailyLossHalted());
+    }
+
+    @Test
+    void testDailyLossHaltedResetOnAccountReset() {
+        Account account = new Account();
+        account.setDailyLossHalted(true);
+        account.reset(Account.STARTING_BALANCE);
+        assertFalse(account.isDailyLossHalted(), "reset() should clear the daily loss halt");
+    }
+
+    @Test
     void testSafetyStopIdempotent() {
         Account account = new Account();
         account.setBalance(0.0);

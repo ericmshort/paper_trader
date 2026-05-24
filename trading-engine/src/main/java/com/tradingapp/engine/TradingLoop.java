@@ -38,6 +38,9 @@ public class TradingLoop implements Runnable {
     private final SignalWeightEvaluator weightEvaluator;
     private final Runnable afterMarketCallback;
     private LocalDate lastTrainingDate;
+    private double dailyLossLimitPct = 0.05;
+    private double dayStartValue = -1;
+    private LocalDate lastDayTrackingDate;
 
     public TradingLoop(QuoteProvider dataClient, PriceHistory priceHistory,
                        IndicatorEngine indicators, TrailingStopMonitor trailingStop,
@@ -116,6 +119,8 @@ public class TradingLoop implements Runnable {
         this.afterMarketCallback = afterMarketCallback;
     }
 
+    public void setDailyLossLimitPct(double pct) { this.dailyLossLimitPct = pct; }
+
     @Override
     public void run() {
         try {
@@ -131,6 +136,12 @@ public class TradingLoop implements Runnable {
                 }
                 return;
             }
+            LocalDate today = now.toLocalDate();
+            if (!today.equals(lastDayTrackingDate)) {
+                lastDayTrackingDate = today;
+                dayStartValue = account.getBalance() + account.getTotalUnrealizedPnL();
+                account.setDailyLossHalted(false);
+            }
             if (account.isTradingHalted()) {
                 researchCallback.accept("TRADING HALTED — balance below $100.");
                 return;
@@ -142,6 +153,16 @@ public class TradingLoop implements Runnable {
                 double price = quote.getPrice();
                 double volume = quote.getVolume();
                 priceHistory.record(symbol, price, volume);
+                account.updatePositionPrice(symbol, price);
+                if (!account.isDailyLossHalted() && dailyLossLimitPct > 0 && dayStartValue > 0) {
+                    double currentValue = account.getBalance() + account.getTotalUnrealizedPnL();
+                    if (currentValue < dayStartValue * (1 - dailyLossLimitPct)) {
+                        account.setDailyLossHalted(true);
+                        researchCallback.accept(String.format(
+                                "DAILY LOSS LIMIT (%.0f%%) reached — no new positions for the rest of the session",
+                                dailyLossLimitPct * 100));
+                    }
+                }
                 List<Double> prices = priceHistory.getPrices(symbol);
                 List<Double> volumes = priceHistory.getVolumes(symbol);
                 List<SignalResult> signals = indicators.evaluateAll(prices, volumes, price);
@@ -166,6 +187,8 @@ public class TradingLoop implements Runnable {
                     if (account.totalExposureFraction() >= MAX_PORTFOLIO_EXPOSURE) {
                         researchCallback.accept(symbol + " BUY skipped: portfolio at capacity ("
                                 + String.format("%.0f%%", account.totalExposureFraction() * 100) + " deployed)");
+                    } else if (account.isDailyLossHalted()) {
+                        researchCallback.accept(symbol + " BUY skipped: daily loss limit active");
                     } else {
                         int shares = fees.maxShares(account.getBalance(), price);
                         if (shares > 0) {

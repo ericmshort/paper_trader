@@ -27,6 +27,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private static final double MAX_PORTFOLIO_EXPOSURE = 0.60;
     private static final double IV_SURGE_THRESHOLD = 1.5;
     private static final int IV_WINDOW = 20;
+    private static final double PROFIT_TARGET = 2.0;
 
     public OptionsSignalRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
                                Account account, PriceHistory priceHistory,
@@ -60,9 +61,11 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                     ? bsEngine.callPrice(price, pos.getStrike(), RISK_FREE_RATE, T, sigma)
                     : 0.0;
             boolean premiumStop = currentPremium > 0 && currentPremium <= pos.getPremiumPaid() * 0.50;
-            if (sellSignals >= 2 || pos.daysToExpiry() < 3 || premiumStop) {
+            boolean profitTarget = currentPremium >= pos.getPremiumPaid() * PROFIT_TARGET;
+            if (sellSignals >= 2 || pos.daysToExpiry() < 3 || premiumStop || profitTarget) {
                 String reason;
                 if (pos.daysToExpiry() < 3) reason = "Expiry <3 days";
+                else if (profitTarget) reason = String.format("Profit target: %.2f >= 2x of %.2f", currentPremium, pos.getPremiumPaid());
                 else if (premiumStop) reason = String.format("Premium stop-loss: %.2f <= 50%% of %.2f", currentPremium, pos.getPremiumPaid());
                 else reason = "Signal reversal: SELL";
                 optExec.closePosition(callKey, currentPremium, reason);
@@ -77,9 +80,11 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                     ? bsEngine.putPrice(price, pos.getStrike(), RISK_FREE_RATE, T, sigma)
                     : 0.0;
             boolean premiumStop = currentPremium > 0 && currentPremium <= pos.getPremiumPaid() * 0.50;
-            if (buySignals >= 2 || pos.daysToExpiry() < 3 || premiumStop) {
+            boolean profitTarget = currentPremium >= pos.getPremiumPaid() * PROFIT_TARGET;
+            if (buySignals >= 2 || pos.daysToExpiry() < 3 || premiumStop || profitTarget) {
                 String reason;
                 if (pos.daysToExpiry() < 3) reason = "Expiry <3 days";
+                else if (profitTarget) reason = String.format("Profit target: %.2f >= 2x of %.2f", currentPremium, pos.getPremiumPaid());
                 else if (premiumStop) reason = String.format("Premium stop-loss: %.2f <= 50%% of %.2f", currentPremium, pos.getPremiumPaid());
                 else reason = "Signal reversal: BUY";
                 optExec.closePosition(putKey, currentPremium, reason);
@@ -95,6 +100,11 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (account.totalExposureFraction() >= MAX_PORTFOLIO_EXPOSURE) {
             researchCallback.accept(symbol + " options skip: portfolio at capacity ("
                     + String.format("%.0f%%", account.totalExposureFraction() * 100) + " deployed)");
+            return;
+        }
+
+        if (account.isDailyLossHalted()) {
+            researchCallback.accept(symbol + " options skip: daily loss limit active");
             return;
         }
 

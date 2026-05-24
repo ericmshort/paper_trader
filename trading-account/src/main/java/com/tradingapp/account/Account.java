@@ -14,6 +14,7 @@ public class Account {
     private final Map<String, OptionsPosition> optionsPositions;
     private volatile double totalRealizedPnL;
     private volatile boolean tradingHalted;
+    private volatile boolean dailyLossHalted;
 
     public Account() {
         this.balance = STARTING_BALANCE;
@@ -29,6 +30,8 @@ public class Account {
     public Map<String, OptionsPosition> getOptionsPositions() { return Collections.unmodifiableMap(optionsPositions); }
     public double getTotalRealizedPnL() { return totalRealizedPnL; }
     public boolean isTradingHalted() { return tradingHalted; }
+    public boolean isDailyLossHalted() { return dailyLossHalted; }
+    public void setDailyLossHalted(boolean v) { this.dailyLossHalted = v; }
 
     public void setBalance(double balance) { this.balance = balance; }
     public void setBuyingPower(double buyingPower) { this.buyingPower = buyingPower; }
@@ -80,5 +83,6 @@ public class Account {
         this.optionsPositions.clear();
         this.totalRealizedPnL = 0.0;
         this.tradingHalted = false;
+        this.dailyLossHalted = false;
     }
 }

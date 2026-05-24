@@ -24,6 +24,7 @@ public class SettingsController implements Initializable {
     @FXML private TextField baseUrlField;
     @FXML private ComboBox<String> quoteProviderCombo;
     @FXML private Label quoteProviderNote;
+    @FXML private TextField dailyLossLimitField;
     @FXML private Button testConnectionButton;
     @FXML private Label statusLabel;
 
@@ -62,6 +63,7 @@ public class SettingsController implements Initializable {
         apiSecretField.setText(cfg.getAlpacaApiSecret());
         quoteProviderCombo.setValue(cfg.getQuoteProviderType() == AppConfig.QuoteProviderType.ALPACA
                 ? "Alpaca" : "Yahoo Finance");
+        dailyLossLimitField.setText(String.valueOf(cfg.getDailyLossLimitPct()));
         updateAlpacaFieldVisibility();
         updateQuoteNote();
     }
@@ -188,6 +190,10 @@ public class SettingsController implements Initializable {
         cfg.setQuoteProviderType("Alpaca".equals(quoteProviderCombo.getValue())
                 ? AppConfig.QuoteProviderType.ALPACA
                 : AppConfig.QuoteProviderType.YAHOO);
+        try {
+            double limit = Double.parseDouble(dailyLossLimitField.getText().strip());
+            cfg.setDailyLossLimitPct(Math.max(0, limit));
+        } catch (NumberFormatException ignored) {}
         return cfg;
     }
 
