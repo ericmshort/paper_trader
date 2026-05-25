@@ -94,6 +94,21 @@ public class OrderExecutorTest {
     }
 
     @Test
+    void testSellRecordsRealizedPnL() throws Exception {
+        Account account = new Account();
+        SafetyStop safety = new SafetyStop(account);
+        TransactionLog log = buildLog();
+        OrderExecutor executor = new OrderExecutor(account, safety, log, new FeeCalculator());
+
+        executor.buy("AAPL", 10, 150.0, "RSI=28", "RSI oversold");
+        executor.sell("AAPL", 10, 160.0, "RSI=72", "RSI overbought");
+
+        // profit = (160 - 150.02) * 10 - 0.10 fee = $99.70
+        assertTrue(account.getTotalRealizedPnL() > 0,
+                "Realized P&L should be positive after a profitable sell");
+    }
+
+    @Test
     void testBuyRefusedWhenBalanceBelowStop() throws Exception {
         Account account = new Account();
         account.setBalance(0.0);

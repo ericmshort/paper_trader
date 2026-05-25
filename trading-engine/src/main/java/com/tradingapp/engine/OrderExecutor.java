@@ -46,6 +46,10 @@ public class OrderExecutor {
         if (safetyStop.check()) return null;
         double fee = fees.calculateFee(shares);
         double proceeds = shares * price - fee;
+        Position pos = account.getPositions().get(symbol);
+        if (pos != null) {
+            account.addRealizedPnL((price - pos.getAverageCost()) * shares - fee);
+        }
         account.setBalance(account.getBalance() + proceeds);
         account.removePosition(symbol);
         TransactionRecord r = new TransactionRecord(symbol, TransactionRecord.TransactionAction.SELL,

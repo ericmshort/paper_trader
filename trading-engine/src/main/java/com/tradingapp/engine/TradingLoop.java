@@ -178,10 +178,12 @@ public class TradingLoop implements Runnable {
                 if (trailingStop.check(symbol, price) && hasPosition) {
                     Position pos = account.getPositions().get(symbol);
                     brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Trailing stop: 5% drawdown from peak");
+                    trailingStop.reset(symbol);
                     uiRefreshCallback.run();
                 } else if (weightedSells >= SIGNAL_THRESHOLD && hasPosition) {
                     Position pos = account.getPositions().get(symbol);
                     brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Signals: " + sells + "/" + signals.size() + " SELL");
+                    trailingStop.reset(symbol);
                     uiRefreshCallback.run();
                 } else if (weightedBuys >= SIGNAL_THRESHOLD && !hasPosition) {
                     if (account.totalExposureFraction() >= MAX_PORTFOLIO_EXPOSURE) {

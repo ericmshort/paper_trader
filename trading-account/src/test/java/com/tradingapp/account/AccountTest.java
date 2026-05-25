@@ -55,17 +55,21 @@ public class AccountTest {
     @Test
     void testTotalExposureFractionEquityOnly() {
         Account account = new Account();
-        // 200 shares at $210 = $42,000 = 42% of $100k starting balance
+        // 200 shares at $210 = $42,000; deduct from balance to simulate realistic state
         account.addOrUpdatePosition("MSFT", 200, 210.0, Position.PositionType.STOCK);
+        account.setBalance(100_000.0 - 42_000.0); // $58,000
+        // $42,000 / ($58,000 + $42,000) = 42%
         assertEquals(0.42, account.totalExposureFraction(), 0.001);
     }
 
     @Test
     void testTotalExposureFractionOptionsOnly() {
         Account account = new Account();
-        // 5 contracts, $2.00 premium = 5 * 2.00 * 100 = $1,000 = 1% of $100k
+        // 5 contracts × $2.00 × 100 = $1,000; deduct from balance
         account.addOptionsPosition("AAPL_CALL",
                 new OptionsPosition("AAPL", "CALL", 150.0, LocalDate.now().plusMonths(1), 5, 2.00));
+        account.setBalance(100_000.0 - 1_000.0); // $99,000
+        // $1,000 / ($99,000 + $1,000) = 1%
         assertEquals(0.01, account.totalExposureFraction(), 0.001);
     }
 
@@ -75,7 +79,8 @@ public class AccountTest {
         account.addOrUpdatePosition("AAPL", 100, 150.0, Position.PositionType.STOCK);   // $15,000
         account.addOptionsPosition("AAPL_CALL",
                 new OptionsPosition("AAPL", "CALL", 150.0, LocalDate.now().plusMonths(1), 10, 1.00)); // $1,000
-        // $16,000 / $100,000 = 16%
+        account.setBalance(100_000.0 - 16_000.0); // $84,000
+        // $16,000 / ($84,000 + $16,000) = 16%
         assertEquals(0.16, account.totalExposureFraction(), 0.001);
     }
 

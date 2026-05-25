@@ -43,7 +43,9 @@ public class Account {
         double equity = positions.values().stream().mapToDouble(Position::getMarketValue).sum();
         double options = optionsPositions.values().stream()
                 .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts()).sum();
-        return (equity + options) / STARTING_BALANCE;
+        double totalPortfolioValue = balance + equity + options;
+        if (totalPortfolioValue <= 0) return 1.0;
+        return (equity + options) / totalPortfolioValue;
     }
 
     public double getTotalUnrealizedPnL() {

@@ -154,8 +154,9 @@ public class OptionsSignalRouterTest {
     @Test
     void testCallSkippedWhenPortfolioAtCapacity() {
         Account account = new Account();
-        // 300 shares at $210 = $63,000 = 63% of $100k — exceeds 60% cap
+        // 300 shares at $210 = $63,000; deduct from balance so 63k/(37k+63k) = 63% > 60% cap
         account.addOrUpdatePosition("MSFT", 300, 210.0, Position.PositionType.STOCK);
+        account.setBalance(37_000.0);
 
         TransactionLog log = new TransactionLog(tempDir.resolve("cap_opt.db").toString());
         List<String> msgs = new ArrayList<>();
@@ -265,6 +266,44 @@ public class OptionsSignalRouterTest {
                 "CALL should not open when daily loss limit is active");
         assertTrue(msgs.stream().anyMatch(m -> m.contains("daily loss limit active")),
                 "Should log daily loss limit skip message");
+    }
+
+    @Test
+    void testCallSkippedWhenEquityPositionAlreadyOpen() {
+        Account account = new Account();
+        // Equity position already open for AAPL — CALL should be blocked (double-dip prevention)
+        account.addOrUpdatePosition(SYMBOL, 100, PRICE, Position.PositionType.STOCK);
+
+        TransactionLog log = new TransactionLog(tempDir.resolve("dbl_dip.db").toString());
+        List<String> msgs = new ArrayList<>();
+        BlackScholesEngine bsEngine = new BlackScholesEngine();
+        OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, log);
+        OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, buildPriceHistory(), msgs::add);
+
+        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+
+        assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
+                "CALL should be blocked when equity position is already open (double-dip)");
+        assertTrue(msgs.stream().anyMatch(m -> m.contains("equity position already open")),
+                "Should log double-dip skip message");
+    }
+
+    @Test
+    void testPutAllowedAsProtectiveHedgeWhenEquityOpen() {
+        Account account = new Account();
+        // Equity position open — PUT should still be allowed as a protective hedge
+        account.addOrUpdatePosition(SYMBOL, 100, PRICE, Position.PositionType.STOCK);
+
+        TransactionLog log = new TransactionLog(tempDir.resolve("prot_put.db").toString());
+        List<String> msgs = new ArrayList<>();
+        BlackScholesEngine bsEngine = new BlackScholesEngine();
+        OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, log);
+        OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, buildPriceHistory(), msgs::add);
+
+        router.evaluate(SYMBOL, PRICE, 0, 2, "sell", "");
+
+        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_PUT"),
+                "PUT should be allowed as protective hedge when equity position is open");
     }
 
     @Test

@@ -135,8 +135,9 @@ public class TradingLoopTest {
         ZonedDateTime marketOpen = ZonedDateTime.of(2026, 5, 15, 10, 0, 0, 0, ET);
 
         Account account = new Account();
-        // 300 shares of MSFT at $210 = $63,000 = 63% of $100k starting balance — exceeds 60% cap
+        // 300 shares of MSFT at $210 = $63,000; deduct from balance so 63k/(37k+63k) = 63% > 60% cap
         account.addOrUpdatePosition("MSFT", 300, 210.0, Position.PositionType.STOCK);
+        account.setBalance(37_000.0);
 
         SafetyStop safety = new SafetyStop(account);
         TransactionLog log = new TransactionLog(tempDir.resolve("cap.db").toString());

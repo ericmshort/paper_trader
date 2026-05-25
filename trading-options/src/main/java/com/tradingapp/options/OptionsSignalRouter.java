@@ -128,40 +128,48 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (T <= 0) return;
 
         if (buySignals >= 2 && !opts.containsKey(callKey)) {
-            double bsPremium = bsEngine.callPrice(price, K, RISK_FREE_RATE, T, sigma);
-            if (bsPremium < MIN_PREMIUM) {
-                researchCallback.accept(symbol + " CALL skip: premium too low (" + String.format("%.4f", bsPremium) + ")");
-                return;
-            }
-            double premium = bsPremium;
-            String priceSource = "BS";
-            if (dataClient != null) {
-                OptionsChain chain = dataClient.getOptionsChain(symbol, expiry);
-                OptionsQuote quote = chain.getCall(K);
-                if (quote != null && quote.isValid()) {
-                    if (!quote.isLiquid()) {
-                        researchCallback.accept(symbol + " CALL skip: illiquid " + quote.liquidityInfo());
-                        return;
-                    }
-                    premium = quote.getAsk();
-                    priceSource = "mkt " + quote.liquidityInfo();
+            if (account.getPositions().containsKey(symbol)) {
+                researchCallback.accept(symbol + " CALL skip: equity position already open (avoid double-dip)");
+            } else {
+                double bsPremium = bsEngine.callPrice(price, K, RISK_FREE_RATE, T, sigma);
+                if (bsPremium < MIN_PREMIUM) {
+                    researchCallback.accept(symbol + " CALL skip: premium too low (" + String.format("%.4f", bsPremium) + ")");
+                    return;
                 }
-            }
-            if (premium < MIN_PREMIUM) {
-                researchCallback.accept(symbol + " CALL skip: market ask too low (" + String.format("%.4f", premium) + ")");
-                return;
-            }
-            int contracts = Math.min(5, (int) (account.getBalance() * 0.05 / (premium * 100)));
-            if (contracts >= 1) {
-                optExec.buyCall(symbol, K, expiry, contracts, premium, signalStr, featureCsv);
-                GreeksResult g = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, true);
-                researchCallback.accept(symbol + " CALL K=" + K + " exp=" + expiry
-                        + " x" + contracts + " ask=" + String.format("%.2f", premium) + " [" + priceSource + "]"
-                        + " | " + g.toString());
+                double premium = bsPremium;
+                String priceSource = "BS";
+                if (dataClient != null) {
+                    OptionsChain chain = dataClient.getOptionsChain(symbol, expiry);
+                    OptionsQuote quote = chain.getCall(K);
+                    if (quote != null && quote.isValid()) {
+                        if (!quote.isLiquid()) {
+                            researchCallback.accept(symbol + " CALL skip: illiquid " + quote.liquidityInfo());
+                            return;
+                        }
+                        premium = quote.getAsk();
+                        priceSource = "mkt " + quote.liquidityInfo();
+                    }
+                }
+                if (premium < MIN_PREMIUM) {
+                    researchCallback.accept(symbol + " CALL skip: market ask too low (" + String.format("%.4f", premium) + ")");
+                    return;
+                }
+                int contracts = Math.min(5, (int) (account.getBalance() * 0.05 / (premium * 100)));
+                if (contracts >= 1) {
+                    optExec.buyCall(symbol, K, expiry, contracts, premium, signalStr, featureCsv);
+                    GreeksResult g = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, true);
+                    researchCallback.accept(symbol + " CALL K=" + K + " exp=" + expiry
+                            + " x" + contracts + " ask=" + String.format("%.2f", premium) + " [" + priceSource + "]"
+                            + " | " + g.toString());
+                }
             }
         }
 
         if (sellSignals >= 2 && !opts.containsKey(putKey)) {
+            // Protective put on existing equity uses half the normal budget to avoid over-exposure
+            double optionsBudget = account.getPositions().containsKey(symbol)
+                    ? account.getBalance() * 0.025
+                    : account.getBalance() * 0.05;
             double bsPremium = bsEngine.putPrice(price, K, RISK_FREE_RATE, T, sigma);
             if (bsPremium < MIN_PREMIUM) {
                 researchCallback.accept(symbol + " PUT skip: premium too low (" + String.format("%.4f", bsPremium) + ")");
@@ -185,7 +193,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                 researchCallback.accept(symbol + " PUT skip: market ask too low (" + String.format("%.4f", premium) + ")");
                 return;
             }
-            int contracts = Math.min(5, (int) (account.getBalance() * 0.05 / (premium * 100)));
+            int contracts = Math.min(5, (int) (optionsBudget / (premium * 100)));
             if (contracts >= 1) {
                 optExec.buyPut(symbol, K, expiry, contracts, premium, signalStr, featureCsv);
                 GreeksResult g = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, false);
