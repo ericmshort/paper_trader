@@ -4,6 +4,7 @@ import com.tradingapp.account.Account;
 import com.tradingapp.account.Position;
 import com.tradingapp.account.SafetyStop;
 import com.tradingapp.account.TransactionLog;
+import com.tradingapp.data.EarningsCalendar;
 import com.tradingapp.data.OptionsChain;
 import com.tradingapp.data.PriceHistory;
 import com.tradingapp.data.QuoteModel;
@@ -221,6 +222,114 @@ public class TradingLoopTest {
                 "Should log daily loss limit message");
         assertTrue(research.stream().anyMatch(m -> m.contains("daily loss limit active")),
                 "Should log buy-skipped message for subsequent symbols");
+    }
+
+    private QuoteProvider singleQuoteProvider(String symbol, double price) {
+        return new QuoteProvider() {
+            @Override public QuoteModel getQuote(String s) {
+                return QuoteModel.fromLive(s, price, 1_000_000L, System.currentTimeMillis());
+            }
+            @Override public List<QuoteModel> getQuotes(List<String> symbols) {
+                return symbols.stream().map(this::getQuote).collect(Collectors.toList());
+            }
+            @Override public OptionsChain getOptionsChain(String s, LocalDate expiry) { return null; }
+            @Override public List<com.tradingapp.data.HistoricalBar> getHistoricalBars(String s, LocalDate start, LocalDate end) { return List.of(); }
+            @Override public String getName() { return "test"; }
+            @Override public LocalDate getEarliestBacktestDate() { return LocalDate.of(2020, 1, 1); }
+        };
+    }
+
+    @Test
+    void testPreClosePositionLiquidated() throws Exception {
+        List<String> research = new ArrayList<>();
+        ZonedDateTime preClose = ZonedDateTime.of(2026, 5, 15, 15, 50, 0, 0, ET);
+
+        Account account = new Account();
+        account.addOrUpdatePosition("AAPL", 10, 150.0, Position.PositionType.STOCK);
+        account.setBalance(100_000.0 - 1_500.0);
+
+        SafetyStop safety = new SafetyStop(account);
+        TransactionLog log = new TransactionLog(tempDir.resolve("preclose.db").toString());
+        FeeCalculator fees = new FeeCalculator();
+        BrokerClient broker = new SimulatedBroker(new OrderExecutor(account, safety, log, fees));
+
+        TradingLoop loop = new TradingLoop(singleQuoteProvider("AAPL", 152.0),
+                new PriceHistory(), new IndicatorEngine(), new TrailingStopMonitor(),
+                broker, fees, List.of("AAPL"), research::add, () -> {}, account,
+                () -> preClose, null, null, null);
+        loop.setAvoidOvernightHolds(true);
+        loop.run();
+
+        assertFalse(account.getPositions().containsKey("AAPL"),
+                "AAPL position should be liquidated in pre-close sweep");
+        assertTrue(research.stream().anyMatch(m -> m.contains("overnight avoidance")),
+                "Should log overnight avoidance message");
+    }
+
+    @Test
+    void testPreCloseNotFiredBeforeCutoff() throws Exception {
+        List<String> research = new ArrayList<>();
+        ZonedDateTime beforeCutoff = ZonedDateTime.of(2026, 5, 15, 15, 40, 0, 0, ET);
+
+        Account account = new Account();
+        account.addOrUpdatePosition("AAPL", 10, 150.0, Position.PositionType.STOCK);
+        account.setBalance(100_000.0 - 1_500.0);
+
+        SafetyStop safety = new SafetyStop(account);
+        TransactionLog log = new TransactionLog(tempDir.resolve("before_cutoff.db").toString());
+        FeeCalculator fees = new FeeCalculator();
+        BrokerClient broker = new SimulatedBroker(new OrderExecutor(account, safety, log, fees));
+
+        SignalWeightEvaluator noSignals = new SignalWeightEvaluator() {
+            @Override public double weightedBuyScore(List<SignalResult> s) { return 0.0; }
+            @Override public double weightedSellScore(List<SignalResult> s) { return 0.0; }
+        };
+
+        TradingLoop loop = new TradingLoop(singleQuoteProvider("AAPL", 152.0),
+                new PriceHistory(), new IndicatorEngine(), new TrailingStopMonitor(),
+                broker, fees, List.of("AAPL"), research::add, () -> {}, account,
+                () -> beforeCutoff, null, noSignals, null);
+        loop.setAvoidOvernightHolds(true);
+        loop.run();
+
+        assertTrue(account.getPositions().containsKey("AAPL"),
+                "AAPL position should NOT be closed before the 15:45 cutoff");
+    }
+
+    @Test
+    void testBuySkippedWhenEarningsNear() throws Exception {
+        List<String> research = new ArrayList<>();
+        ZonedDateTime marketOpen = ZonedDateTime.of(2026, 5, 15, 10, 0, 0, 0, ET);
+
+        Account account = new Account();
+        SafetyStop safety = new SafetyStop(account);
+        TransactionLog log = new TransactionLog(tempDir.resolve("earnings.db").toString());
+        FeeCalculator fees = new FeeCalculator();
+        BrokerClient broker = new SimulatedBroker(new OrderExecutor(account, safety, log, fees));
+
+        SignalWeightEvaluator alwaysBuy = new SignalWeightEvaluator() {
+            @Override public double weightedBuyScore(List<SignalResult> s) { return 2.0; }
+            @Override public double weightedSellScore(List<SignalResult> s) { return 0.0; }
+        };
+
+        EarningsCalendar nearEarnings = new EarningsCalendar() {
+            @Override public LocalDate nextEarningsDate(String symbol) {
+                return LocalDate.of(2026, 5, 17); // 2 days away
+            }
+        };
+
+        TradingLoop loop = new TradingLoop(singleQuoteProvider("AAPL", 150.0),
+                new PriceHistory(), new IndicatorEngine(), new TrailingStopMonitor(),
+                broker, fees, List.of("AAPL"), research::add, () -> {}, account,
+                () -> marketOpen, null, alwaysBuy, null);
+        loop.setEarningsCalendar(nearEarnings);
+        loop.setEarningsBlackoutDays(3);
+        loop.run();
+
+        assertFalse(account.getPositions().containsKey("AAPL"),
+                "Buy should be blocked when earnings are within blackout window");
+        assertTrue(research.stream().anyMatch(m -> m.contains("earnings in")),
+                "Should log earnings blackout skip message");
     }
 
     @Test

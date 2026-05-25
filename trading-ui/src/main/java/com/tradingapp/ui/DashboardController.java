@@ -9,6 +9,7 @@ import com.tradingapp.account.TransactionRecord;
 import com.tradingapp.broker.AlpacaBroker;
 import com.tradingapp.broker.AlpacaQuoteProvider;
 import com.tradingapp.broker.AppConfig;
+import com.tradingapp.data.EarningsCalendar;
 import com.tradingapp.data.LargeCapWatchList;
 import com.tradingapp.data.PriceHistory;
 import com.tradingapp.data.QuoteProvider;
@@ -195,11 +196,16 @@ public class DashboardController implements Initializable {
         // history of at least 50 trades placed under correct conditions.
         Runnable trainingCallback = null;
 
+        EarningsCalendar earningsCalendar = new EarningsCalendar();
+
         TradingLoop tradingLoop = new TradingLoop(quoteProvider, priceHistory,
                 new IndicatorEngine(), new TrailingStopMonitor(), brokerClient, feeCalc,
                 LargeCapWatchList.SYMBOLS, researchCb, uiRefresh, account,
                 optionsRouter, mlEval, trainingCallback);
         tradingLoop.setDailyLossLimitPct(appConfig.getDailyLossLimitPct() / 100.0);
+        tradingLoop.setAvoidOvernightHolds(appConfig.isAvoidOvernightHolds());
+        tradingLoop.setEarningsCalendar(earningsCalendar);
+        tradingLoop.setEarningsBlackoutDays(appConfig.getEarningsBlackoutDays());
 
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "trading-loop");

@@ -25,6 +25,8 @@ public class SettingsController implements Initializable {
     @FXML private ComboBox<String> quoteProviderCombo;
     @FXML private Label quoteProviderNote;
     @FXML private TextField dailyLossLimitField;
+    @FXML private CheckBox avoidOvernightCheck;
+    @FXML private TextField earningsBlackoutField;
     @FXML private Button testConnectionButton;
     @FXML private Label statusLabel;
 
@@ -64,6 +66,8 @@ public class SettingsController implements Initializable {
         quoteProviderCombo.setValue(cfg.getQuoteProviderType() == AppConfig.QuoteProviderType.ALPACA
                 ? "Alpaca" : "Yahoo Finance");
         dailyLossLimitField.setText(String.valueOf(cfg.getDailyLossLimitPct()));
+        avoidOvernightCheck.setSelected(cfg.isAvoidOvernightHolds());
+        earningsBlackoutField.setText(String.valueOf(cfg.getEarningsBlackoutDays()));
         updateAlpacaFieldVisibility();
         updateQuoteNote();
     }
@@ -193,6 +197,11 @@ public class SettingsController implements Initializable {
         try {
             double limit = Double.parseDouble(dailyLossLimitField.getText().strip());
             cfg.setDailyLossLimitPct(Math.max(0, limit));
+        } catch (NumberFormatException ignored) {}
+        cfg.setAvoidOvernightHolds(avoidOvernightCheck.isSelected());
+        try {
+            int days = Integer.parseInt(earningsBlackoutField.getText().strip());
+            cfg.setEarningsBlackoutDays(Math.max(0, days));
         } catch (NumberFormatException ignored) {}
         return cfg;
     }

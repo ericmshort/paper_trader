@@ -94,7 +94,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         // Re-read positions map after potential closures
         opts = account.getOptionsPositions();
-        List<Double> prices = priceHistory.getPrices(symbol);
+        List<Double> dailyPs = priceHistory.getDailyPrices(symbol);
+        List<Double> prices = dailyPs.size() >= 2 ? dailyPs : priceHistory.getPrices(symbol);
         if (prices.size() < 2) return;
 
         if (account.totalExposureFraction() >= MAX_PORTFOLIO_EXPOSURE) {
@@ -205,7 +206,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     }
 
     private double computeVol(String symbol) {
-        List<Double> prices = priceHistory.getPrices(symbol);
+        List<Double> daily = priceHistory.getDailyPrices(symbol);
+        List<Double> prices = daily.size() >= 2 ? daily : priceHistory.getPrices(symbol);
         return prices.size() < 2 ? 0.0 : bsEngine.historicalVol(prices);
     }
 }

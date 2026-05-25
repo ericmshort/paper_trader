@@ -20,6 +20,8 @@ public class AppConfig {
     private String alpacaApiSecret = "";
     private QuoteProviderType quoteProviderType = QuoteProviderType.YAHOO;
     private double dailyLossLimitPct = 5.0;
+    private boolean avoidOvernightHolds = true;
+    private int earningsBlackoutDays = 3;
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
@@ -39,6 +41,12 @@ public class AppConfig {
                 config.dailyLossLimitPct = Double.parseDouble(
                         props.getProperty("risk.daily_loss_limit_pct", "5.0"));
             } catch (NumberFormatException ignored) {}
+            config.avoidOvernightHolds = Boolean.parseBoolean(
+                    props.getProperty("risk.avoid_overnight_holds", "true"));
+            try {
+                config.earningsBlackoutDays = Integer.parseInt(
+                        props.getProperty("risk.earnings_blackout_days", "3"));
+            } catch (NumberFormatException ignored) {}
         } catch (IOException ignored) {}
         return config;
     }
@@ -52,6 +60,8 @@ public class AppConfig {
             props.setProperty("broker.alpaca.api_secret", alpacaApiSecret);
             props.setProperty("quote.provider", quoteProviderType.name());
             props.setProperty("risk.daily_loss_limit_pct", String.valueOf(dailyLossLimitPct));
+            props.setProperty("risk.avoid_overnight_holds", String.valueOf(avoidOvernightHolds));
+            props.setProperty("risk.earnings_blackout_days", String.valueOf(earningsBlackoutDays));
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
             }
@@ -74,6 +84,12 @@ public class AppConfig {
 
     public double getDailyLossLimitPct() { return dailyLossLimitPct; }
     public void setDailyLossLimitPct(double pct) { this.dailyLossLimitPct = pct; }
+
+    public boolean isAvoidOvernightHolds() { return avoidOvernightHolds; }
+    public void setAvoidOvernightHolds(boolean v) { this.avoidOvernightHolds = v; }
+
+    public int getEarningsBlackoutDays() { return earningsBlackoutDays; }
+    public void setEarningsBlackoutDays(int days) { this.earningsBlackoutDays = days; }
 
     public boolean isAlpacaBroker() {
         return brokerType == BrokerType.ALPACA_PAPER || brokerType == BrokerType.ALPACA_LIVE;

@@ -2,6 +2,7 @@ package com.tradingapp.engine;
 
 import com.tradingapp.account.Account;
 import com.tradingapp.account.Position;
+import com.tradingapp.data.EarningsCalendar;
 import com.tradingapp.data.PriceHistory;
 import com.tradingapp.data.QuoteModel;
 import com.tradingapp.data.QuoteProvider;
@@ -10,7 +11,10 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -21,6 +25,7 @@ public class TradingLoop implements Runnable {
     static final double MAX_PORTFOLIO_EXPOSURE = 0.60;
     private static final LocalTime MARKET_OPEN = LocalTime.of(9, 30);
     private static final LocalTime MARKET_CLOSE = LocalTime.of(16, 0);
+    private static final LocalTime PRE_CLOSE_CUTOFF = LocalTime.of(15, 45);
     private static final ZoneId ET = ZoneId.of("America/New_York");
 
     private final QuoteProvider dataClient;
@@ -41,6 +46,11 @@ public class TradingLoop implements Runnable {
     private double dailyLossLimitPct = 0.05;
     private double dayStartValue = -1;
     private LocalDate lastDayTrackingDate;
+    private boolean avoidOvernightHolds = true;
+    private EarningsCalendar earningsCalendar;
+    private int earningsBlackoutDays = 3;
+    private final Map<String, Double> lastKnownPrices = new HashMap<>();
+    private final Map<String, LocalDate> dailyBarLastRecorded = new HashMap<>();
 
     public TradingLoop(QuoteProvider dataClient, PriceHistory priceHistory,
                        IndicatorEngine indicators, TrailingStopMonitor trailingStop,
@@ -120,15 +130,18 @@ public class TradingLoop implements Runnable {
     }
 
     public void setDailyLossLimitPct(double pct) { this.dailyLossLimitPct = pct; }
+    public void setAvoidOvernightHolds(boolean v) { this.avoidOvernightHolds = v; }
+    public void setEarningsCalendar(EarningsCalendar cal) { this.earningsCalendar = cal; }
+    public void setEarningsBlackoutDays(int days) { this.earningsBlackoutDays = days; }
 
     @Override
     public void run() {
         try {
             ZonedDateTime now = clock.get();
             LocalTime time = now.toLocalTime();
+            LocalDate today = now.toLocalDate();
             if (time.isBefore(MARKET_OPEN) || time.isAfter(MARKET_CLOSE)) {
                 researchCallback.accept("Market closed. Next open: " + MARKET_OPEN + " ET.");
-                LocalDate today = now.toLocalDate();
                 if (!time.isBefore(MARKET_CLOSE) && afterMarketCallback != null
                         && !today.equals(lastTrainingDate)) {
                     lastTrainingDate = today;
@@ -136,7 +149,6 @@ public class TradingLoop implements Runnable {
                 }
                 return;
             }
-            LocalDate today = now.toLocalDate();
             if (!today.equals(lastDayTrackingDate)) {
                 lastDayTrackingDate = today;
                 dayStartValue = account.getBalance() + account.getTotalUnrealizedPnL();
@@ -152,7 +164,13 @@ public class TradingLoop implements Runnable {
                 String symbol = quote.getSymbol();
                 double price = quote.getPrice();
                 double volume = quote.getVolume();
+                lastKnownPrices.put(symbol, price);
                 priceHistory.record(symbol, price, volume);
+                // Gap 6: one daily bar per symbol per trading day — keeps indicators on daily cadence
+                if (!today.equals(dailyBarLastRecorded.get(symbol))) {
+                    priceHistory.recordDaily(symbol, price, volume);
+                    dailyBarLastRecorded.put(symbol, today);
+                }
                 account.updatePositionPrice(symbol, price);
                 if (!account.isDailyLossHalted() && dailyLossLimitPct > 0 && dayStartValue > 0) {
                     double currentValue = account.getBalance() + account.getTotalUnrealizedPnL();
@@ -163,8 +181,11 @@ public class TradingLoop implements Runnable {
                                 dailyLossLimitPct * 100));
                     }
                 }
-                List<Double> prices = priceHistory.getPrices(symbol);
-                List<Double> volumes = priceHistory.getVolumes(symbol);
+                // Gap 6: use daily-resolution prices for indicators; fall back to intraday if not yet seeded
+                List<Double> dailyPs = priceHistory.getDailyPrices(symbol);
+                List<Double> dailyVs = priceHistory.getDailyVolumes(symbol);
+                List<Double> prices  = dailyPs.isEmpty() ? priceHistory.getPrices(symbol)  : dailyPs;
+                List<Double> volumes = dailyVs.isEmpty() ? priceHistory.getVolumes(symbol) : dailyVs;
                 List<SignalResult> signals = indicators.evaluateAll(prices, volumes, price);
                 int buys = indicators.countBuySignals(signals);
                 int sells = indicators.countSellSignals(signals);
@@ -186,7 +207,12 @@ public class TradingLoop implements Runnable {
                     trailingStop.reset(symbol);
                     uiRefreshCallback.run();
                 } else if (weightedBuys >= SIGNAL_THRESHOLD && !hasPosition) {
-                    if (account.totalExposureFraction() >= MAX_PORTFOLIO_EXPOSURE) {
+                    int daysToEarnings = earningsCalendar != null
+                            ? earningsCalendar.daysUntilEarnings(symbol) : Integer.MAX_VALUE;
+                    if (daysToEarnings <= earningsBlackoutDays) {
+                        researchCallback.accept(symbol + " BUY skipped: earnings in "
+                                + daysToEarnings + " day" + (daysToEarnings == 1 ? "" : "s"));
+                    } else if (account.totalExposureFraction() >= MAX_PORTFOLIO_EXPOSURE) {
                         researchCallback.accept(symbol + " BUY skipped: portfolio at capacity ("
                                 + String.format("%.0f%%", account.totalExposureFraction() * 100) + " deployed)");
                     } else if (account.isDailyLossHalted()) {
@@ -206,6 +232,19 @@ public class TradingLoop implements Runnable {
                 }
                 researchCallback.accept(time + " | " + symbol + " $" + String.format("%.2f", price)
                         + " | " + signalStr + " | BUY=" + buys + " SELL=" + sells);
+            }
+            // Gap 5: liquidate all equity positions at 15:45 to avoid overnight gap risk
+            if (avoidOvernightHolds && !time.isBefore(PRE_CLOSE_CUTOFF)) {
+                for (String sym : new ArrayList<>(account.getPositions().keySet())) {
+                    Position pos = account.getPositions().get(sym);
+                    if (pos == null) continue;
+                    double closePrice = lastKnownPrices.getOrDefault(sym, pos.getCurrentPrice());
+                    brokerClient.submitSell(sym, pos.getQuantity(), closePrice, "",
+                            "Pre-close: avoid overnight hold");
+                    trailingStop.reset(sym);
+                    researchCallback.accept(sym + " closed at $" + String.format("%.2f", closePrice)
+                            + ": pre-close overnight avoidance");
+                }
             }
             uiRefreshCallback.run();
         } catch (Exception e) {
