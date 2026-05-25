@@ -123,7 +123,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                 return;
             }
         }
-        LocalDate expiry = bsEngine.nextMonthlyExpiry();
+        LocalDate expiry = bsEngine.selectExpiry(symbol);
         double K = bsEngine.roundStrike(price);
         double T = bsEngine.timeToExpiry(expiry);
         if (T <= 0) return;

@@ -47,6 +47,7 @@ public class TradingLoop implements Runnable {
     private double dayStartValue = -1;
     private LocalDate lastDayTrackingDate;
     private boolean avoidOvernightHolds = true;
+    private boolean marketRegimeFilterEnabled = true;
     private EarningsCalendar earningsCalendar;
     private int earningsBlackoutDays = 3;
     private final Map<String, Double> lastKnownPrices = new HashMap<>();
@@ -131,6 +132,7 @@ public class TradingLoop implements Runnable {
 
     public void setDailyLossLimitPct(double pct) { this.dailyLossLimitPct = pct; }
     public void setAvoidOvernightHolds(boolean v) { this.avoidOvernightHolds = v; }
+    public void setMarketRegimeFilterEnabled(boolean v) { this.marketRegimeFilterEnabled = v; }
     public void setEarningsCalendar(EarningsCalendar cal) { this.earningsCalendar = cal; }
     public void setEarningsBlackoutDays(int days) { this.earningsBlackoutDays = days; }
 
@@ -209,7 +211,9 @@ public class TradingLoop implements Runnable {
                 } else if (weightedBuys >= SIGNAL_THRESHOLD && !hasPosition) {
                     int daysToEarnings = earningsCalendar != null
                             ? earningsCalendar.daysUntilEarnings(symbol) : Integer.MAX_VALUE;
-                    if (daysToEarnings <= earningsBlackoutDays) {
+                    if (!isMarketInUptrend()) {
+                        researchCallback.accept(symbol + " BUY skipped: SPY below 50-day MA (bear regime)");
+                    } else if (daysToEarnings <= earningsBlackoutDays) {
                         researchCallback.accept(symbol + " BUY skipped: earnings in "
                                 + daysToEarnings + " day" + (daysToEarnings == 1 ? "" : "s"));
                     } else if (account.totalExposureFraction() >= MAX_PORTFOLIO_EXPOSURE) {
@@ -250,6 +254,15 @@ public class TradingLoop implements Runnable {
         } catch (Exception e) {
             researchCallback.accept("TradingLoop error: " + e.getMessage());
         }
+    }
+
+    private boolean isMarketInUptrend() {
+        if (!marketRegimeFilterEnabled) return true;
+        List<Double> spyPrices = priceHistory.getDailyPrices("SPY");
+        if (spyPrices.size() < 50) return true; // insufficient data — don't block trades
+        double ma50 = spyPrices.subList(spyPrices.size() - 50, spyPrices.size())
+                .stream().mapToDouble(Double::doubleValue).average().orElse(0);
+        return spyPrices.get(spyPrices.size() - 1) >= ma50;
     }
 
     private static final String[] FEATURE_NAMES = {"RSI", "MACD", "BollingerBands", "MACrossover", "VolumeSurge"};

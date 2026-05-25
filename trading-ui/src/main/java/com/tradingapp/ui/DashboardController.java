@@ -204,6 +204,7 @@ public class DashboardController implements Initializable {
                 optionsRouter, mlEval, trainingCallback);
         tradingLoop.setDailyLossLimitPct(appConfig.getDailyLossLimitPct() / 100.0);
         tradingLoop.setAvoidOvernightHolds(appConfig.isAvoidOvernightHolds());
+        tradingLoop.setMarketRegimeFilterEnabled(appConfig.isMarketRegimeFilterEnabled());
         tradingLoop.setEarningsCalendar(earningsCalendar);
         tradingLoop.setEarningsBlackoutDays(appConfig.getEarningsBlackoutDays());
 
@@ -221,7 +222,10 @@ public class DashboardController implements Initializable {
             LocalDate end = LocalDate.now();
             LocalDate start = end.minusDays(280); // extra buffer for weekends/holidays
             int seeded = 0;
-            for (String sym : LargeCapWatchList.SYMBOLS) {
+            // Include SPY for the market-regime filter (not traded, just tracked)
+            List<String> symbolsToSeed = new ArrayList<>(LargeCapWatchList.SYMBOLS);
+            symbolsToSeed.add("SPY");
+            for (String sym : symbolsToSeed) {
                 try {
                     var bars = seedProvider.getHistoricalBars(sym, start, end);
                     if (bars != null && !bars.isEmpty()) {
@@ -234,7 +238,7 @@ public class DashboardController implements Initializable {
             }
             int finalSeeded = seeded;
             Platform.runLater(() -> researchCb.accept(
-                    "Price history seeded for " + finalSeeded + "/" + LargeCapWatchList.SYMBOLS.size() + " symbols."));
+                    "Price history seeded for " + finalSeeded + "/" + symbolsToSeed.size() + " symbols (incl. SPY regime data)."));
         }, "price-history-seed");
         seedThread.setDaemon(true);
         seedThread.start();

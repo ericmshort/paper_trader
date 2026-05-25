@@ -21,6 +21,7 @@ public class AppConfig {
     private QuoteProviderType quoteProviderType = QuoteProviderType.YAHOO;
     private double dailyLossLimitPct = 5.0;
     private boolean avoidOvernightHolds = true;
+    private boolean marketRegimeFilterEnabled = true;
     private int earningsBlackoutDays = 3;
 
     public static AppConfig load() {
@@ -43,6 +44,8 @@ public class AppConfig {
             } catch (NumberFormatException ignored) {}
             config.avoidOvernightHolds = Boolean.parseBoolean(
                     props.getProperty("risk.avoid_overnight_holds", "true"));
+            config.marketRegimeFilterEnabled = Boolean.parseBoolean(
+                    props.getProperty("risk.market_regime_filter", "true"));
             try {
                 config.earningsBlackoutDays = Integer.parseInt(
                         props.getProperty("risk.earnings_blackout_days", "3"));
@@ -61,6 +64,7 @@ public class AppConfig {
             props.setProperty("quote.provider", quoteProviderType.name());
             props.setProperty("risk.daily_loss_limit_pct", String.valueOf(dailyLossLimitPct));
             props.setProperty("risk.avoid_overnight_holds", String.valueOf(avoidOvernightHolds));
+            props.setProperty("risk.market_regime_filter", String.valueOf(marketRegimeFilterEnabled));
             props.setProperty("risk.earnings_blackout_days", String.valueOf(earningsBlackoutDays));
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
@@ -87,6 +91,9 @@ public class AppConfig {
 
     public boolean isAvoidOvernightHolds() { return avoidOvernightHolds; }
     public void setAvoidOvernightHolds(boolean v) { this.avoidOvernightHolds = v; }
+
+    public boolean isMarketRegimeFilterEnabled() { return marketRegimeFilterEnabled; }
+    public void setMarketRegimeFilterEnabled(boolean v) { this.marketRegimeFilterEnabled = v; }
 
     public int getEarningsBlackoutDays() { return earningsBlackoutDays; }
     public void setEarningsBlackoutDays(int days) { this.earningsBlackoutDays = days; }

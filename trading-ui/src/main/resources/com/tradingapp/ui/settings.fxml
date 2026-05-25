@@ -84,6 +84,13 @@
     </HBox>
 
     <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Market Regime:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <CheckBox fx:id="marketRegimeFilterCheck"
+                  style="-fx-text-fill: #e0e0e0;"
+                  text="Block new stock buys when SPY is below its 50-day MA"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
         <Label text="Earnings Blackout:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
         <TextField fx:id="earningsBlackoutField" prefWidth="60"
                    style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"

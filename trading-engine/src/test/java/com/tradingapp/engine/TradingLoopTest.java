@@ -333,6 +333,70 @@ public class TradingLoopTest {
     }
 
     @Test
+    void testBuyBlockedInBearRegime() throws Exception {
+        List<String> research = new ArrayList<>();
+        ZonedDateTime marketOpen = ZonedDateTime.of(2026, 5, 15, 10, 0, 0, 0, ET);
+        Account account = new Account();
+        SafetyStop safety = new SafetyStop(account);
+        TransactionLog log = new TransactionLog(tempDir.resolve("bear.db").toString());
+        FeeCalculator fees = new FeeCalculator();
+        BrokerClient broker = new SimulatedBroker(new OrderExecutor(account, safety, log, fees));
+
+        // Seed SPY with 50 bars at $500, then one bar at $400 (below 50-day MA of $500)
+        PriceHistory ph = new PriceHistory();
+        for (int i = 0; i < 50; i++) ph.recordDaily("SPY", 500.0, 1_000_000);
+        ph.recordDaily("SPY", 400.0, 1_000_000);
+
+        SignalWeightEvaluator alwaysBuy = new SignalWeightEvaluator() {
+            @Override public double weightedBuyScore(List<SignalResult> s) { return 2.0; }
+            @Override public double weightedSellScore(List<SignalResult> s) { return 0.0; }
+        };
+
+        TradingLoop loop = new TradingLoop(singleQuoteProvider("AAPL", 150.0),
+                ph, new IndicatorEngine(), new TrailingStopMonitor(),
+                broker, fees, List.of("AAPL"), research::add, () -> {}, account,
+                () -> marketOpen, null, alwaysBuy, null);
+        loop.setMarketRegimeFilterEnabled(true);
+        loop.run();
+
+        assertFalse(account.getPositions().containsKey("AAPL"),
+                "Buy should be blocked when SPY is below its 50-day MA");
+        assertTrue(research.stream().anyMatch(m -> m.contains("bear regime")),
+                "Should log bear regime skip message");
+    }
+
+    @Test
+    void testBuyAllowedInBullRegime() throws Exception {
+        List<String> research = new ArrayList<>();
+        ZonedDateTime marketOpen = ZonedDateTime.of(2026, 5, 15, 10, 0, 0, 0, ET);
+        Account account = new Account();
+        SafetyStop safety = new SafetyStop(account);
+        TransactionLog log = new TransactionLog(tempDir.resolve("bull.db").toString());
+        FeeCalculator fees = new FeeCalculator();
+        BrokerClient broker = new SimulatedBroker(new OrderExecutor(account, safety, log, fees));
+
+        // Seed SPY with 50 bars at $400, then one bar at $500 (above 50-day MA of $400)
+        PriceHistory ph = new PriceHistory();
+        for (int i = 0; i < 50; i++) ph.recordDaily("SPY", 400.0, 1_000_000);
+        ph.recordDaily("SPY", 500.0, 1_000_000);
+
+        SignalWeightEvaluator alwaysBuy = new SignalWeightEvaluator() {
+            @Override public double weightedBuyScore(List<SignalResult> s) { return 2.0; }
+            @Override public double weightedSellScore(List<SignalResult> s) { return 0.0; }
+        };
+
+        TradingLoop loop = new TradingLoop(singleQuoteProvider("AAPL", 150.0),
+                ph, new IndicatorEngine(), new TrailingStopMonitor(),
+                broker, fees, List.of("AAPL"), research::add, () -> {}, account,
+                () -> marketOpen, null, alwaysBuy, null);
+        loop.setMarketRegimeFilterEnabled(true);
+        loop.run();
+
+        assertFalse(research.stream().anyMatch(m -> m.contains("bear regime")),
+                "Bear regime filter should not fire when SPY is above its 50-day MA");
+    }
+
+    @Test
     void testNoTradeWhenOnlyOneBuySignal() throws Exception {
         List<String> research = new ArrayList<>();
         ZonedDateTime marketOpen = ZonedDateTime.of(2026, 5, 15, 10, 0, 0, 0, ET);

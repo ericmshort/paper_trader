@@ -59,6 +59,23 @@ public class BlackScholesEngine {
         return candidate;
     }
 
+    /**
+     * Selects an expiry that is at least 21 days away. When the next monthly expiry
+     * qualifies, symbols are split deterministically across next and following month
+     * so not all contracts expire on the same Friday. When the next expiry is within
+     * 21 days, all symbols fall back to the following month to avoid short-dated theta decay.
+     */
+    public LocalDate selectExpiry(String symbol) {
+        LocalDate next = nextMonthlyExpiry();
+        LocalDate following = thirdFriday(next.plusMonths(1).withDayOfMonth(1));
+        long daysToNext = ChronoUnit.DAYS.between(LocalDate.now(), next);
+        if (daysToNext < 21) {
+            return following; // too close — everyone shifts to the following month
+        }
+        // Split symbols across two expiry dates based on symbol hash
+        return (Math.abs(symbol.hashCode()) % 2 == 0) ? next : following;
+    }
+
     private LocalDate thirdFriday(LocalDate firstOfMonth) {
         // Find first Friday on or after the 1st, then add 2 weeks
         LocalDate firstFriday = firstOfMonth.with(TemporalAdjusters.nextOrSame(DayOfWeek.FRIDAY));

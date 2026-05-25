@@ -95,4 +95,43 @@ public class BlackScholesEngineTest {
         assertTrue(!expiry.isBefore(LocalDate.now().plusDays(14)),
                 "Expiry must be at least 14 days from today, got: " + expiry);
     }
+
+    @Test
+    void testSelectExpiryAtLeast21DaysOut() {
+        // selectExpiry must always return a date at least 21 days out regardless of symbol
+        for (String sym : List.of("AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA")) {
+            LocalDate expiry = bs.selectExpiry(sym);
+            long days = java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(), expiry);
+            assertTrue(days >= 21, sym + " expiry should be >= 21 days out, got " + days);
+        }
+    }
+
+    @Test
+    void testSelectExpirySkipsToFollowingWhenNextIsTooClose() {
+        // Simulate next expiry being 10 days away by overriding nextMonthlyExpiry
+        LocalDate shortExpiry = LocalDate.now().plusDays(10);
+        BlackScholesEngine engine = new BlackScholesEngine() {
+            @Override public LocalDate nextMonthlyExpiry() { return shortExpiry; }
+        };
+        LocalDate result = engine.selectExpiry("AAPL");
+        long days = java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(), result);
+        assertTrue(days >= 21, "Should skip to following month when next expiry is only 10 days out");
+        assertTrue(result.isAfter(shortExpiry), "Result should be after the too-close expiry");
+    }
+
+    @Test
+    void testSelectExpirySpreadAcrossSymbols() {
+        // When next expiry is comfortably far (> 21 days), different symbols should
+        // land on different expiry dates (some on next, some on following month).
+        // Force a scenario where next expiry is always 40 days away.
+        LocalDate farExpiry = LocalDate.now().plusDays(40);
+        BlackScholesEngine engine = new BlackScholesEngine() {
+            @Override public LocalDate nextMonthlyExpiry() { return farExpiry; }
+        };
+        java.util.Set<LocalDate> dates = new java.util.HashSet<>();
+        for (String sym : List.of("AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "V")) {
+            dates.add(engine.selectExpiry(sym));
+        }
+        assertTrue(dates.size() >= 2, "Symbols should be spread across at least two expiry dates");
+    }
 }

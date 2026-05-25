@@ -26,6 +26,7 @@ public class SettingsController implements Initializable {
     @FXML private Label quoteProviderNote;
     @FXML private TextField dailyLossLimitField;
     @FXML private CheckBox avoidOvernightCheck;
+    @FXML private CheckBox marketRegimeFilterCheck;
     @FXML private TextField earningsBlackoutField;
     @FXML private Button testConnectionButton;
     @FXML private Label statusLabel;
@@ -67,6 +68,7 @@ public class SettingsController implements Initializable {
                 ? "Alpaca" : "Yahoo Finance");
         dailyLossLimitField.setText(String.valueOf(cfg.getDailyLossLimitPct()));
         avoidOvernightCheck.setSelected(cfg.isAvoidOvernightHolds());
+        marketRegimeFilterCheck.setSelected(cfg.isMarketRegimeFilterEnabled());
         earningsBlackoutField.setText(String.valueOf(cfg.getEarningsBlackoutDays()));
         updateAlpacaFieldVisibility();
         updateQuoteNote();
@@ -199,6 +201,7 @@ public class SettingsController implements Initializable {
             cfg.setDailyLossLimitPct(Math.max(0, limit));
         } catch (NumberFormatException ignored) {}
         cfg.setAvoidOvernightHolds(avoidOvernightCheck.isSelected());
+        cfg.setMarketRegimeFilterEnabled(marketRegimeFilterCheck.isSelected());
         try {
             int days = Integer.parseInt(earningsBlackoutField.getText().strip());
             cfg.setEarningsBlackoutDays(Math.max(0, days));
