@@ -6,12 +6,19 @@ import com.tradingapp.data.HistoricalBar;
 import com.tradingapp.data.QuoteProvider;
 import com.tradingapp.data.YahooFinanceQuoteProvider;
 import com.tradingapp.engine.*;
+import com.tradingapp.options.BlackScholesEngine;
+import com.tradingapp.options.OptionsBacktestEngine;
+import com.tradingapp.options.OptionsStrategy;
 import javafx.application.Platform;
+import javafx.beans.property.SimpleStringProperty;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
 import javafx.scene.chart.LineChart;
 import javafx.scene.chart.XYChart;
 import javafx.scene.control.*;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.VBox;
 import javafx.util.Callback;
 
 import java.net.URL;
@@ -30,10 +37,23 @@ public class BacktestController implements Initializable {
     @FXML private Label btWinRateLabel;
     @FXML private Label btTradeCountLabel;
     @FXML private ComboBox<String> quoteSourceCombo;
+    @FXML private ComboBox<String> strategyCombo;
+    @FXML private HBox statsBox;
+    @FXML private TableView<StrategyResult> comparisonTable;
     @FXML private LineChart<String, Number> backtestChart;
 
     private QuoteProvider quoteProvider;
     private AppConfig appConfig;
+
+    private static final String EQUITY_LABEL = "Equity (Current)";
+    private static final String COMPARE_ALL_LABEL = "Compare All";
+
+    record StrategyResult(String name, double returnPct, double maxDrawdownPct,
+                          double winRate, int trades) {
+        double riskReward() {
+            return maxDrawdownPct > 0 ? returnPct / maxDrawdownPct : 0;
+        }
+    }
 
     @Override
     public void initialize(URL location, ResourceBundle resources) {
@@ -43,12 +63,75 @@ public class BacktestController implements Initializable {
         quoteSourceCombo.setValue("Yahoo Finance");
         applyEarliestDate(LocalDate.now().minusYears(1));
         quoteSourceCombo.setOnAction(e -> onSourceChanged());
+
+        // Strategy selector
+        strategyCombo.getItems().add(EQUITY_LABEL);
+        for (OptionsStrategy s : OptionsStrategy.values()) {
+            strategyCombo.getItems().add(s.getDisplayName());
+        }
+        strategyCombo.getItems().add(COMPARE_ALL_LABEL);
+        strategyCombo.setValue(EQUITY_LABEL);
+        strategyCombo.setOnAction(e -> onStrategyChanged());
+
+        // Comparison table columns
+        VBox.setVgrow(comparisonTable, Priority.ALWAYS);
+        setupComparisonTable();
     }
 
-    /**
-     * Called by DashboardController after the active quote provider is known.
-     * Populates the source combo and enforces the matching date constraint.
-     */
+    private void setupComparisonTable() {
+        comparisonTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        comparisonTable.setStyle("-fx-base: #1a1a2e; -fx-control-inner-background: #1a1a2e; -fx-text-fill: #e0e0e0;");
+
+        TableColumn<StrategyResult, String> nameCol = new TableColumn<>("Strategy");
+        nameCol.setCellValueFactory(r -> new SimpleStringProperty(r.getValue().name()));
+        nameCol.setPrefWidth(160);
+
+        TableColumn<StrategyResult, String> retCol = new TableColumn<>("Return %");
+        retCol.setCellValueFactory(r -> new SimpleStringProperty(
+                String.format("%+.1f%%", r.getValue().returnPct())));
+        retCol.setPrefWidth(90);
+        retCol.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) { setText(null); setStyle(""); return; }
+                setText(item);
+                setStyle(item.startsWith("+") ? "-fx-text-fill: #00ff88;" : "-fx-text-fill: #ff4444;");
+            }
+        });
+
+        TableColumn<StrategyResult, String> ddCol = new TableColumn<>("Max Drawdown");
+        ddCol.setCellValueFactory(r -> new SimpleStringProperty(
+                String.format("%.1f%%", r.getValue().maxDrawdownPct())));
+        ddCol.setPrefWidth(110);
+
+        TableColumn<StrategyResult, String> rrCol = new TableColumn<>("Return/Risk");
+        rrCol.setCellValueFactory(r -> new SimpleStringProperty(
+                String.format("%.2f", r.getValue().riskReward())));
+        rrCol.setPrefWidth(90);
+
+        TableColumn<StrategyResult, String> wrCol = new TableColumn<>("Win Rate");
+        wrCol.setCellValueFactory(r -> new SimpleStringProperty(
+                String.format("%.1f%%", r.getValue().winRate())));
+        wrCol.setPrefWidth(80);
+
+        TableColumn<StrategyResult, String> tradeCol = new TableColumn<>("Trades");
+        tradeCol.setCellValueFactory(r -> new SimpleStringProperty(
+                String.valueOf(r.getValue().trades())));
+        tradeCol.setPrefWidth(60);
+
+        comparisonTable.getColumns().addAll(nameCol, retCol, ddCol, rrCol, wrCol, tradeCol);
+    }
+
+    private void onStrategyChanged() {
+        boolean isCompare = COMPARE_ALL_LABEL.equals(strategyCombo.getValue());
+        comparisonTable.setVisible(isCompare);
+        comparisonTable.setManaged(isCompare);
+        backtestChart.setVisible(!isCompare);
+        backtestChart.setManaged(!isCompare);
+        backtestChart.setLegendVisible(false);
+    }
+
     public void setContext(AppConfig config, QuoteProvider activeProvider) {
         this.appConfig = config;
         quoteSourceCombo.getItems().setAll("Yahoo Finance");
@@ -107,7 +190,8 @@ public class BacktestController implements Initializable {
         if (quoteProvider != null) {
             LocalDate earliest = quoteProvider.getEarliestBacktestDate();
             if (startDate.isBefore(earliest)) {
-                btReturnLabel.setText("Start date before earliest available data (" + earliest + " for " + quoteProvider.getName() + ")");
+                btReturnLabel.setText("Start date before earliest available data ("
+                        + earliest + " for " + quoteProvider.getName() + ")");
                 return;
             }
         }
@@ -116,22 +200,32 @@ public class BacktestController implements Initializable {
         backtestProgress.setVisible(true);
         btReturnLabel.setText("Fetching data...");
 
+        String selected = strategyCombo.getValue();
         QuoteProvider provider = quoteProvider;
+
         Thread t = new Thread(() -> {
             try {
-                Map<String, List<HistoricalBar>> barsBySymbol = new LinkedHashMap<>();
-                for (String sym : symbols) {
-                    List<HistoricalBar> bars = (provider != null)
-                            ? provider.getHistoricalBars(sym, startDate, endDate)
-                            : new com.tradingapp.data.HistoricalBarFetcher().fetchDailyBars(sym, startDate, endDate);
-                    barsBySymbol.put(sym, bars);
+                Map<String, List<HistoricalBar>> barsBySymbol = fetchBars(symbols, startDate, endDate, provider);
+                BacktestConfig cfg = new BacktestConfig(symbols, startDate, endDate, 100_000.0);
+
+                if (EQUITY_LABEL.equals(selected)) {
+                    BacktestResult result = new BacktestEngine(new IndicatorEngine(), new FeeCalculator())
+                            .run(cfg, barsBySymbol);
+                    Platform.runLater(() -> applySingleResult(result, EQUITY_LABEL));
+
+                } else if (COMPARE_ALL_LABEL.equals(selected)) {
+                    List<StrategyResult> rows = runAllStrategies(cfg, barsBySymbol);
+                    Platform.runLater(() -> applyComparisonResults(rows));
+
+                } else {
+                    OptionsStrategy optStrat = strategyForName(selected);
+                    if (optStrat == null) return;
+                    BacktestResult result = new OptionsBacktestEngine(
+                            new IndicatorEngine(), new BlackScholesEngine(), new FeeCalculator())
+                            .run(optStrat, cfg, barsBySymbol);
+                    Platform.runLater(() -> applySingleResult(result, selected));
                 }
 
-                BacktestConfig cfg = new BacktestConfig(symbols, startDate, endDate, 100_000.0);
-                BacktestEngine engine = new BacktestEngine(new IndicatorEngine(), new FeeCalculator());
-                BacktestResult result = engine.run(cfg, barsBySymbol);
-
-                Platform.runLater(() -> applyResult(result));
             } catch (Exception e) {
                 Platform.runLater(() -> {
                     String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
@@ -148,10 +242,50 @@ public class BacktestController implements Initializable {
         t.start();
     }
 
-    private void applyResult(BacktestResult result) {
-        backtestChart.getData().clear();
+    private Map<String, List<HistoricalBar>> fetchBars(List<String> symbols, LocalDate start, LocalDate end,
+                                                        QuoteProvider provider) throws Exception {
+        Map<String, List<HistoricalBar>> barsBySymbol = new LinkedHashMap<>();
+        for (String sym : symbols) {
+            List<HistoricalBar> bars = (provider != null)
+                    ? provider.getHistoricalBars(sym, start, end)
+                    : new com.tradingapp.data.HistoricalBarFetcher().fetchDailyBars(sym, start, end);
+            barsBySymbol.put(sym, bars);
+        }
+        return barsBySymbol;
+    }
 
+    private List<StrategyResult> runAllStrategies(BacktestConfig cfg,
+                                                   Map<String, List<HistoricalBar>> barsBySymbol) {
+        List<StrategyResult> rows = new ArrayList<>();
+
+        // Equity baseline
+        BacktestResult eq = new BacktestEngine(new IndicatorEngine(), new FeeCalculator())
+                .run(cfg, barsBySymbol);
+        rows.add(toRow(EQUITY_LABEL, eq));
+
+        // All options strategies
+        OptionsBacktestEngine optEngine = new OptionsBacktestEngine(
+                new IndicatorEngine(), new BlackScholesEngine(), new FeeCalculator());
+        for (OptionsStrategy s : OptionsStrategy.values()) {
+            BacktestResult r = optEngine.run(s, cfg, barsBySymbol);
+            rows.add(toRow(s.getDisplayName(), r));
+        }
+
+        // Sort by return/risk descending (risk-adjusted performance)
+        rows.sort(Comparator.comparingDouble(StrategyResult::riskReward).reversed());
+        return rows;
+    }
+
+    private StrategyResult toRow(String name, BacktestResult r) {
+        return new StrategyResult(name, r.getTotalReturnPct(), r.getMaxDrawdownPct(),
+                r.winRate(), r.getTotalTrades());
+    }
+
+    private void applySingleResult(BacktestResult result, String strategyName) {
+        backtestChart.getData().clear();
+        backtestChart.setLegendVisible(false);
         XYChart.Series<String, Number> series = new XYChart.Series<>();
+        series.setName(strategyName);
         for (BacktestDataPoint pt : result.getEquityCurve()) {
             series.getData().add(new XYChart.Data<>(pt.getDate().toString(), pt.getPortfolioValue()));
         }
@@ -163,5 +297,29 @@ public class BacktestController implements Initializable {
         btMaxDrawdownLabel.setText(String.format("Max Drawdown: %.1f%%", result.getMaxDrawdownPct()));
         btWinRateLabel.setText(String.format("Win Rate: %.1f%%", result.winRate()));
         btTradeCountLabel.setText("Trades: " + result.getTotalTrades());
+    }
+
+    private void applyComparisonResults(List<StrategyResult> rows) {
+        comparisonTable.getItems().setAll(rows);
+
+        // Show range summary in stat labels for quick reference
+        if (rows.isEmpty()) return;
+        double minRet = rows.stream().mapToDouble(StrategyResult::returnPct).min().orElse(0);
+        double maxRet = rows.stream().mapToDouble(StrategyResult::returnPct).max().orElse(0);
+        StrategyResult best = rows.get(0);
+        btReturnLabel.setText(String.format("Returns: %+.1f%% to %+.1f%%", minRet, maxRet));
+        btReturnLabel.setStyle("-fx-font-size: 14px; -fx-text-fill: #e0e0e0;");
+        btMaxDrawdownLabel.setText(String.format("Best Risk/Reward: %.2f (%s)", best.riskReward(), best.name()));
+        btWinRateLabel.setText(String.format("Best Return: %+.1f%% (%s)",
+                rows.stream().mapToDouble(StrategyResult::returnPct).max().orElse(0),
+                rows.stream().max(Comparator.comparingDouble(StrategyResult::returnPct)).map(StrategyResult::name).orElse("")));
+        btTradeCountLabel.setText(String.format("Strategies: %d", rows.size()));
+    }
+
+    private static OptionsStrategy strategyForName(String name) {
+        for (OptionsStrategy s : OptionsStrategy.values()) {
+            if (s.getDisplayName().equals(name)) return s;
+        }
+        return null;
     }
 }

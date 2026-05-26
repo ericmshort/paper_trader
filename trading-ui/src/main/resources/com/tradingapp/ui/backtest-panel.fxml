@@ -19,13 +19,15 @@
         <DatePicker fx:id="backtestEndDate" prefWidth="130"/>
         <Label text="Symbols:" style="-fx-font-size: 12px; -fx-text-fill: #e0e0e0;"/>
         <TextField fx:id="backtestSymbols" prefWidth="200" promptText="AAPL,MSFT,GOOGL"/>
+        <Label text="Strategy:" style="-fx-font-size: 12px; -fx-text-fill: #e0e0e0;"/>
+        <ComboBox fx:id="strategyCombo" prefWidth="175"/>
         <Button fx:id="runBacktestButton" text="Run Backtest" onAction="#runBacktest"
                 style="-fx-background-color: #00aa55; -fx-text-fill: white; -fx-font-weight: bold;"/>
         <ProgressIndicator fx:id="backtestProgress" visible="false" prefWidth="20" prefHeight="20"/>
     </HBox>
 
-    <!-- Row 2: Stats labels -->
-    <HBox spacing="30" style="-fx-background-color: #16213e; -fx-padding: 8;">
+    <!-- Row 2: Stats labels (single-strategy view) -->
+    <HBox fx:id="statsBox" spacing="30" style="-fx-background-color: #16213e; -fx-padding: 8;">
         <Label fx:id="btReturnLabel" text="Return: —"
                style="-fx-font-size: 14px; -fx-text-fill: #e0e0e0;"/>
         <Label fx:id="btMaxDrawdownLabel" text="Max Drawdown: —"
@@ -36,7 +38,13 @@
                style="-fx-font-size: 14px; -fx-text-fill: #e0e0e0;"/>
     </HBox>
 
-    <!-- Row 3: Equity curve chart -->
+    <!-- Comparison table (Compare All mode) — hidden until needed -->
+    <TableView fx:id="comparisonTable" visible="false" managed="false"
+               VBox.vgrow="ALWAYS"
+               style="-fx-background-color: #1a1a2e; -fx-control-inner-background: #1a1a2e;
+                      -fx-table-cell-border-color: #2a2a4e; -fx-text-fill: #e0e0e0;"/>
+
+    <!-- Equity curve chart -->
     <LineChart fx:id="backtestChart"
                VBox.vgrow="ALWAYS"
                animated="false"

@@ -32,15 +32,26 @@ public class OptionsOrderExecutor {
 
     public void buyCall(String symbol, double strike, LocalDate expiry, int contracts,
                         double premium, String signalStr, String featureCsv) {
-        buy(symbol, "CALL", strike, expiry, contracts, premium, signalStr, featureCsv, TransactionAction.CALL_BUY);
+        buy(symbol + "_CALL", symbol, "CALL", strike, expiry, contracts, premium, signalStr, featureCsv, TransactionAction.CALL_BUY);
     }
 
     public void buyPut(String symbol, double strike, LocalDate expiry, int contracts,
                        double premium, String signalStr, String featureCsv) {
-        buy(symbol, "PUT", strike, expiry, contracts, premium, signalStr, featureCsv, TransactionAction.PUT_BUY);
+        buy(symbol + "_PUT", symbol, "PUT", strike, expiry, contracts, premium, signalStr, featureCsv, TransactionAction.PUT_BUY);
     }
 
-    private void buy(String symbol, String optionType, double strike, LocalDate expiry, int contracts,
+    // Used for multi-leg strategies (straddle, strangle) that need a unique position key per leg
+    public void buyCallAs(String positionKey, String symbol, double strike, LocalDate expiry,
+                          int contracts, double premium, String signalStr, String featureCsv) {
+        buy(positionKey, symbol, "CALL", strike, expiry, contracts, premium, signalStr, featureCsv, TransactionAction.CALL_BUY);
+    }
+
+    public void buyPutAs(String positionKey, String symbol, double strike, LocalDate expiry,
+                         int contracts, double premium, String signalStr, String featureCsv) {
+        buy(positionKey, symbol, "PUT", strike, expiry, contracts, premium, signalStr, featureCsv, TransactionAction.PUT_BUY);
+    }
+
+    private void buy(String posKey, String symbol, String optionType, double strike, LocalDate expiry, int contracts,
                      double bsPremium, String signalStr, String featureCsv, TransactionAction action) {
         String externalId = null;
         double fillPremium;
@@ -60,7 +71,6 @@ public class OptionsOrderExecutor {
         if (account.getBalance() < totalCost) return;
         account.setBalance(account.getBalance() - totalCost);
 
-        String posKey = symbol + "_" + optionType;
         OptionsPosition pos = new OptionsPosition(symbol, optionType, strike, expiry, contracts, fillPremium);
         account.addOptionsPosition(posKey, pos);
 
