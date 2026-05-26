@@ -110,6 +110,7 @@ public class DashboardController implements Initializable {
     private boolean alpacaMode = false;
 
     private static final Logger LOG = Logger.getLogger(DashboardController.class.getName());
+    private final TradingLogger tradingLogger = new TradingLogger();
     private static final DateTimeFormatter TIME_FMT =
             DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
 
@@ -173,7 +174,13 @@ public class DashboardController implements Initializable {
             brokerClient = new SimulatedBroker(orderExecutor);
         }
 
-        Consumer<String> researchCb = msg -> Platform.runLater(() -> researchArea.appendText(msg + "\n"));
+        Consumer<String> researchCb = msg -> {
+            Platform.runLater(() -> researchArea.appendText(msg + "\n"));
+            // Quote lines: "HH:mm | SYMBOL $price | ... | BUY=n SELL=n" — skip those
+            if (!msg.contains("| BUY=")) {
+                tradingLogger.log(msg);
+            }
+        };
         Runnable uiRefresh = () -> Platform.runLater(this::refreshUi);
 
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, transactionLog,
@@ -207,6 +214,7 @@ public class DashboardController implements Initializable {
         tradingLoop.setMarketRegimeFilterEnabled(appConfig.isMarketRegimeFilterEnabled());
         tradingLoop.setEarningsCalendar(earningsCalendar);
         tradingLoop.setEarningsBlackoutDays(appConfig.getEarningsBlackoutDays());
+        optionsRouter.setUptrendSupplier(tradingLoop::isUptrend);
 
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "trading-loop");

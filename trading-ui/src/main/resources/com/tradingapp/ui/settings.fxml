@@ -72,7 +72,7 @@
         <TextField fx:id="dailyLossLimitField" prefWidth="60"
                    style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
                    promptText="5.0"/>
-        <Label text="% of portfolio value (0 = disabled)"
+        <Label text="(% of portfolio value, 0 = disabled)"
                style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
     </HBox>
 

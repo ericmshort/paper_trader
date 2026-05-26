@@ -133,6 +133,7 @@ public class TradingLoop implements Runnable {
     public void setDailyLossLimitPct(double pct) { this.dailyLossLimitPct = pct; }
     public void setAvoidOvernightHolds(boolean v) { this.avoidOvernightHolds = v; }
     public void setMarketRegimeFilterEnabled(boolean v) { this.marketRegimeFilterEnabled = v; }
+    public boolean isUptrend() { return isMarketInUptrend(); }
     public void setEarningsCalendar(EarningsCalendar cal) { this.earningsCalendar = cal; }
     public void setEarningsBlackoutDays(int days) { this.earningsBlackoutDays = days; }
 
