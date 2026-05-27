@@ -135,8 +135,8 @@ public class IndicatorEngineTest {
     @Test
     void testVolumeSurge_NoSurge() {
         List<Double> volumes = new ArrayList<>(Collections.nCopies(20, 1000.0));
-        SignalResult result = engine.computeVolumeSurge(volumes, 1500.0, 2.0);
-        assertEquals(SignalResult.Direction.NEUTRAL, result.getDirection(), "Volume below 2× avg → NEUTRAL");
+        SignalResult result = engine.computeVolumeSurge(volumes, 1400.0, 2.0);
+        assertEquals(SignalResult.Direction.NEUTRAL, result.getDirection(), "Volume below 1.5× avg → NEUTRAL");
     }
 
     // evaluateAll test

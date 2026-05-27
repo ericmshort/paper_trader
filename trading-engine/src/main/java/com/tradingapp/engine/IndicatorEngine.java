@@ -95,7 +95,7 @@ public class IndicatorEngine {
         }
         double avgVolume = volumes.subList(0, 20).stream().mapToDouble(Double::doubleValue).average().orElse(0);
         double ratio = currentVolume / avgVolume;
-        if (currentVolume < avgVolume * 2) {
+        if (currentVolume < avgVolume * 1.5) {
             return SignalResult.neutral("VolumeSurge", ratio);
         }
         if (priceChangePct > 0) return SignalResult.buy("VolumeSurge", ratio);

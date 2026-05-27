@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
 
 public class TradingLoop implements Runnable {
 
-    static final int SIGNAL_THRESHOLD = 2;
+    static final double SIGNAL_THRESHOLD = 1.8;
     static final double MAX_PORTFOLIO_EXPOSURE = 0.60;
     private static final LocalTime MARKET_OPEN = LocalTime.of(9, 30);
     private static final LocalTime MARKET_CLOSE = LocalTime.of(16, 0);
