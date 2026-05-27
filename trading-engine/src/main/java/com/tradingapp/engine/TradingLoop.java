@@ -52,6 +52,7 @@ public class TradingLoop implements Runnable {
     private int earningsBlackoutDays = 3;
     private final Map<String, Double> lastKnownPrices = new HashMap<>();
     private final Map<String, LocalDate> dailyBarLastRecorded = new HashMap<>();
+    private final Map<String, RSIMomentumStrategy> symbolStrategies = new HashMap<>();
 
     public TradingLoop(QuoteProvider dataClient, PriceHistory priceHistory,
                        IndicatorEngine indicators, TrailingStopMonitor trailingStop,
@@ -136,6 +137,7 @@ public class TradingLoop implements Runnable {
     public boolean isUptrend() { return isMarketInUptrend(); }
     public void setEarningsCalendar(EarningsCalendar cal) { this.earningsCalendar = cal; }
     public void setEarningsBlackoutDays(int days) { this.earningsBlackoutDays = days; }
+    public void registerStrategy(String symbol, RSIMomentumStrategy strategy) { symbolStrategies.put(symbol, strategy); }
 
     @Override
     public void run() {
@@ -199,39 +201,81 @@ public class TradingLoop implements Runnable {
                 String signalStr = signals.stream().map(SignalResult::toString).collect(Collectors.joining(", "));
                 String featureCsv = extractFeatureCsv(signals);
                 boolean hasPosition = account.getPositions().containsKey(symbol);
-                if (trailingStop.check(symbol, price) && hasPosition) {
-                    Position pos = account.getPositions().get(symbol);
-                    brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Trailing stop: 5% drawdown from peak");
-                    trailingStop.reset(symbol);
-                    uiRefreshCallback.run();
-                } else if (weightedSells >= SIGNAL_THRESHOLD && hasPosition) {
-                    Position pos = account.getPositions().get(symbol);
-                    brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Signals: " + sells + "/" + signals.size() + " SELL");
-                    trailingStop.reset(symbol);
-                    uiRefreshCallback.run();
-                } else if (weightedBuys >= SIGNAL_THRESHOLD && !hasPosition) {
-                    int daysToEarnings = earningsCalendar != null
-                            ? earningsCalendar.daysUntilEarnings(symbol) : Integer.MAX_VALUE;
-                    if (!isMarketInUptrend()) {
-                        researchCallback.accept(symbol + " BUY skipped: SPY below 50-day MA (bear regime)");
-                    } else if (daysToEarnings <= earningsBlackoutDays) {
-                        researchCallback.accept(symbol + " BUY skipped: earnings in "
-                                + daysToEarnings + " day" + (daysToEarnings == 1 ? "" : "s"));
-                    } else if (account.totalExposureFraction() >= MAX_PORTFOLIO_EXPOSURE) {
-                        researchCallback.accept(symbol + " BUY skipped: portfolio at capacity ("
-                                + String.format("%.0f%%", account.totalExposureFraction() * 100) + " deployed)");
-                    } else if (account.isDailyLossHalted()) {
-                        researchCallback.accept(symbol + " BUY skipped: daily loss limit active");
-                    } else {
-                        int shares = fees.maxShares(account.getBalance(), price);
-                        if (shares > 0) {
-                            brokerClient.submitBuy(symbol, shares, price, signalStr,
-                                    "Signals: " + buys + "/" + signals.size() + " BUY", featureCsv);
-                            uiRefreshCallback.run();
+                RSIMomentumStrategy rsiStrategy = symbolStrategies.get(symbol);
+                if (rsiStrategy != null) {
+                    boolean stopHit = hasPosition && rsiStrategy.isTrailingStopHit(price);
+                    SignalResult.Direction rsiDir = rsiStrategy.signal(prices);
+                    if (stopHit) {
+                        Position pos = account.getPositions().get(symbol);
+                        brokerClient.submitSell(symbol, pos.getQuantity(), price, "RSI=" + rsiDir,
+                                String.format("RSI Momentum trailing stop: %.0f%% drawdown from peak",
+                                        rsiStrategy.getTrailingStopPct() * 100));
+                        rsiStrategy.onPositionClosed();
+                        uiRefreshCallback.run();
+                    } else if (rsiDir == SignalResult.Direction.SELL && hasPosition) {
+                        Position pos = account.getPositions().get(symbol);
+                        brokerClient.submitSell(symbol, pos.getQuantity(), price,
+                                "RSI overbought", "RSI Momentum: RSI overbought");
+                        rsiStrategy.onPositionClosed();
+                        uiRefreshCallback.run();
+                    } else if (rsiDir == SignalResult.Direction.BUY && !hasPosition) {
+                        int daysToEarnings = earningsCalendar != null
+                                ? earningsCalendar.daysUntilEarnings(symbol) : Integer.MAX_VALUE;
+                        if (!isMarketInUptrend()) {
+                            researchCallback.accept(symbol + " BUY skipped: SPY below 50-day MA (bear regime)");
+                        } else if (daysToEarnings <= earningsBlackoutDays) {
+                            researchCallback.accept(symbol + " BUY skipped: earnings in "
+                                    + daysToEarnings + " day" + (daysToEarnings == 1 ? "" : "s"));
+                        } else if (account.totalExposureFraction() >= MAX_PORTFOLIO_EXPOSURE) {
+                            researchCallback.accept(symbol + " BUY skipped: portfolio at capacity ("
+                                    + String.format("%.0f%%", account.totalExposureFraction() * 100) + " deployed)");
+                        } else if (account.isDailyLossHalted()) {
+                            researchCallback.accept(symbol + " BUY skipped: daily loss limit active");
+                        } else {
+                            int shares = fees.maxShares(account.getBalance(), price);
+                            if (shares > 0) {
+                                brokerClient.submitBuy(symbol, shares, price, "RSI oversold",
+                                        "RSI Momentum: RSI oversold", "");
+                                rsiStrategy.onPositionOpened(price);
+                                uiRefreshCallback.run();
+                            }
                         }
                     }
+                } else {
+                    if (trailingStop.check(symbol, price) && hasPosition) {
+                        Position pos = account.getPositions().get(symbol);
+                        brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Trailing stop: 5% drawdown from peak");
+                        trailingStop.reset(symbol);
+                        uiRefreshCallback.run();
+                    } else if (weightedSells >= SIGNAL_THRESHOLD && hasPosition) {
+                        Position pos = account.getPositions().get(symbol);
+                        brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Signals: " + sells + "/" + signals.size() + " SELL");
+                        trailingStop.reset(symbol);
+                        uiRefreshCallback.run();
+                    } else if (weightedBuys >= SIGNAL_THRESHOLD && !hasPosition) {
+                        int daysToEarnings = earningsCalendar != null
+                                ? earningsCalendar.daysUntilEarnings(symbol) : Integer.MAX_VALUE;
+                        if (!isMarketInUptrend()) {
+                            researchCallback.accept(symbol + " BUY skipped: SPY below 50-day MA (bear regime)");
+                        } else if (daysToEarnings <= earningsBlackoutDays) {
+                            researchCallback.accept(symbol + " BUY skipped: earnings in "
+                                    + daysToEarnings + " day" + (daysToEarnings == 1 ? "" : "s"));
+                        } else if (account.totalExposureFraction() >= MAX_PORTFOLIO_EXPOSURE) {
+                            researchCallback.accept(symbol + " BUY skipped: portfolio at capacity ("
+                                    + String.format("%.0f%%", account.totalExposureFraction() * 100) + " deployed)");
+                        } else if (account.isDailyLossHalted()) {
+                            researchCallback.accept(symbol + " BUY skipped: daily loss limit active");
+                        } else {
+                            int shares = fees.maxShares(account.getBalance(), price);
+                            if (shares > 0) {
+                                brokerClient.submitBuy(symbol, shares, price, signalStr,
+                                        "Signals: " + buys + "/" + signals.size() + " BUY", featureCsv);
+                                uiRefreshCallback.run();
+                            }
+                        }
+                    }
+                    trailingStop.updatePeak(symbol, price);
                 }
-                trailingStop.updatePeak(symbol, price);
                 if (optionsEvaluator != null) {
                     optionsEvaluator.evaluate(symbol, price, buys, sells, signalStr, featureCsv);
                 }
