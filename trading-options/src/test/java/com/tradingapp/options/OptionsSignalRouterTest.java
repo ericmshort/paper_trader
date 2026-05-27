@@ -65,7 +65,7 @@ public class OptionsSignalRouterTest {
         TransactionLog log = new TransactionLog(tempDir.resolve("call.db").toString());
         OptionsSignalRouter router = buildRouter(account, log);
 
-        router.evaluate(SYMBOL, PRICE, 2, 0, "test signals", "");
+        router.evaluate(SYMBOL, PRICE, 3, 0, "test signals", "");
 
         assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
                 "CALL position should be opened on 2 buy signals");
@@ -77,7 +77,7 @@ public class OptionsSignalRouterTest {
         TransactionLog log = new TransactionLog(tempDir.resolve("put.db").toString());
         OptionsSignalRouter router = buildRouter(account, log);
 
-        router.evaluate(SYMBOL, PRICE, 0, 2, "test signals", "");
+        router.evaluate(SYMBOL, PRICE, 0, 3, "test signals", "");
 
         assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_PUT"),
                 "PUT position should be opened on 2 sell signals");
@@ -90,11 +90,11 @@ public class OptionsSignalRouterTest {
         OptionsSignalRouter router = buildRouter(account, log);
 
         // Open call
-        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+        router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
         assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"));
 
         // Reverse: sell signal closes the call
-        router.evaluate(SYMBOL, PRICE, 0, 2, "sell", "");
+        router.evaluate(SYMBOL, PRICE, 0, 3, "sell", "");
         assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
                 "CALL position should be closed on sell reversal");
     }
@@ -111,7 +111,7 @@ public class OptionsSignalRouterTest {
         List<String> msgs = new ArrayList<>();
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, ph, msgs::add);
 
-        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+        router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
 
         assertTrue(account.getOptionsPositions().isEmpty(),
                 "No position should be opened when vol = 0");
@@ -124,7 +124,7 @@ public class OptionsSignalRouterTest {
         OptionsSignalRouter router = buildRouter(account, log);
 
         // Open a call ATM at $150
-        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+        router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
         assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"));
 
         // Price collapses to $100 — the call is now deep OTM; premium drops well below 50% of paid
@@ -141,7 +141,7 @@ public class OptionsSignalRouterTest {
         OptionsSignalRouter router = buildRouter(account, log);
 
         // Open a put ATM at $150
-        router.evaluate(SYMBOL, PRICE, 0, 2, "sell", "");
+        router.evaluate(SYMBOL, PRICE, 0, 3, "sell", "");
         assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_PUT"));
 
         // Price surges to $200 — put is now deep OTM; premium drops well below 50% of paid
@@ -158,7 +158,7 @@ public class OptionsSignalRouterTest {
         OptionsSignalRouter router = buildRouter(account, log);
 
         // Open a call ATM at $150
-        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+        router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
         assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"));
 
         // Price moves slightly against the position but not enough to trigger the 50% stop
@@ -180,7 +180,7 @@ public class OptionsSignalRouterTest {
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, log);
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, buildPriceHistory(), msgs::add);
 
-        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+        router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
 
         assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
                 "CALL should not open when portfolio is at 42% capacity");
@@ -203,7 +203,7 @@ public class OptionsSignalRouterTest {
         for (int i = 0; i < 20; i++) ph.record(SYMBOL, i % 2 == 0 ? 100.0 : 200.0, 1_000_000.0);
 
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, ph, msgs::add);
-        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+        router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
 
         assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
                 "CALL should not open when IV is surging");
@@ -224,7 +224,7 @@ public class OptionsSignalRouterTest {
         for (int i = 0; i < 40; i++) ph.record(SYMBOL, i % 2 == 0 ? 148.0 : 152.0, 1_000_000.0);
 
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, ph, msgs::add);
-        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+        router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
 
         // Should open (or be skipped for premium reasons), but never for IV surge
         assertFalse(msgs.stream().anyMatch(m -> m.contains("IV surge")),
@@ -238,7 +238,7 @@ public class OptionsSignalRouterTest {
         OptionsSignalRouter router = buildRouter(account, log);
 
         // Open a call ATM at $150
-        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+        router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
         assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"));
 
         // Price surges to $250 — deeply ITM; premium is far above 2x of original
@@ -255,7 +255,7 @@ public class OptionsSignalRouterTest {
         OptionsSignalRouter router = buildRouter(account, log);
 
         // Open a put ATM at $150
-        router.evaluate(SYMBOL, PRICE, 0, 2, "sell", "");
+        router.evaluate(SYMBOL, PRICE, 0, 3, "sell", "");
         assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_PUT"));
 
         // Price collapses to $50 — deeply ITM put; premium far above 2x of original
@@ -276,7 +276,7 @@ public class OptionsSignalRouterTest {
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, log);
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, buildPriceHistory(), msgs::add);
 
-        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+        router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
 
         assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
                 "CALL should not open when daily loss limit is active");
@@ -296,7 +296,7 @@ public class OptionsSignalRouterTest {
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, log);
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, buildPriceHistory(), msgs::add);
 
-        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+        router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
 
         assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
                 "CALL should be blocked when equity position is already open (double-dip)");
@@ -316,7 +316,7 @@ public class OptionsSignalRouterTest {
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, log);
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, buildPriceHistory(), msgs::add);
 
-        router.evaluate(SYMBOL, PRICE, 0, 2, "sell", "");
+        router.evaluate(SYMBOL, PRICE, 0, 3, "sell", "");
 
         assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_PUT"),
                 "PUT should be allowed as protective hedge when equity position is open");
@@ -333,7 +333,7 @@ public class OptionsSignalRouterTest {
         List<String> msgs = new ArrayList<>();
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, ph, msgs::add);
 
-        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+        router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
 
         assertTrue(account.getOptionsPositions().isEmpty(),
                 "No position should open with only 1 price in history");
@@ -502,7 +502,7 @@ public class OptionsSignalRouterTest {
         assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_STRADDLE_CALL"));
 
         // Now: pure buy signal — should NOT open an additional directional call
-        router.evaluate(SYMBOL, PRICE, 2, 0, "buy", "");
+        router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
         assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
                 "Long CALL should not open when straddle is already active");
     }

@@ -19,8 +19,8 @@ import java.util.function.Consumer;
 /**
  * Routes options signals to the appropriate strategy:
  *
- *   purelyBullish (buys ≥ 2, sells = 0) → Long Call
- *   purelyBearish (sells ≥ 2, buys = 0) → Long Put
+ *   purelyBullish (buys ≥ 3, sells = 0) → Long Call
+ *   purelyBearish (sells ≥ 3, buys = 0) → Long Put
  *   mixedStrong   (buys ≥ 2 + sells ≥ 1, or vice-versa) → Straddle or Strangle
  *
  * Straddle vs Strangle selection: when recent IV (last 10 bars) is below 80% of
@@ -135,8 +135,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (T <= 0) return;
 
         // ── 4. Signal classification ──
-        boolean purelyBullish = buySignals >= 2 && sellSignals == 0;
-        boolean purelyBearish = sellSignals >= 2 && buySignals == 0;
+        boolean purelyBullish = buySignals >= 3 && sellSignals == 0;
+        boolean purelyBearish = sellSignals >= 3 && buySignals == 0;
         boolean mixedStrong   = (buySignals >= 2 && sellSignals >= 1)
                              || (sellSignals >= 2 && buySignals >= 1);
 
