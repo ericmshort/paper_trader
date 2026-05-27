@@ -346,6 +346,28 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         optExec.buyCallAs(posCallKey, symbol, callK, expiry, contracts, callPremium, signalStr, featureCsv);
         optExec.buyPutAs(posPutKey,   symbol, putK,  expiry, contracts, putPremium,  signalStr, featureCsv);
 
+        // Atomicity guard: if one leg opened but the other didn't (broker rejection, balance
+        // exhausted by slippage, etc.), close the opened leg immediately to avoid a half-open
+        // position that neither the multi-leg nor directional close logic would ever manage.
+        boolean callOpened = account.getOptionsPositions().containsKey(posCallKey);
+        boolean putOpened  = account.getOptionsPositions().containsKey(posPutKey);
+
+        if (callOpened && !putOpened) {
+            optExec.closePosition(posCallKey, callPremium,
+                    "Rollback: " + strategyName + " put leg did not open");
+            researchCallback.accept(symbol + " " + strategyName + " CALL rolled back: put leg failed");
+            return;
+        }
+        if (!callOpened && putOpened) {
+            optExec.closePosition(posPutKey, putPremium,
+                    "Rollback: " + strategyName + " call leg did not open");
+            researchCallback.accept(symbol + " " + strategyName + " PUT rolled back: call leg failed");
+            return;
+        }
+        if (!callOpened) {
+            return; // both legs failed; nothing to log
+        }
+
         GreeksResult cg = bsEngine.greeks(price, callK, RISK_FREE_RATE, T, sigma, true);
         GreeksResult pg = bsEngine.greeks(price, putK,  RISK_FREE_RATE, T, sigma, false);
         researchCallback.accept(String.format(

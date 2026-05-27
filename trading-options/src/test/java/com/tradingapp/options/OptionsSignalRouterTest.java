@@ -506,4 +506,31 @@ public class OptionsSignalRouterTest {
         assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
                 "Long CALL should not open when straddle is already active");
     }
+
+    @Test
+    void testStraddleCallRolledBackWhenPutLegRejected() {
+        // Broker accepts call buys and all sells (needed for rollback) but rejects put buys.
+        // The router must detect the half-open state and close the call to restore consistency.
+        Account account = new Account();
+        TransactionLog log = new TransactionLog(tempDir.resolve("rollback.db").toString());
+        BlackScholesEngine bsEngine = new BlackScholesEngine();
+        OptionsSubmitter submitter = (sym, type, strike, expiry, contracts, side) -> {
+            if ("sell".equals(side))   return "SELL-" + type; // accept rollback close
+            if ("CALL".equals(type))   return "CALL-ORD-1";   // accept call buy
+            return null;                                       // reject put buy
+        };
+        OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, log, submitter);
+        PriceHistory ph = buildLowRecentIVHistory();
+        List<String> msgs = new ArrayList<>();
+        OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, ph, msgs::add);
+
+        router.evaluate(SYMBOL, PRICE, 2, 1, "mixed", "");
+
+        assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_STRADDLE_CALL"),
+                "STRADDLE_CALL should be rolled back when put leg is rejected by broker");
+        assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_STRADDLE_PUT"),
+                "STRADDLE_PUT should not be open");
+        assertTrue(msgs.stream().anyMatch(m -> m.contains("rolled back")),
+                "Should log rollback message");
+    }
 }
