@@ -445,7 +445,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (contracts < 1) return;
 
         boolean opened = optExec.openCreditSpread(shortKey, longKey, symbol, "PUT",
-                shortK, longK, expiry, contracts, shortPrem, longPrem, signalStr, featureCsv);
+                shortK, longK, expiry, contracts, shortPrem, longPrem, signalStr, featureCsv, "BULL PUT SPREAD");
         if (!opened) {
             researchCallback.accept(symbol + " BULL PUT SPREAD did not open (legs rejected)");
             return;
@@ -495,7 +495,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (contracts < 1) return;
 
         boolean opened = optExec.openCreditSpread(shortKey, longKey, symbol, "CALL",
-                shortK, longK, expiry, contracts, shortPrem, longPrem, signalStr, featureCsv);
+                shortK, longK, expiry, contracts, shortPrem, longPrem, signalStr, featureCsv, "BEAR CALL SPREAD");
         if (!opened) {
             researchCallback.accept(symbol + " BEAR CALL SPREAD did not open (legs rejected)");
             return;
@@ -627,7 +627,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         }
 
         boolean opened = optExec.openBuyPair(callKey, putKey, symbol, K, K,
-                today, today, contracts, callPremium, putPremium, signalStr, featureCsv);
+                today, today, contracts, callPremium, putPremium, signalStr, featureCsv, "ZERO-DTE");
         if (!opened) {
             researchCallback.accept(symbol + " ZERO-DTE did not open (legs rejected)");
             return;
@@ -685,7 +685,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         }
 
         boolean opened = optExec.openBuyPair(posCallKey, posPutKey, symbol, callK, putK,
-                expiry, expiry, contracts, callPremium, putPremium, signalStr, featureCsv);
+                expiry, expiry, contracts, callPremium, putPremium, signalStr, featureCsv, strategyName);
         if (!opened) {
             researchCallback.accept(symbol + " " + strategyName + " did not open (legs rejected)");
             return;

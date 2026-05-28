@@ -56,7 +56,8 @@ public class TransactionLog {
                     """);
             for (String migration : new String[]{
                     "ALTER TABLE transactions ADD COLUMN features TEXT",
-                    "ALTER TABLE transactions ADD COLUMN external_id TEXT"
+                    "ALTER TABLE transactions ADD COLUMN external_id TEXT",
+                    "ALTER TABLE transactions ADD COLUMN group_id TEXT"
             }) {
                 try {
                     stmt.execute(migration);
@@ -72,8 +73,8 @@ public class TransactionLog {
     public void insert(TransactionRecord record) {
         String sql = """
                 INSERT INTO transactions
-                    (timestamp, symbol, action, quantity, price_per_unit, fee_charged, balance_after, reason, signals, features, external_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (timestamp, symbol, action, quantity, price_per_unit, fee_charged, balance_after, reason, signals, features, external_id, group_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
         try (Connection conn = connect();
              PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
@@ -88,6 +89,7 @@ public class TransactionLog {
             ps.setString(9, record.getSignals());
             ps.setString(10, record.getFeatures());
             ps.setString(11, record.getExternalId());
+            ps.setString(12, record.getGroupId());
             ps.executeUpdate();
             try (ResultSet keys = ps.getGeneratedKeys()) {
                 if (keys.next()) {
@@ -96,6 +98,17 @@ public class TransactionLog {
             }
         } catch (SQLException e) {
             throw new RuntimeException("Failed to insert transaction record", e);
+        }
+    }
+
+    public void updateGroupId(long id, String groupId) {
+        String sql = "UPDATE transactions SET group_id = ? WHERE id = ?";
+        try (Connection conn = connect(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, groupId);
+            ps.setLong(2, id);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to update group_id", e);
         }
     }
 
@@ -167,6 +180,7 @@ public class TransactionLog {
                 r.setSignals(rs.getString("signals"));
                 r.setFeatures(rs.getString("features"));
                 r.setExternalId(rs.getString("external_id"));
+                r.setGroupId(rs.getString("group_id"));
                 records.add(r);
             }
         } catch (SQLException e) {

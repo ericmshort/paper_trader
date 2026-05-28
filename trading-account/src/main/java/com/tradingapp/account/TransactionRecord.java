@@ -16,6 +16,7 @@ public class TransactionRecord {
     private String signals;
     private String features;
     private String externalId;
+    private String groupId;
 
     public TransactionRecord() {}
 
@@ -58,4 +59,6 @@ public class TransactionRecord {
     public void setFeatures(String features) { this.features = features; }
     public String getExternalId() { return externalId; }
     public void setExternalId(String externalId) { this.externalId = externalId; }
+    public String getGroupId() { return groupId; }
+    public void setGroupId(String groupId) { this.groupId = groupId; }
 }

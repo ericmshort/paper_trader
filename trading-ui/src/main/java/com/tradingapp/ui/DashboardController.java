@@ -45,6 +45,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -314,6 +315,19 @@ public class DashboardController implements Initializable {
 
         colSymbol.setCellValueFactory(new PropertyValueFactory<>("symbol"));
         colAction.setCellValueFactory(new PropertyValueFactory<>("action"));
+        colAction.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String action, boolean empty) {
+                super.updateItem(action, empty);
+                if (empty || action == null) { setText(null); setStyle(""); return; }
+                String label = formatAction(action);
+                boolean isBuy = label.contains("BUY") || label.contains("OPEN");
+                setText(label);
+                setStyle(isBuy
+                        ? "-fx-text-fill: #00ff88; -fx-font-weight: bold;"
+                        : "-fx-text-fill: #ff4444; -fx-font-weight: bold;");
+            }
+        });
         colQuantity.setCellValueFactory(new PropertyValueFactory<>("quantity"));
 
         colPrice.setCellValueFactory(new PropertyValueFactory<>("pricePerUnit"));
@@ -460,7 +474,7 @@ public class DashboardController implements Initializable {
     }
 
     private void refreshUi() {
-        List<TransactionRecord> history = transactionLog.findAll();
+        List<TransactionRecord> history = collapseMultiLegHistory(transactionLog.findAll());
         tradeHistoryTable.setItems(FXCollections.observableArrayList(history));
 
         double availableCash = account.getBalance();
@@ -577,7 +591,7 @@ public class DashboardController implements Initializable {
                     int sellQty = r.getQuantity();
                     double pnl = (r.getPricePerUnit() - entry[0]) * 100 * sellQty - r.getFeeCharged();
                     closed.add(new ClosedTradeRecord(r.getSymbol(), "Call Option", sellQty,
-                            entry[0], r.getPricePerUnit(), pnl, r.getTimestamp()));
+                            entry[0], r.getPricePerUnit(), pnl, r.getTimestamp(), r.getGroupId()));
                     reduceOptionPosition(openOptionPremiums, r.getSymbol() + "_CALL", entry, sellQty);
                 }
                 case PUT_SELL -> {
@@ -586,14 +600,14 @@ public class DashboardController implements Initializable {
                     int sellQty = r.getQuantity();
                     double pnl = (r.getPricePerUnit() - entry[0]) * 100 * sellQty - r.getFeeCharged();
                     closed.add(new ClosedTradeRecord(r.getSymbol(), "Put Option", sellQty,
-                            entry[0], r.getPricePerUnit(), pnl, r.getTimestamp()));
+                            entry[0], r.getPricePerUnit(), pnl, r.getTimestamp(), r.getGroupId()));
                     reduceOptionPosition(openOptionPremiums, r.getSymbol() + "_PUT", entry, sellQty);
                 }
             }
         }
 
         Collections.reverse(closed); // most recent first
-        return closed;
+        return mergeMultiLegClosedTrades(closed);
     }
 
     /** Accumulates multiple BUY records for the same option key into a weighted-average position. */
@@ -605,6 +619,115 @@ public class DashboardController implements Initializable {
                 ? (existing[0] * existing[1] + effectivePremium * r.getQuantity()) / totalContracts
                 : effectivePremium;
         map.put(r.getSymbol() + suffix, new double[]{weightedAvg, totalContracts});
+    }
+
+    /**
+     * Collapses pairs of multi-leg history records (same non-null groupId) into a single
+     * combined TransactionRecord for display in the trade history table.
+     * Records without a groupId are passed through unchanged.
+     */
+    private static List<TransactionRecord> collapseMultiLegHistory(List<TransactionRecord> records) {
+        Map<String, TransactionRecord> pending = new java.util.LinkedHashMap<>();
+        List<TransactionRecord> result = new ArrayList<>();
+
+        for (TransactionRecord r : records) {
+            if (r.getGroupId() == null) {
+                result.add(r);
+                continue;
+            }
+            TransactionRecord first = pending.remove(r.getGroupId());
+            if (first == null) {
+                pending.put(r.getGroupId(), r);
+            } else {
+                // Combine the two legs into one display row
+                TransactionRecord combined = new TransactionRecord();
+                combined.setTimestamp(Math.min(first.getTimestamp(), r.getTimestamp()));
+                combined.setSymbol(first.getSymbol());
+                combined.setAction(first.getAction()); // drives color: CALL_BUY=green, CALL_SELL=red
+                combined.setQuantity(first.getQuantity());
+                combined.setPricePerUnit(first.getPricePerUnit() + r.getPricePerUnit());
+                combined.setFeeCharged(first.getFeeCharged() + r.getFeeCharged());
+                // Balance after both legs: the record with the lower id is the later insert
+                combined.setBalanceAfter(first.getId() > r.getId()
+                        ? first.getBalanceAfter() : r.getBalanceAfter());
+                combined.setReason(buildCombinedReason(first.getReason(), r.getReason()));
+                combined.setSignals(first.getSignals());
+                combined.setExternalId(first.getExternalId());
+                combined.setGroupId(first.getGroupId());
+                result.add(combined);
+            }
+        }
+        // Any unmatched first legs (shouldn't happen normally) pass through as-is
+        result.addAll(pending.values());
+        result.sort(Comparator.comparingLong(TransactionRecord::getTimestamp).reversed());
+        return result;
+    }
+
+    /** Merges pairs of ClosedTradeRecord entries that share a groupId into one combined row. */
+    private static List<ClosedTradeRecord> mergeMultiLegClosedTrades(List<ClosedTradeRecord> records) {
+        Map<String, ClosedTradeRecord> pending = new java.util.LinkedHashMap<>();
+        List<ClosedTradeRecord> result = new ArrayList<>();
+
+        for (ClosedTradeRecord r : records) {
+            if (r.getGroupId() == null) {
+                result.add(r);
+                continue;
+            }
+            ClosedTradeRecord first = pending.remove(r.getGroupId());
+            if (first == null) {
+                pending.put(r.getGroupId(), r);
+            } else {
+                String type = first.getType().equals(r.getType()) ? "Credit Spread" : "Straddle/Strangle";
+                result.add(new ClosedTradeRecord(
+                        first.getSymbol(), type, first.getQuantity(),
+                        first.getEntryRaw() + r.getEntryRaw(),
+                        first.getExitRaw()  + r.getExitRaw(),
+                        first.getPnlRaw()   + r.getPnlRaw(),
+                        Math.min(first.getTimestampRaw(), r.getTimestampRaw())));
+            }
+        }
+        result.addAll(pending.values());
+        result.sort(Comparator.comparingLong(ClosedTradeRecord::getTimestampRaw).reversed());
+        return result;
+    }
+
+    /** Builds a human-readable combined reason from two multi-leg leg reasons. */
+    private static String buildCombinedReason(String r1, String r2) {
+        if (r1 == null) return r2 != null ? r2 : "";
+        if (r2 == null) return r1;
+        if (r1.equals(r2)) return r1; // close reasons are identical — just use one
+        // Open reasons: "STRADDLE CALL K=150.0 exp=..." + "STRADDLE PUT K=150.0 exp=..."
+        // Extract strategy prefix (everything before " CALL" or " PUT")
+        int split1 = indexOfLegKeyword(r1);
+        int split2 = indexOfLegKeyword(r2);
+        if (split1 > 0 && split2 > 0) {
+            String strategy = r1.substring(0, split1).trim();
+            String leg1 = r1.substring(split1).trim();
+            String leg2 = r2.substring(split2).trim();
+            return strategy + ": " + leg1 + " + " + leg2;
+        }
+        return r1 + " / " + r2;
+    }
+
+    private static int indexOfLegKeyword(String reason) {
+        int i = reason.indexOf(" CALL K=");
+        if (i >= 0) return i + 1;
+        i = reason.indexOf(" PUT K=");
+        if (i >= 0) return i + 1;
+        return -1;
+    }
+
+    /** Maps a TransactionAction enum name to a human-readable display string. */
+    private static String formatAction(String action) {
+        return switch (action) {
+            case "BUY"       -> "STOCK BUY";
+            case "SELL"      -> "STOCK SELL";
+            case "CALL_BUY"  -> "CALL BUY";
+            case "CALL_SELL" -> "CALL SELL";
+            case "PUT_BUY"   -> "PUT BUY";
+            case "PUT_SELL"  -> "PUT SELL";
+            default          -> action;
+        };
     }
 
     /** Reduces an open option position after a partial or full close. */

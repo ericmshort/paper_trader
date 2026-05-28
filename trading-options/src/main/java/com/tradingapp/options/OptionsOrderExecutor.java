@@ -9,6 +9,7 @@ import com.tradingapp.account.TransactionRecord.TransactionAction;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.logging.Logger;
 
 public class OptionsOrderExecutor {
@@ -82,7 +83,10 @@ public class OptionsOrderExecutor {
             LocalDate callExpiry, LocalDate putExpiry,
             int contracts,
             double callPremium, double putPremium,
-            String signalStr, String featureCsv) {
+            String signalStr, String featureCsv,
+            String strategyName) {
+
+        String groupId = UUID.randomUUID().toString();
 
         // ── Attempt atomic multi-leg submission ───────────────────────────────
         if (submitter != null) {
@@ -99,9 +103,11 @@ public class OptionsOrderExecutor {
                 account.addOptionsPosition(putPosKey,
                         new OptionsPosition(symbol, "PUT", putStrike, putExpiry, contracts, putPremium));
                 logRecord(symbol, TransactionAction.CALL_BUY, contracts, callPremium, 0.0,
-                        "CALL K=" + callStrike + " exp=" + callExpiry + " (MLEG)", signalStr, featureCsv, orderId);
+                        strategyName + " CALL K=" + callStrike + " exp=" + callExpiry,
+                        signalStr, featureCsv, orderId, groupId);
                 logRecord(symbol, TransactionAction.PUT_BUY, contracts, putPremium, 0.0,
-                        "PUT K=" + putStrike + " exp=" + putExpiry + " (MLEG)", signalStr, featureCsv, orderId);
+                        strategyName + " PUT K=" + putStrike + " exp=" + putExpiry,
+                        signalStr, featureCsv, orderId, groupId);
                 return true;
             }
             // Multi-leg not supported or rejected — fall through to sequential
@@ -122,6 +128,8 @@ public class OptionsOrderExecutor {
             closePosition(putPosKey, putPremium, "Rollback: call leg rejected");
             return false;
         }
+        // Tag both legs with the same groupId so the UI can combine them
+        if (callOpened) tagLastTwoRecords(groupId);
         return callOpened;
     }
 
@@ -141,7 +149,10 @@ public class OptionsOrderExecutor {
             LocalDate expiry,
             int contracts,
             double shortPremium, double longPremium,
-            String signalStr, String featureCsv) {
+            String signalStr, String featureCsv,
+            String strategyName) {
+
+        String groupId = UUID.randomUUID().toString();
 
         // ── Attempt atomic multi-leg submission ───────────────────────────────
         if (submitter != null) {
@@ -150,10 +161,8 @@ public class OptionsOrderExecutor {
                     new MultiLegOrder(symbol, optionType, longStrike,  expiry, "buy",  "buy_to_open"));
             String orderId = submitter.submitMultiLeg(legs, contracts);
             if (orderId != null) {
-                // Net credit: short premium received minus long premium paid
                 double netCredit = (shortPremium - longPremium) * 100 * contracts;
                 account.setBalance(account.getBalance() + netCredit);
-                // Short leg stored with negative contracts (convention for short options)
                 account.addOptionsPosition(shortPosKey,
                         new OptionsPosition(symbol, optionType, shortStrike, expiry, -contracts, shortPremium));
                 account.addOptionsPosition(longPosKey,
@@ -163,9 +172,11 @@ public class OptionsOrderExecutor {
                 TransactionAction longAction = "CALL".equals(optionType)
                         ? TransactionAction.CALL_BUY : TransactionAction.PUT_BUY;
                 logRecord(symbol, shortAction, contracts, shortPremium, 0.0,
-                        optionType + " K=" + shortStrike + " exp=" + expiry + " (MLEG SHORT)", signalStr, featureCsv, orderId);
+                        strategyName + " " + optionType + " K=" + shortStrike + " exp=" + expiry + " (SHORT)",
+                        signalStr, featureCsv, orderId, groupId);
                 logRecord(symbol, longAction,  contracts, longPremium,  0.0,
-                        optionType + " K=" + longStrike  + " exp=" + expiry + " (MLEG LONG)",  signalStr, featureCsv, orderId);
+                        strategyName + " " + optionType + " K=" + longStrike  + " exp=" + expiry + " (LONG)",
+                        signalStr, featureCsv, orderId, groupId);
                 return true;
             }
             // Multi-leg not supported or rejected — fall through to sequential
@@ -191,6 +202,7 @@ public class OptionsOrderExecutor {
             closePosition(longPosKey, longPremium, "Rollback: short leg rejected");
             return false;
         }
+        if (shortOpened) tagLastTwoRecords(groupId);
         return shortOpened;
     }
 
@@ -267,7 +279,7 @@ public class OptionsOrderExecutor {
             fee = CONTRACT_FEE * pos.getContracts();
         }
 
-        recordClose(positionKey, pos, currentPremium, fee, reason, externalId);
+        recordClose(positionKey, pos, currentPremium, fee, reason, externalId, null);
     }
 
     /**
@@ -282,6 +294,8 @@ public class OptionsOrderExecutor {
         OptionsPosition putPos  = account.getOptionsPositions().get(putPosKey);
         if (callPos == null || putPos == null) return;
 
+        String groupId = UUID.randomUUID().toString();
+
         // ── Attempt atomic multi-leg close ────────────────────────────────────
         if (submitter != null) {
             List<MultiLegOrder> legs = List.of(
@@ -289,8 +303,8 @@ public class OptionsOrderExecutor {
                     new MultiLegOrder(putPos.getSymbol(),  "PUT",  putPos.getStrike(),  putPos.getExpiry(),  "sell", "sell_to_close"));
             String orderId = submitter.submitMultiLeg(legs, callPos.getContracts());
             if (orderId != null) {
-                recordClose(callPosKey, callPos, callPremium, 0.0, reason, orderId);
-                recordClose(putPosKey,  putPos,  putPremium,  0.0, reason, orderId);
+                recordClose(callPosKey, callPos, callPremium, 0.0, reason, orderId, groupId);
+                recordClose(putPosKey,  putPos,  putPremium,  0.0, reason, orderId, groupId);
                 return;
             }
         }
@@ -298,6 +312,7 @@ public class OptionsOrderExecutor {
         // ── Sequential fallback ───────────────────────────────────────────────
         closePosition(callPosKey, callPremium, reason);
         closePosition(putPosKey,  putPremium,  reason);
+        tagLastTwoRecords(groupId);
     }
 
     /**
@@ -312,6 +327,7 @@ public class OptionsOrderExecutor {
         if (shortPos == null || longPos == null) return;
 
         int contracts = Math.abs(shortPos.getContracts());
+        String groupId = UUID.randomUUID().toString();
 
         // ── Attempt atomic multi-leg close ────────────────────────────────────
         if (submitter != null) {
@@ -320,8 +336,8 @@ public class OptionsOrderExecutor {
                     new MultiLegOrder(longPos.getSymbol(),  longPos.getType(),  longPos.getStrike(),  longPos.getExpiry(),  "sell", "sell_to_close"));
             String orderId = submitter.submitMultiLeg(legs, contracts);
             if (orderId != null) {
-                recordClose(shortPosKey, shortPos, shortPremium, 0.0, reason, orderId);
-                recordClose(longPosKey,  longPos,  longPremium,  0.0, reason, orderId);
+                recordClose(shortPosKey, shortPos, shortPremium, 0.0, reason, orderId, groupId);
+                recordClose(longPosKey,  longPos,  longPremium,  0.0, reason, orderId, groupId);
                 return;
             }
         }
@@ -329,11 +345,12 @@ public class OptionsOrderExecutor {
         // ── Sequential fallback ───────────────────────────────────────────────
         closePosition(shortPosKey, shortPremium, reason);
         closePosition(longPosKey,  longPremium,  reason);
+        tagLastTwoRecords(groupId);
     }
 
     /** Updates account state and logs a single leg close. Does not submit to broker. */
     private void recordClose(String posKey, OptionsPosition pos, double currentPremium,
-                             double fee, String reason, String externalId) {
+                             double fee, String reason, String externalId, String groupId) {
         double proceeds = currentPremium * 100 * pos.getContracts();
         double net = proceeds - fee;
         account.setBalance(account.getBalance() + net);
@@ -345,6 +362,7 @@ public class OptionsOrderExecutor {
         TransactionRecord rec = new TransactionRecord(pos.getSymbol(), action, pos.getContracts(),
                 currentPremium, fee, account.getBalance(), reason, "");
         rec.setExternalId(externalId);
+        rec.setGroupId(groupId);
         try {
             transactionLog.insert(rec);
         } catch (Exception e) {
@@ -353,15 +371,38 @@ public class OptionsOrderExecutor {
     }
 
     private void logRecord(String symbol, TransactionAction action, int contracts, double premium,
-                           double fee, String reason, String signalStr, String featureCsv, String externalId) {
+                           double fee, String reason, String signalStr, String featureCsv,
+                           String externalId, String groupId) {
         TransactionRecord rec = new TransactionRecord(symbol, action, contracts, premium, fee,
                 account.getBalance(), reason, signalStr);
         rec.setFeatures(featureCsv);
         rec.setExternalId(externalId);
+        rec.setGroupId(groupId);
         try {
             transactionLog.insert(rec);
         } catch (Exception e) {
             LOG.warning("Options order placed but failed to log: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Tags the two most-recently inserted records in the transaction log with the given groupId.
+     * Used by the sequential fallback path so both legs are still linkable in the UI even when
+     * they were submitted as individual single-leg orders.
+     */
+    private void tagLastTwoRecords(String groupId) {
+        try {
+            List<TransactionRecord> recent = transactionLog.findAll();
+            int tagged = 0;
+            for (TransactionRecord r : recent) {
+                if (r.getGroupId() == null) {
+                    r.setGroupId(groupId);
+                    transactionLog.updateGroupId(r.getId(), groupId);
+                    if (++tagged == 2) break;
+                }
+            }
+        } catch (Exception e) {
+            LOG.warning("Failed to tag multi-leg records with groupId: " + e.getMessage());
         }
     }
 }
