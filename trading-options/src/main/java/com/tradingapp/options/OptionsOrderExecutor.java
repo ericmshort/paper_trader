@@ -86,6 +86,16 @@ public class OptionsOrderExecutor {
             String signalStr, String featureCsv,
             String strategyName) {
 
+        // Pre-flight: ensure we can afford both legs before touching the account.
+        // Uses the paper-trading cost (slippage + fees) as the conservative floor.
+        double totalRequired = (callPremium + putPremium + 2 * OPTION_BUY_SLIPPAGE) * 100 * contracts
+                + 2 * CONTRACT_FEE * contracts;
+        if (account.getBalance() < totalRequired) {
+            LOG.warning(symbol + " buy-pair skip: insufficient balance "
+                    + String.format("%.2f < %.2f required", account.getBalance(), totalRequired));
+            return false;
+        }
+
         String groupId = UUID.randomUUID().toString();
 
         // ── Attempt atomic multi-leg submission ───────────────────────────────
@@ -110,10 +120,12 @@ public class OptionsOrderExecutor {
                         signalStr, featureCsv, orderId, groupId);
                 return true;
             }
-            // Multi-leg not supported or rejected — fall through to sequential
+            // MLEG rejected by broker — do not fall back to individual legs
+            LOG.warning(symbol + " buy-pair rejected by broker; not attempting individual legs");
+            return false;
         }
 
-        // ── Sequential fallback with rollback ─────────────────────────────────
+        // ── Paper-trading: sequential (no broker, so no MLEG support) ─────────
         buyCallAs(callPosKey, symbol, callStrike, callExpiry, contracts, callPremium, signalStr, featureCsv);
         buyPutAs(putPosKey,   symbol, putStrike,  putExpiry,  contracts, putPremium,  signalStr, featureCsv);
 
@@ -128,7 +140,6 @@ public class OptionsOrderExecutor {
             closePosition(putPosKey, putPremium, "Rollback: call leg rejected");
             return false;
         }
-        // Tag both legs with the same groupId so the UI can combine them
         if (callOpened) tagLastTwoRecords(groupId);
         return callOpened;
     }
@@ -151,6 +162,16 @@ public class OptionsOrderExecutor {
             double shortPremium, double longPremium,
             String signalStr, String featureCsv,
             String strategyName) {
+
+        // Pre-flight: for credit spreads the net is a credit, but verify the long leg
+        // can be funded from current balance alone (conservative check).
+        double longLegCost = (longPremium + OPTION_BUY_SLIPPAGE) * 100 * contracts
+                + CONTRACT_FEE * contracts;
+        if (account.getBalance() < longLegCost) {
+            LOG.warning(symbol + " credit-spread skip: insufficient balance "
+                    + String.format("%.2f < %.2f long-leg cost", account.getBalance(), longLegCost));
+            return false;
+        }
 
         String groupId = UUID.randomUUID().toString();
 
@@ -179,10 +200,12 @@ public class OptionsOrderExecutor {
                         signalStr, featureCsv, orderId, groupId);
                 return true;
             }
-            // Multi-leg not supported or rejected — fall through to sequential
+            // MLEG rejected by broker — do not fall back to individual legs
+            LOG.warning(symbol + " credit-spread rejected by broker; not attempting individual legs");
+            return false;
         }
 
-        // ── Sequential fallback with rollback ─────────────────────────────────
+        // ── Paper-trading: sequential (no broker, so no MLEG support) ─────────
         if ("CALL".equals(optionType)) {
             sellCallAs(shortPosKey, symbol, shortStrike, expiry, contracts, shortPremium, signalStr, featureCsv);
             buyCallAs(longPosKey,   symbol, longStrike,  expiry, contracts, longPremium,  signalStr, featureCsv);
