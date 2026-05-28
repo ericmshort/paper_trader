@@ -17,8 +17,10 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.logging.Logger;
 
@@ -268,6 +270,20 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
 
             JSONArray positions = getJsonArray("/positions");
             if (positions != null) {
+                // Build fingerprint → (key, existing position) map before clearing.
+                // This preserves strategy-specific keys (e.g. NKE_STRADDLE_CALL,
+                // BRZE_BULLPUTSPREAD_SHORT) across sync ticks. Without this, every sync
+                // collapses multi-leg positions into SYMBOL_CALL / SYMBOL_PUT, causing
+                // closeDirectionalLeg to fire on straddle and credit-spread legs.
+                Map<String, String> keyByFingerprint = new HashMap<>();
+                Map<String, com.tradingapp.account.OptionsPosition> posByFingerprint = new HashMap<>();
+                for (Map.Entry<String, com.tradingapp.account.OptionsPosition> e : account.getOptionsPositions().entrySet()) {
+                    com.tradingapp.account.OptionsPosition p = e.getValue();
+                    String fp = p.getSymbol() + "|" + p.getType() + "|" + p.getStrike() + "|" + p.getExpiry();
+                    keyByFingerprint.put(fp, e.getKey());
+                    posByFingerprint.put(fp, p);
+                }
+
                 account.getPositions().keySet().stream().toList().forEach(account::removePosition);
                 account.getOptionsPositions().keySet().stream().toList().forEach(account::removeOptionsPosition);
                 for (int i = 0; i < positions.length(); i++) {
@@ -280,10 +296,16 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                     if (isOccSymbol(symbol)) {
                         OccComponents occ = parseOcc(symbol);
                         if (occ != null) {
-                            com.tradingapp.account.OptionsPosition optPos =
+                            String fp = occ.underlying + "|" + occ.type + "|" + occ.strike + "|" + occ.expiry;
+                            String posKey = keyByFingerprint.getOrDefault(fp, occ.underlying + "_" + occ.type);
+                            // Reuse the existing position object to preserve negative contracts on short
+                            // legs and the original premiumPaid. Fall back to a new object only for
+                            // positions that appeared in Alpaca but weren't locally tracked.
+                            com.tradingapp.account.OptionsPosition existing = posByFingerprint.get(fp);
+                            com.tradingapp.account.OptionsPosition optPos = (existing != null) ? existing :
                                     new com.tradingapp.account.OptionsPosition(
                                             occ.underlying, occ.type, occ.strike, occ.expiry, qty, avgCost);
-                            account.addOptionsPosition(occ.underlying + "_" + occ.type, optPos);
+                            account.addOptionsPosition(posKey, optPos);
                         }
                     } else {
                         account.addOrUpdatePosition(symbol, qty, avgCost, Position.PositionType.STOCK);

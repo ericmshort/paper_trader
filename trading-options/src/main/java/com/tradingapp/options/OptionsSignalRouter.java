@@ -724,7 +724,13 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         OptionsChain chain = dataClient.getOptionsChain(symbol, expiry);
         OptionsQuote quote = isCall ? chain.getCall(strike) : chain.getPut(strike);
-        if (quote == null || !quote.isValid()) return bsPremium;
+        // Fail-closed: if the broker has no market quote for this strike, refuse rather than
+        // trading on a theoretical BS price with unknown liquidity.
+        if (quote == null || !quote.isValid()) {
+            researchCallback.accept(symbol + (isCall ? " CALL" : " PUT")
+                    + " skip: no market quote at K=" + strike);
+            return 0.0;
+        }
         if (!quote.isLiquid()) {
             researchCallback.accept(symbol + (isCall ? " CALL" : " PUT")
                     + " skip: illiquid " + quote.liquidityInfo());

@@ -29,13 +29,17 @@ public class OptionsQuote {
         return ask > 0 && bid >= 0;
     }
 
+    private static final long   MIN_OPEN_INTEREST = 500;
+    private static final long   MIN_VOLUME        = 10;
+    private static final double MAX_SPREAD_PCT    = 0.20;
+
     /** Returns true if the contract has enough liquidity to trade safely. */
     public boolean isLiquid() {
         if (!isValid()) return false;
-        if (openInterest > 0 && openInterest < 100) return false;
-        if (volume > 0 && volume < 10) return false;
+        if (openInterest > 0 && openInterest < MIN_OPEN_INTEREST) return false;
+        if (volume > 0 && volume < MIN_VOLUME) return false;
         double mid = (bid + ask) / 2.0;
-        if (mid > 0 && (ask - bid) / mid > 0.30) return false;
+        if (mid > 0 && (ask - bid) / mid > MAX_SPREAD_PCT) return false;
         return true;
     }
 
