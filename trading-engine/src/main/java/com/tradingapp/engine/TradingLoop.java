@@ -158,22 +158,22 @@ public class TradingLoop implements Runnable {
                 }
                 return;
             }
-            if (!today.equals(lastDayTrackingDate)) {
-                lastDayTrackingDate = today;
-                // Seed from durable DB balance so restarts don't reset the baseline to
-                // the current (already-depleted) balance mid-day.
-                if (transactionLog != null) {
-                    dayStartValue = transactionLog.getBalanceBeforeDate(today);
-                } else {
-                    dayStartValue = account.getBalance() + account.getTotalUnrealizedPnL();
-                }
-                account.setDailyLossHalted(false);
-            }
             if (account.isTradingHalted()) {
                 researchCallback.accept("TRADING HALTED — balance below $100.");
                 return;
             }
             brokerClient.syncAccount(account);
+            if (!today.equals(lastDayTrackingDate)) {
+                lastDayTrackingDate = today;
+                // Seed from DB for restart resilience; take max with broker value so that
+                // switching to a different account resets the baseline to actual balance.
+                double brokerValue = account.getBalance() + account.getTotalUnrealizedPnL();
+                double dbValue = transactionLog != null
+                        ? transactionLog.getBalanceBeforeDate(today)
+                        : brokerValue;
+                dayStartValue = Math.max(dbValue, brokerValue);
+                account.setDailyLossHalted(false);
+            }
             List<QuoteModel> quotes = dataClient.getQuotes(watchList);
             for (QuoteModel quote : quotes) {
                 String symbol = quote.getSymbol();
@@ -228,12 +228,16 @@ public class TradingLoop implements Runnable {
                         brokerClient.submitSell(symbol, pos.getQuantity(), price, "RSI=" + rsiDir,
                                 String.format("RSI Momentum trailing stop: %.0f%% drawdown from peak",
                                         rsiStrategy.getTrailingStopPct() * 100));
+                        // Force-remove locally so the multi-indicator leg cannot double-sell
+                        // if the broker call timed out but the order went through at the exchange.
+                        account.removePosition(symbol);
                         rsiStrategy.onPositionClosed();
                         uiRefreshCallback.run();
                     } else if (rsiDir == SignalResult.Direction.SELL && hasPosition) {
                         Position pos = account.getPositions().get(symbol);
                         brokerClient.submitSell(symbol, pos.getQuantity(), price,
                                 "RSI overbought", "RSI Momentum: RSI overbought");
+                        account.removePosition(symbol);
                         rsiStrategy.onPositionClosed();
                         uiRefreshCallback.run();
                     } else if (rsiDir == SignalResult.Direction.BUY && !hasPosition) {
@@ -266,11 +270,13 @@ public class TradingLoop implements Runnable {
                 if (trailingStop.check(symbol, price) && hasPosition) {
                     Position pos = account.getPositions().get(symbol);
                     brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Trailing stop: 5% drawdown from peak");
+                    account.removePosition(symbol);
                     trailingStop.reset(symbol);
                     uiRefreshCallback.run();
                 } else if (weightedSells >= SIGNAL_THRESHOLD && hasPosition) {
                     Position pos = account.getPositions().get(symbol);
                     brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Signals: " + sells + "/" + signals.size() + " SELL");
+                    account.removePosition(symbol);
                     trailingStop.reset(symbol);
                     uiRefreshCallback.run();
                 } else if (weightedBuys >= SIGNAL_THRESHOLD && !hasPosition) {
