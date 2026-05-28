@@ -418,6 +418,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             researchCallback.accept(symbol + " BULL PUT SPREAD skip: stop-loss cooldown");
             return;
         }
+        if (uptrendSupplier != null && !uptrendSupplier.getAsBoolean()) {
+            researchCallback.accept(symbol + " BULL PUT SPREAD skip: bear market (SPY below 50-day MA)");
+            return;
+        }
 
         double shortK = K;
         double longK  = K - STRANGLE_SPREAD;
@@ -473,6 +477,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         if (sessionStopLossed.contains(cooldownKey)) {
             researchCallback.accept(symbol + " BEAR CALL SPREAD skip: stop-loss cooldown");
+            return;
+        }
+        if (uptrendSupplier != null && uptrendSupplier.getAsBoolean()) {
+            researchCallback.accept(symbol + " BEAR CALL SPREAD skip: bull market (SPY above 50-day MA)");
             return;
         }
 
