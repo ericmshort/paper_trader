@@ -251,8 +251,7 @@ public class OptionsOrderExecutor {
     }
 
     public void closePosition(String positionKey, double currentPremium, String reason) {
-        Map<String, OptionsPosition> opts = account.getOptionsPositions();
-        OptionsPosition pos = opts.get(positionKey);
+        OptionsPosition pos = account.getOptionsPositions().get(positionKey);
         if (pos == null) return;
 
         String externalId = null;
@@ -268,10 +267,77 @@ public class OptionsOrderExecutor {
             fee = CONTRACT_FEE * pos.getContracts();
         }
 
+        recordClose(positionKey, pos, currentPremium, fee, reason, externalId);
+    }
+
+    /**
+     * Closes two long option legs atomically (straddle / strangle / zero-DTE).
+     * Attempts a single multi-leg sell_to_close order; falls back to sequential
+     * close if atomic submission is unsupported or rejected.
+     */
+    public void closeBuyPair(String callPosKey, String putPosKey,
+                             double callPremium, double putPremium,
+                             String reason) {
+        OptionsPosition callPos = account.getOptionsPositions().get(callPosKey);
+        OptionsPosition putPos  = account.getOptionsPositions().get(putPosKey);
+        if (callPos == null || putPos == null) return;
+
+        // ── Attempt atomic multi-leg close ────────────────────────────────────
+        if (submitter != null) {
+            List<MultiLegOrder> legs = List.of(
+                    new MultiLegOrder(callPos.getSymbol(), "CALL", callPos.getStrike(), callPos.getExpiry(), "sell", "sell_to_close"),
+                    new MultiLegOrder(putPos.getSymbol(),  "PUT",  putPos.getStrike(),  putPos.getExpiry(),  "sell", "sell_to_close"));
+            String orderId = submitter.submitMultiLeg(legs, callPos.getContracts());
+            if (orderId != null) {
+                recordClose(callPosKey, callPos, callPremium, 0.0, reason, orderId);
+                recordClose(putPosKey,  putPos,  putPremium,  0.0, reason, orderId);
+                return;
+            }
+        }
+
+        // ── Sequential fallback ───────────────────────────────────────────────
+        closePosition(callPosKey, callPremium, reason);
+        closePosition(putPosKey,  putPremium,  reason);
+    }
+
+    /**
+     * Closes a credit spread atomically (buy_to_close the short leg + sell_to_close the long leg).
+     * Falls back to sequential close if atomic submission is unsupported or rejected.
+     */
+    public void closeCreditSpread(String shortPosKey, String longPosKey,
+                                  double shortPremium, double longPremium,
+                                  String reason) {
+        OptionsPosition shortPos = account.getOptionsPositions().get(shortPosKey);
+        OptionsPosition longPos  = account.getOptionsPositions().get(longPosKey);
+        if (shortPos == null || longPos == null) return;
+
+        int contracts = Math.abs(shortPos.getContracts());
+
+        // ── Attempt atomic multi-leg close ────────────────────────────────────
+        if (submitter != null) {
+            List<MultiLegOrder> legs = List.of(
+                    new MultiLegOrder(shortPos.getSymbol(), shortPos.getType(), shortPos.getStrike(), shortPos.getExpiry(), "buy",  "buy_to_close"),
+                    new MultiLegOrder(longPos.getSymbol(),  longPos.getType(),  longPos.getStrike(),  longPos.getExpiry(),  "sell", "sell_to_close"));
+            String orderId = submitter.submitMultiLeg(legs, contracts);
+            if (orderId != null) {
+                recordClose(shortPosKey, shortPos, shortPremium, 0.0, reason, orderId);
+                recordClose(longPosKey,  longPos,  longPremium,  0.0, reason, orderId);
+                return;
+            }
+        }
+
+        // ── Sequential fallback ───────────────────────────────────────────────
+        closePosition(shortPosKey, shortPremium, reason);
+        closePosition(longPosKey,  longPremium,  reason);
+    }
+
+    /** Updates account state and logs a single leg close. Does not submit to broker. */
+    private void recordClose(String posKey, OptionsPosition pos, double currentPremium,
+                             double fee, String reason, String externalId) {
         double proceeds = currentPremium * 100 * pos.getContracts();
         double net = proceeds - fee;
         account.setBalance(account.getBalance() + net);
-        account.removeOptionsPosition(positionKey);
+        account.removeOptionsPosition(posKey);
         double pnl = net - pos.getPremiumPaid() * 100 * pos.getContracts();
         account.addRealizedPnL(pnl);
 

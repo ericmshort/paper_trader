@@ -296,8 +296,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                                         totalCurrent, totalPaid);
 
         if (premiumStop) sessionStopLossed.add(symbol + "_" + strategyName);
-        optExec.closePosition(callKey, callPrem, reason);
-        optExec.closePosition(putKey,  putPrem,  reason);
+        optExec.closeBuyPair(callKey, putKey, callPrem, putPrem, reason);
         researchCallback.accept(String.format("%s %s closed: %s combined=%.2f",
                 symbol, strategyName, reason, totalCurrent));
     }
@@ -344,8 +343,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                                         netCostToClose, creditReceived);
 
         if (stopLoss) sessionStopLossed.add(symbol + "_" + strategyName);
-        optExec.closePosition(shortKey, shortPrem, reason); // buy-to-close: neg contracts → balance decreases
-        optExec.closePosition(longKey,  longPrem,  reason); // sell-to-close
+        optExec.closeCreditSpread(shortKey, longKey, shortPrem, longPrem, reason);
         researchCallback.accept(String.format("%s %s closed: %s credit=%.2f costToClose=%.2f",
                 symbol, strategyName, reason, creditReceived, netCostToClose));
     }
