@@ -10,6 +10,7 @@ import com.tradingapp.engine.OptionsEvaluator;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +58,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     static final double STRANGLE_SPREAD       = 5.0;
 
     private final Set<String> sessionStopLossed = new HashSet<>();
+    private final Map<String, Long> lastMultiLegCloseMs = new HashMap<>();
+    private static final long MULTILEG_REENTRY_COOLDOWN_MS = 15 * 60 * 1000L; // 15 minutes
     private LocalDate stopLossResetDate;
     private BooleanSupplier uptrendSupplier;
 
@@ -295,7 +298,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         else                   reason = String.format("Premium stop-loss: combined %.2f <= 50%% of %.2f",
                                         totalCurrent, totalPaid);
 
-        if (premiumStop) sessionStopLossed.add(symbol + "_" + strategyName);
+        if (premiumStop) sessionStopLossed.add(symbol + "_MULTILEG");
+        lastMultiLegCloseMs.put(symbol, System.currentTimeMillis());
         optExec.closeBuyPair(callKey, putKey, callPrem, putPrem, reason);
         researchCallback.accept(String.format("%s %s closed: %s combined=%.2f",
                 symbol, strategyName, reason, totalCurrent));
@@ -598,10 +602,15 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                                 String signalStr, String featureCsv) {
         String callKey    = symbol + "_ZEROTE_CALL";
         String putKey     = symbol + "_ZEROTE_PUT";
-        String cooldownKey = symbol + "_ZEROTE";
 
-        if (sessionStopLossed.contains(cooldownKey)) {
+        if (sessionStopLossed.contains(symbol + "_MULTILEG")) {
             researchCallback.accept(symbol + " ZERO-DTE skip: stop-loss cooldown");
+            return;
+        }
+        Long lastClose = lastMultiLegCloseMs.get(symbol);
+        if (lastClose != null && System.currentTimeMillis() - lastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
+            researchCallback.accept(symbol + " ZERO-DTE skip: re-entry cooldown ("
+                    + ((System.currentTimeMillis() - lastClose) / 60000) + "m elapsed, need 15m)");
             return;
         }
 
@@ -646,10 +655,15 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                                            String signalStr, String featureCsv) {
         boolean useStraddle  = isLowRelativeIV(prices);
         String  strategyName = useStraddle ? "STRADDLE" : "STRANGLE";
-        String  cooldownKey  = symbol + "_" + strategyName;
 
-        if (sessionStopLossed.contains(cooldownKey)) {
+        if (sessionStopLossed.contains(symbol + "_MULTILEG")) {
             researchCallback.accept(symbol + " " + strategyName + " skip: stop-loss cooldown");
+            return;
+        }
+        Long lastClose = lastMultiLegCloseMs.get(symbol);
+        if (lastClose != null && System.currentTimeMillis() - lastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
+            researchCallback.accept(symbol + " " + strategyName + " skip: re-entry cooldown ("
+                    + ((System.currentTimeMillis() - lastClose) / 60000) + "m elapsed, need 15m)");
             return;
         }
 
@@ -741,6 +755,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         LocalDate today = LocalDate.now();
         if (!today.equals(stopLossResetDate)) {
             sessionStopLossed.clear();
+            lastMultiLegCloseMs.clear();
             stopLossResetDate = today;
         }
     }
