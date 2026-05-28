@@ -11,6 +11,7 @@ import com.tradingapp.broker.AlpacaQuoteProvider;
 import com.tradingapp.broker.AppConfig;
 import com.tradingapp.data.EarningsCalendar;
 import com.tradingapp.data.LargeCapWatchList;
+import com.tradingapp.data.SmallCapWatchList;
 import com.tradingapp.data.PriceHistory;
 import com.tradingapp.data.QuoteProvider;
 import com.tradingapp.data.YahooFinanceQuoteProvider;
@@ -185,7 +186,7 @@ public class DashboardController implements Initializable {
 
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, transactionLog,
                 appConfig.isAlpacaBroker()
-                        ? ((AlpacaBroker) brokerClient)::submitOptionsOrder
+                        ? (AlpacaBroker) brokerClient
                         : null);
         OptionsSignalRouter optionsRouter = new OptionsSignalRouter(
                 bsEngine, optExec, account, priceHistory, researchCb, quoteProvider);
@@ -205,9 +206,13 @@ public class DashboardController implements Initializable {
 
         EarningsCalendar earningsCalendar = new EarningsCalendar();
 
+        List<String> allSymbols = new ArrayList<>();
+        allSymbols.addAll(LargeCapWatchList.SYMBOLS);
+        allSymbols.addAll(SmallCapWatchList.SYMBOLS);
+
         TradingLoop tradingLoop = new TradingLoop(quoteProvider, priceHistory,
                 new IndicatorEngine(), new TrailingStopMonitor(), brokerClient, feeCalc,
-                LargeCapWatchList.SYMBOLS, researchCb, uiRefresh, account,
+                allSymbols, researchCb, uiRefresh, account,
                 optionsRouter, mlEval, trainingCallback);
         tradingLoop.setDailyLossLimitPct(appConfig.getDailyLossLimitPct() / 100.0);
         tradingLoop.setAvoidOvernightHolds(appConfig.isAvoidOvernightHolds());
@@ -215,7 +220,7 @@ public class DashboardController implements Initializable {
         tradingLoop.setEarningsCalendar(earningsCalendar);
         tradingLoop.setEarningsBlackoutDays(appConfig.getEarningsBlackoutDays());
         IndicatorEngine rsiEngine = new IndicatorEngine();
-        for (String sym : List.of("AAPL", "SBUX", "GOOGL", "MRK")) {
+        for (String sym : allSymbols) {
             tradingLoop.registerStrategy(sym, new RSIMomentumStrategy(rsiEngine));
         }
         optionsRouter.setUptrendSupplier(tradingLoop::isUptrend);
@@ -225,7 +230,7 @@ public class DashboardController implements Initializable {
             t.setDaemon(true);
             return t;
         });
-        scheduler.scheduleAtFixedRate(tradingLoop, 0, 60, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(tradingLoop, 0, 30, TimeUnit.SECONDS);
 
         // Seed price history from 200 days of daily bars so MACrossover is immediately usable.
         // Runs in background — does not block the trading loop or the UI.
@@ -235,7 +240,7 @@ public class DashboardController implements Initializable {
             LocalDate start = end.minusDays(280); // extra buffer for weekends/holidays
             int seeded = 0;
             // Include SPY for the market-regime filter (not traded, just tracked)
-            List<String> symbolsToSeed = new ArrayList<>(LargeCapWatchList.SYMBOLS);
+            List<String> symbolsToSeed = new ArrayList<>(allSymbols);
             symbolsToSeed.add("SPY");
             for (String sym : symbolsToSeed) {
                 try {

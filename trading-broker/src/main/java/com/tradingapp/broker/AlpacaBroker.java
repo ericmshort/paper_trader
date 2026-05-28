@@ -5,6 +5,8 @@ import com.tradingapp.account.Position;
 import com.tradingapp.account.TransactionLog;
 import com.tradingapp.account.TransactionRecord;
 import com.tradingapp.engine.BrokerClient;
+import com.tradingapp.options.MultiLegOrder;
+import com.tradingapp.options.OptionsSubmitter;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -16,10 +18,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.logging.Logger;
 
-public class AlpacaBroker implements BrokerClient {
+public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
 
     private static final Logger LOG = Logger.getLogger(AlpacaBroker.class.getName());
 
@@ -111,7 +114,59 @@ public class AlpacaBroker implements BrokerClient {
         }
     }
 
-    /** Submits an options order to Alpaca using OCC symbol format. Used as an OptionsSubmitter lambda. */
+    /** OptionsSubmitter.submit — delegates to the single-leg options order path. */
+    @Override
+    public String submit(String symbol, String optionType, double strike, LocalDate expiry, int contracts, String side) {
+        return submitOptionsOrder(symbol, optionType, strike, expiry, contracts, side);
+    }
+
+    /**
+     * OptionsSubmitter.submitMultiLeg — submits an all-or-nothing multi-leg order via Alpaca's
+     * {@code order_class: "mleg"} endpoint. All legs are resolved to OCC symbols before submission;
+     * if any lookup fails the whole order is aborted and null is returned.
+     */
+    @Override
+    public String submitMultiLeg(List<MultiLegOrder> legs, int contracts) {
+        try {
+            JSONArray legsArray = new JSONArray();
+            for (MultiLegOrder leg : legs) {
+                String occSymbol = lookupBestContract(leg.symbol(), leg.optionType(), leg.strike(), leg.expiry());
+                if (occSymbol == null) {
+                    LOG.warning("Multi-leg: no contract found for " + leg.symbol()
+                            + " " + leg.optionType() + " K=" + leg.strike() + " exp=" + leg.expiry());
+                    return null;
+                }
+                legsArray.put(new JSONObject()
+                        .put("symbol", occSymbol)
+                        .put("side", leg.side())
+                        .put("ratio_qty", 1)
+                        .put("position_intent", leg.positionIntent()));
+            }
+
+            JSONObject body = new JSONObject()
+                    .put("order_class", "mleg")
+                    .put("type", "market")
+                    .put("time_in_force", "day")
+                    .put("qty", String.valueOf(contracts))
+                    .put("legs", legsArray);
+
+            HttpResponse<String> resp = post("/orders", body.toString());
+            if (resp.statusCode() != 200 && resp.statusCode() != 201) {
+                System.err.println("Alpaca mleg order rejected (" + resp.statusCode() + "): " + resp.body());
+                return null;
+            }
+
+            JSONObject order = new JSONObject(resp.body());
+            String orderId = order.optString("id");
+            LOG.info("Alpaca mleg order accepted: " + orderId + " (" + legs.size() + " legs x" + contracts + ")");
+            return orderId;
+        } catch (Exception e) {
+            System.err.println("Alpaca mleg order failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /** Submits a single-leg options order to Alpaca using OCC symbol format. */
     public String submitOptionsOrder(String symbol, String optionType, double strike, LocalDate expiry, int contracts, String side) {
         try {
             String occSymbol = lookupBestContract(symbol, optionType, strike, expiry);

@@ -569,7 +569,7 @@ public class OptionsSignalRouterTest {
                 "STRADDLE_CALL should be rolled back when put leg is rejected by broker");
         assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_STRADDLE_PUT"),
                 "STRADDLE_PUT should not be open");
-        assertTrue(msgs.stream().anyMatch(m -> m.contains("rolled back")),
-                "Should log rollback message");
+        assertTrue(msgs.stream().anyMatch(m -> m.contains("did not open")),
+                "Should log failure message when legs are rejected");
     }
 }

@@ -446,22 +446,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         int contracts = Math.min(5, (int) (account.getBalance() * 0.05 / (STRANGLE_SPREAD * 100)));
         if (contracts < 1) return;
 
-        optExec.sellPutAs(shortKey, symbol, shortK, expiry, contracts, shortPrem, signalStr, featureCsv);
-        optExec.buyPutAs(longKey,   symbol, longK,  expiry, contracts, longPrem,  signalStr, featureCsv);
-
-        boolean shortOpened = account.getOptionsPositions().containsKey(shortKey);
-        boolean longOpened  = account.getOptionsPositions().containsKey(longKey);
-        if (shortOpened && !longOpened) {
-            optExec.closePosition(shortKey, shortPrem, "Rollback: BULL PUT SPREAD long leg did not open");
-            researchCallback.accept(symbol + " BULL PUT SPREAD SHORT rolled back: long leg failed");
+        boolean opened = optExec.openCreditSpread(shortKey, longKey, symbol, "PUT",
+                shortK, longK, expiry, contracts, shortPrem, longPrem, signalStr, featureCsv);
+        if (!opened) {
+            researchCallback.accept(symbol + " BULL PUT SPREAD did not open (legs rejected)");
             return;
         }
-        if (!shortOpened && longOpened) {
-            optExec.closePosition(longKey, longPrem, "Rollback: BULL PUT SPREAD short leg did not open");
-            researchCallback.accept(symbol + " BULL PUT SPREAD LONG rolled back: short leg failed");
-            return;
-        }
-        if (!shortOpened) return;
 
         GreeksResult sg = bsEngine.greeks(price, shortK, RISK_FREE_RATE, T, sigma, false);
         GreeksResult lg = bsEngine.greeks(price, longK,  RISK_FREE_RATE, T, sigma, false);
@@ -506,22 +496,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         int contracts = Math.min(5, (int) (account.getBalance() * 0.05 / (STRANGLE_SPREAD * 100)));
         if (contracts < 1) return;
 
-        optExec.sellCallAs(shortKey, symbol, shortK, expiry, contracts, shortPrem, signalStr, featureCsv);
-        optExec.buyCallAs(longKey,   symbol, longK,  expiry, contracts, longPrem,  signalStr, featureCsv);
-
-        boolean shortOpened = account.getOptionsPositions().containsKey(shortKey);
-        boolean longOpened  = account.getOptionsPositions().containsKey(longKey);
-        if (shortOpened && !longOpened) {
-            optExec.closePosition(shortKey, shortPrem, "Rollback: BEAR CALL SPREAD long leg did not open");
-            researchCallback.accept(symbol + " BEAR CALL SPREAD SHORT rolled back: long leg failed");
+        boolean opened = optExec.openCreditSpread(shortKey, longKey, symbol, "CALL",
+                shortK, longK, expiry, contracts, shortPrem, longPrem, signalStr, featureCsv);
+        if (!opened) {
+            researchCallback.accept(symbol + " BEAR CALL SPREAD did not open (legs rejected)");
             return;
         }
-        if (!shortOpened && longOpened) {
-            optExec.closePosition(longKey, longPrem, "Rollback: BEAR CALL SPREAD short leg did not open");
-            researchCallback.accept(symbol + " BEAR CALL SPREAD LONG rolled back: short leg failed");
-            return;
-        }
-        if (!shortOpened) return;
 
         GreeksResult sg = bsEngine.greeks(price, shortK, RISK_FREE_RATE, T, sigma, true);
         GreeksResult lg = bsEngine.greeks(price, longK,  RISK_FREE_RATE, T, sigma, true);
@@ -648,22 +628,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             return;
         }
 
-        optExec.buyCallAs(callKey, symbol, K, today, contracts, callPremium, signalStr, featureCsv);
-        optExec.buyPutAs(putKey,  symbol, K, today, contracts, putPremium,  signalStr, featureCsv);
-
-        boolean callOpened = account.getOptionsPositions().containsKey(callKey);
-        boolean putOpened  = account.getOptionsPositions().containsKey(putKey);
-        if (callOpened && !putOpened) {
-            optExec.closePosition(callKey, callPremium, "Rollback: ZERO-DTE put leg did not open");
-            researchCallback.accept(symbol + " ZERO-DTE CALL rolled back: put leg failed");
+        boolean opened = optExec.openBuyPair(callKey, putKey, symbol, K, K,
+                today, today, contracts, callPremium, putPremium, signalStr, featureCsv);
+        if (!opened) {
+            researchCallback.accept(symbol + " ZERO-DTE did not open (legs rejected)");
             return;
         }
-        if (!callOpened && putOpened) {
-            optExec.closePosition(putKey, putPremium, "Rollback: ZERO-DTE call leg did not open");
-            researchCallback.accept(symbol + " ZERO-DTE PUT rolled back: call leg failed");
-            return;
-        }
-        if (!callOpened) return;
 
         GreeksResult cg = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, true);
         GreeksResult pg = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, false);
@@ -716,25 +686,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             return;
         }
 
-        optExec.buyCallAs(posCallKey, symbol, callK, expiry, contracts, callPremium, signalStr, featureCsv);
-        optExec.buyPutAs(posPutKey,   symbol, putK,  expiry, contracts, putPremium,  signalStr, featureCsv);
-
-        boolean callOpened = account.getOptionsPositions().containsKey(posCallKey);
-        boolean putOpened  = account.getOptionsPositions().containsKey(posPutKey);
-
-        if (callOpened && !putOpened) {
-            optExec.closePosition(posCallKey, callPremium,
-                    "Rollback: " + strategyName + " put leg did not open");
-            researchCallback.accept(symbol + " " + strategyName + " CALL rolled back: put leg failed");
-            return;
-        }
-        if (!callOpened && putOpened) {
-            optExec.closePosition(posPutKey, putPremium,
-                    "Rollback: " + strategyName + " call leg did not open");
-            researchCallback.accept(symbol + " " + strategyName + " PUT rolled back: call leg failed");
-            return;
-        }
-        if (!callOpened) {
+        boolean opened = optExec.openBuyPair(posCallKey, posPutKey, symbol, callK, putK,
+                expiry, expiry, contracts, callPremium, putPremium, signalStr, featureCsv);
+        if (!opened) {
+            researchCallback.accept(symbol + " " + strategyName + " did not open (legs rejected)");
             return;
         }
 

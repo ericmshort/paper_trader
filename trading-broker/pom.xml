@@ -43,6 +43,10 @@
             <artifactId>trading-engine</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.tradingapp</groupId>
+            <artifactId>trading-options</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.json</groupId>
             <artifactId>json</artifactId>
         </dependency>
