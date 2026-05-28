@@ -170,6 +170,7 @@ public class DashboardController implements Initializable {
             alpaca.syncAccount(account);
             alpaca.reconcileTransactionLog();
             brokerClient = alpaca;
+            refreshUi();
         } else {
             SafetyStop safetyStop = new SafetyStop(account);
             OrderExecutor orderExecutor = new OrderExecutor(account, safetyStop, transactionLog, feeCalc);
