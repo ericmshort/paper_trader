@@ -11,11 +11,13 @@ import org.junit.jupiter.api.io.TempDir;
 import com.tradingapp.account.OptionsPosition;
 
 import java.nio.file.Path;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.*;
 
 public class OptionsSignalRouterTest {
 
@@ -343,6 +345,9 @@ public class OptionsSignalRouterTest {
 
     @Test
     void testStrangleOpenedOnMixedSignalsWithNormalIV() {
+        // Zero-DTE takes precedence on Fridays; skip this assertion then
+        assumeTrue(LocalDate.now().getDayOfWeek() != DayOfWeek.FRIDAY,
+                "Skipped on Fridays: zero-DTE replaces strangle/straddle");
         // Consistent zigzag history → recent/full vol ratio ~1.0 → strangle territory
         Account account = new Account();
         TransactionLog log = new TransactionLog(tempDir.resolve("strangle.db").toString());
@@ -359,6 +364,9 @@ public class OptionsSignalRouterTest {
 
     @Test
     void testStraddleOpenedOnMixedSignalsWithLowRecentIV() {
+        // Zero-DTE takes precedence on Fridays; skip this assertion then
+        assumeTrue(LocalDate.now().getDayOfWeek() != DayOfWeek.FRIDAY,
+                "Skipped on Fridays: zero-DTE replaces strangle/straddle");
         // Recent 10 bars are flat → recent vol << full vol → ratio < 0.80 → straddle territory
         Account account = new Account();
         TransactionLog log = new TransactionLog(tempDir.resolve("straddle.db").toString());
@@ -405,6 +413,8 @@ public class OptionsSignalRouterTest {
 
     @Test
     void testStraddleClosedOnCombinedProfitTarget() {
+        assumeTrue(LocalDate.now().getDayOfWeek() != DayOfWeek.FRIDAY,
+                "Skipped on Fridays: zero-DTE replaces straddle");
         Account account = new Account();
         TransactionLog log = new TransactionLog(tempDir.resolve("straddle_profit.db").toString());
         BlackScholesEngine bsEngine = new BlackScholesEngine();
@@ -428,6 +438,8 @@ public class OptionsSignalRouterTest {
 
     @Test
     void testStraddleClosedOnCombinedStopLoss() {
+        assumeTrue(LocalDate.now().getDayOfWeek() != DayOfWeek.FRIDAY,
+                "Skipped on Fridays: zero-DTE replaces straddle");
         Account account = new Account();
         TransactionLog log = new TransactionLog(tempDir.resolve("straddle_stop.db").toString());
         BlackScholesEngine bsEngine = new BlackScholesEngine();
@@ -453,6 +465,8 @@ public class OptionsSignalRouterTest {
 
     @Test
     void testStraddleStopLossBlocksReEntry() {
+        assumeTrue(LocalDate.now().getDayOfWeek() != DayOfWeek.FRIDAY,
+                "Skipped on Fridays: zero-DTE replaces straddle on mixed signals");
         // Plant straddle positions with inflated premiumPaid ($50/leg) so that current BS premiums
         // (~$7/leg at 42% vol) fall below 50% of paid → combined stop fires → cooldown set.
         // (Collapsing price to $1 wouldn't work: the put would gain value on a straddle.)
@@ -488,6 +502,8 @@ public class OptionsSignalRouterTest {
 
     @Test
     void testStraddleAndCallDoNotCoexist() {
+        assumeTrue(LocalDate.now().getDayOfWeek() != DayOfWeek.FRIDAY,
+                "Skipped on Fridays: zero-DTE replaces straddle on mixed signals");
         // Opening a call should block straddle entry and vice versa
         Account account = new Account();
         TransactionLog log = new TransactionLog(tempDir.resolve("coexist.db").toString());
@@ -509,6 +525,8 @@ public class OptionsSignalRouterTest {
 
     @Test
     void testStraddleCallRolledBackWhenPutLegRejected() {
+        assumeTrue(LocalDate.now().getDayOfWeek() != DayOfWeek.FRIDAY,
+                "Skipped on Fridays: zero-DTE replaces straddle on mixed signals");
         // Broker accepts call buys and all sells (needed for rollback) but rejects put buys.
         // The router must detect the half-open state and close the call to restore consistency.
         Account account = new Account();

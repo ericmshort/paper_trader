@@ -14,7 +14,8 @@ public class OptionsOrderExecutor {
 
     private static final Logger LOG = Logger.getLogger(OptionsOrderExecutor.class.getName());
     private static final double CONTRACT_FEE = 0.65;
-    static final double OPTION_BUY_SLIPPAGE = 0.05;
+    static final double OPTION_BUY_SLIPPAGE  = 0.05;
+    static final double OPTION_SELL_SLIPPAGE = 0.02; // haircut on credit received
 
     private final Account account;
     private final TransactionLog transactionLog;
@@ -49,6 +50,40 @@ public class OptionsOrderExecutor {
     public void buyPutAs(String positionKey, String symbol, double strike, LocalDate expiry,
                          int contracts, double premium, String signalStr, String featureCsv) {
         buy(positionKey, symbol, "PUT", strike, expiry, contracts, premium, signalStr, featureCsv, TransactionAction.PUT_BUY);
+    }
+
+    // Short-option entry (credit spread legs): receives credit upfront, stored with negative contracts.
+    // closePosition() handles buy-to-close correctly when contracts < 0.
+    public void sellCallAs(String positionKey, String symbol, double strike, LocalDate expiry,
+                           int contracts, double premium, String signalStr, String featureCsv) {
+        sell(positionKey, symbol, "CALL", strike, expiry, contracts, premium, signalStr, featureCsv, TransactionAction.CALL_SELL);
+    }
+
+    public void sellPutAs(String positionKey, String symbol, double strike, LocalDate expiry,
+                          int contracts, double premium, String signalStr, String featureCsv) {
+        sell(positionKey, symbol, "PUT", strike, expiry, contracts, premium, signalStr, featureCsv, TransactionAction.PUT_SELL);
+    }
+
+    private void sell(String posKey, String symbol, String optionType, double strike, LocalDate expiry, int contracts,
+                      double bsPremium, String signalStr, String featureCsv, TransactionAction action) {
+        double fillPremium = bsPremium - OPTION_SELL_SLIPPAGE;
+        if (fillPremium <= 0) return;
+        double fee = CONTRACT_FEE * contracts;
+        double creditReceived = fillPremium * 100 * contracts - fee;
+        account.setBalance(account.getBalance() + creditReceived);
+
+        // Negative contracts marks this as a short position; closePosition math stays correct.
+        OptionsPosition pos = new OptionsPosition(symbol, optionType, strike, expiry, -contracts, fillPremium);
+        account.addOptionsPosition(posKey, pos);
+
+        TransactionRecord rec = new TransactionRecord(symbol, action, contracts, fillPremium, fee,
+                account.getBalance(), optionType + " K=" + strike + " exp=" + expiry + " (SHORT)", signalStr);
+        rec.setFeatures(featureCsv);
+        try {
+            transactionLog.insert(rec);
+        } catch (Exception e) {
+            LOG.warning("Options short order placed but failed to log: " + e.getMessage());
+        }
     }
 
     private void buy(String posKey, String symbol, String optionType, double strike, LocalDate expiry, int contracts,

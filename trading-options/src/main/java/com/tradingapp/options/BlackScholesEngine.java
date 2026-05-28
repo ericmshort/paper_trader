@@ -82,6 +82,17 @@ public class BlackScholesEngine {
         return firstFriday.plusWeeks(2);
     }
 
+    /**
+     * Picks the next Friday at least 7 days away for near-term/day-trading strategies.
+     */
+    public LocalDate selectNearTermExpiry() {
+        LocalDate candidate = LocalDate.now().plusDays(7);
+        while (candidate.getDayOfWeek() != DayOfWeek.FRIDAY) {
+            candidate = candidate.plusDays(1);
+        }
+        return candidate;
+    }
+
     public double roundStrike(double price) {
         return Math.round(price / 5.0) * 5.0;
     }

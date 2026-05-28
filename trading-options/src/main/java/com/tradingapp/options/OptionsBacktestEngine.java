@@ -140,14 +140,21 @@ public class OptionsBacktestEngine {
                 if (!openPositions.containsKey(symbol) && entryCondition(strategy, buys, sells)) {
                     double sigma = bsEngine.historicalVol(prices);
                     if (sigma <= 0) continue;
-                    LocalDate expiry = date.plusDays(EXPIRY_DAYS);
-                    double T = EXPIRY_DAYS / 365.0;
+                    int expDays = expiryDays(strategy);
+                    LocalDate expiry = date.plusDays(expDays);
+                    double T = expDays / 365.0;
                     double K = bsEngine.roundStrike(close);
                     OpenPosition pos = buildPosition(strategy, symbol, close, K, expiry, T, sigma, cash);
-                    if (pos != null && pos.totalCostBasis > 0
-                            && cash >= pos.totalCostBasis + CONTRACT_FEE * pos.totalOptionContracts()) {
-                        cash -= pos.totalCostBasis + CONTRACT_FEE * pos.totalOptionContracts();
-                        openPositions.put(symbol, pos);
+                    if (pos != null) {
+                        double fees = CONTRACT_FEE * pos.totalOptionContracts();
+                        // Credit spreads (totalCostBasis < 0): only need cash for fees
+                        boolean canAfford = pos.totalCostBasis >= 0
+                                ? cash >= pos.totalCostBasis + fees
+                                : cash >= fees;
+                        if (canAfford) {
+                            cash -= pos.totalCostBasis + fees; // credit spreads: cash increases
+                            openPositions.put(symbol, pos);
+                        }
                     }
                 }
             }
@@ -223,7 +230,17 @@ public class OptionsBacktestEngine {
         return switch (strategy) {
             case LONG_CALL, BULL_CALL_SPREAD, COVERED_CALL, BUTTERFLY -> buys >= 2;
             case LONG_PUT, BEAR_PUT_SPREAD -> sells >= 2;
-            case STRADDLE, STRANGLE -> buys >= 2 || sells >= 2;
+            case STRADDLE, STRANGLE, ZERO_DTE -> buys >= 2 || sells >= 2;
+            case BULL_PUT_SPREAD -> buys >= 2 && sells == 0;
+            case BEAR_CALL_SPREAD -> sells >= 2 && buys == 0;
+            case HIGH_DELTA_SCALP, MOMENTUM_NEAR_TERM -> buys >= 3 || sells >= 3;
+        };
+    }
+
+    static int expiryDays(OptionsStrategy strategy) {
+        return switch (strategy) {
+            case HIGH_DELTA_SCALP, MOMENTUM_NEAR_TERM, ZERO_DTE -> 7;
+            default -> EXPIRY_DAYS;
         };
     }
 
@@ -232,23 +249,35 @@ public class OptionsBacktestEngine {
         long daysLeft = ChronoUnit.DAYS.between(currentDate, pos.expiry);
         if (daysLeft < 3) return true;
 
+        // Credit spreads use inverted exit logic (totalCostBasis < 0 = credit received)
+        if (pos.totalCostBasis < 0) {
+            double creditReceived = -pos.totalCostBasis;
+            double costToClose    = -currentValue;
+            if (costToClose <= creditReceived * 0.50) return true; // kept 50% of max profit
+            if (costToClose >= creditReceived * 2.0)  return true; // stop: paying 2x what we received
+            return switch (strategy) {
+                case BULL_PUT_SPREAD  -> sells >= 2;
+                case BEAR_CALL_SPREAD -> buys  >= 2;
+                default -> false;
+            };
+        }
+
         if (strategy == OptionsStrategy.COVERED_CALL) {
-            // Use an equity-style trailing stop on the stock price instead of option premium stop
             if (currentPrice < pos.stockEntryPrice * EQUITY_STOP_FRACTION) return true;
         } else if (pos.totalCostBasis > 0 && currentValue <= pos.totalCostBasis * STOP_LOSS_FRACTION) {
             return true;
         }
 
-        // Profit targets
         if (pos.totalCostBasis > 0 && currentValue >= pos.totalCostBasis * PROFIT_TARGET_MULTIPLIER) return true;
         if (pos.maxProfit > 0
                 && (currentValue - pos.totalCostBasis) >= pos.maxProfit * SPREAD_PROFIT_TARGET_FRACTION) return true;
 
-        // Signal reversal
         return switch (strategy) {
-            case LONG_CALL, BULL_CALL_SPREAD, COVERED_CALL, BUTTERFLY -> sells >= 2;
+            case LONG_CALL, BULL_CALL_SPREAD, COVERED_CALL, BUTTERFLY,
+                 HIGH_DELTA_SCALP, MOMENTUM_NEAR_TERM -> sells >= 2;
             case LONG_PUT, BEAR_PUT_SPREAD -> buys >= 2;
-            case STRADDLE, STRANGLE -> false; // exit only on stops/expiry
+            case STRADDLE, STRANGLE, ZERO_DTE -> false;
+            case BULL_PUT_SPREAD, BEAR_CALL_SPREAD -> false; // handled above
         };
     }
 
@@ -331,6 +360,61 @@ public class OptionsBacktestEngine {
                         List.of(new Leg(K - SPREAD_WIDTH, true, true, 1),
                                 new Leg(K, true, false, 2),
                                 new Leg(K + SPREAD_WIDTH, true, true, 1)), 0, 0);
+            }
+            case BULL_PUT_SPREAD -> {
+                // Short ATM put, long OTM put — net credit received
+                double netCredit = bsEngine.putPrice(price, K, RISK_FREE_RATE, T, sigma)
+                                 - bsEngine.putPrice(price, K - SPREAD_WIDTH, RISK_FREE_RATE, T, sigma);
+                if (netCredit <= 0) yield null;
+                int c = Math.min(MAX_CONTRACTS, (int) (cash * POSITION_SIZE_PCT / (SPREAD_WIDTH * 100)));
+                if (c < 1) yield null;
+                // totalCostBasis < 0 signals credit received; computeCurrentValue and shouldExit handle this
+                yield new OpenPosition(symbol, expiry, c, sigma, -netCredit * 100 * c,
+                        netCredit * 100 * c,
+                        List.of(new Leg(K, false, false, 1),
+                                new Leg(K - SPREAD_WIDTH, false, true, 1)), 0, 0);
+            }
+            case BEAR_CALL_SPREAD -> {
+                // Short ATM call, long OTM call — net credit received
+                double netCredit = bsEngine.callPrice(price, K, RISK_FREE_RATE, T, sigma)
+                                 - bsEngine.callPrice(price, K + SPREAD_WIDTH, RISK_FREE_RATE, T, sigma);
+                if (netCredit <= 0) yield null;
+                int c = Math.min(MAX_CONTRACTS, (int) (cash * POSITION_SIZE_PCT / (SPREAD_WIDTH * 100)));
+                if (c < 1) yield null;
+                yield new OpenPosition(symbol, expiry, c, sigma, -netCredit * 100 * c,
+                        netCredit * 100 * c,
+                        List.of(new Leg(K, true, false, 1),
+                                new Leg(K + SPREAD_WIDTH, true, true, 1)), 0, 0);
+            }
+            case HIGH_DELTA_SCALP -> {
+                // Deep ITM call (buys ≥ 3) or put (sells ≥ 3); default to call in backtest
+                double deepK = Math.max(1.0, K - SPREAD_WIDTH * 2);
+                double prem = bsEngine.callPrice(price, deepK, RISK_FREE_RATE, T, sigma);
+                if (prem <= 0) yield null;
+                int c = contracts(cash, prem);
+                if (c < 1) yield null;
+                yield new OpenPosition(symbol, expiry, c, sigma, prem * 100 * c, 0,
+                        List.of(new Leg(deepK, true, true, 1)), 0, 0);
+            }
+            case MOMENTUM_NEAR_TERM -> {
+                // ATM call with near-term expiry
+                double prem = bsEngine.callPrice(price, K, RISK_FREE_RATE, T, sigma);
+                if (prem <= 0) yield null;
+                int c = contracts(cash, prem);
+                if (c < 1) yield null;
+                yield new OpenPosition(symbol, expiry, c, sigma, prem * 100 * c, 0,
+                        List.of(new Leg(K, true, true, 1)), 0, 0);
+            }
+            case ZERO_DTE -> {
+                // Same-day straddle; T is already set to 7/365 (1 week) in the backtest for simplicity
+                double callPrem = bsEngine.callPrice(price, K, RISK_FREE_RATE, T, sigma);
+                double putPrem  = bsEngine.putPrice(price, K, RISK_FREE_RATE, T, sigma);
+                double netDebit = callPrem + putPrem;
+                if (netDebit <= 0) yield null;
+                int c = contracts(cash, netDebit);
+                if (c < 1) yield null;
+                yield new OpenPosition(symbol, expiry, c, sigma, netDebit * 100 * c, 0,
+                        List.of(new Leg(K, true, true, 1), new Leg(K, false, true, 1)), 0, 0);
             }
             case COVERED_CALL -> {
                 // Buy stock; sell 1 OTM call per 100 shares to collect premium
