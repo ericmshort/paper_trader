@@ -220,7 +220,9 @@ public class TradingLoop implements Runnable {
                 RSIMomentumStrategy rsiStrategy = symbolStrategies.get(symbol);
                 if (rsiStrategy != null) {
                     boolean stopHit = hasPosition && rsiStrategy.isTrailingStopHit(price);
-                    SignalResult.Direction rsiDir = rsiStrategy.signal(prices);
+                    // Use intraday ticks so RSI reflects same-day price action and updates
+                    // every minute rather than being frozen at yesterday's daily close.
+                    SignalResult.Direction rsiDir = rsiStrategy.signal(priceHistory.getPrices(symbol));
                     if (stopHit) {
                         Position pos = account.getPositions().get(symbol);
                         brokerClient.submitSell(symbol, pos.getQuantity(), price, "RSI=" + rsiDir,

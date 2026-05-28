@@ -153,14 +153,14 @@ public class RSIMomentumStrategyTest {
     void loopBuysWhenRSIStrategySignalsBuy() throws Exception {
         Account account = new Account();
 
-        // Seed price history to produce RSI < 30 (oversold)
+        // Seed intraday price history to produce RSI < 30 (oversold)
         PriceHistory ph = new PriceHistory();
-        for (int i = 0; i < 10; i++) ph.recordDaily("AAPL", 100.0 + i, 1_000_000);
-        for (int i = 0; i < 10; i++) ph.recordDaily("AAPL", 110.0 - i * 3, 1_000_000);
+        for (int i = 0; i < 10; i++) ph.record("AAPL", 100.0 + i, 1_000_000);
+        for (int i = 0; i < 10; i++) ph.record("AAPL", 110.0 - i * 3, 1_000_000);
 
         RSIMomentumStrategy strategy = new RSIMomentumStrategy(new IndicatorEngine());
-        // Verify the seeded history actually produces a BUY signal
-        List<Double> seededPrices = ph.getDailyPrices("AAPL");
+        // Verify the seeded intraday history actually produces a BUY signal
+        List<Double> seededPrices = ph.getPrices("AAPL");
         assertEquals(SignalResult.Direction.BUY, strategy.signal(seededPrices),
                 "Test pre-condition: seeded prices should be oversold");
 
@@ -195,15 +195,15 @@ public class RSIMomentumStrategyTest {
         account.addOrUpdatePosition("AAPL", 10, 100.0, Position.PositionType.STOCK);
         account.setBalance(100_000.0 - 1_000.0);
 
-        // Seed price history with strong uptrend (RSI > 70)
+        // Seed intraday price history with strong uptrend (RSI > 70)
         PriceHistory ph = new PriceHistory();
-        for (int i = 0; i < 5; i++) ph.recordDaily("AAPL", 100.0 - i, 1_000_000);
-        for (int i = 0; i < 10; i++) ph.recordDaily("AAPL", 95.0 + i * 3, 1_000_000);
+        for (int i = 0; i < 5; i++) ph.record("AAPL", 100.0 - i, 1_000_000);
+        for (int i = 0; i < 10; i++) ph.record("AAPL", 95.0 + i * 3, 1_000_000);
 
         RSIMomentumStrategy strategy = new RSIMomentumStrategy(new IndicatorEngine());
         strategy.onPositionOpened(100.0);
-        // Verify the seeded history actually produces a SELL signal
-        List<Double> seededPrices = ph.getDailyPrices("AAPL");
+        // Verify the seeded intraday history actually produces a SELL signal
+        List<Double> seededPrices = ph.getPrices("AAPL");
         assertEquals(SignalResult.Direction.SELL, strategy.signal(seededPrices),
                 "Test pre-condition: seeded prices should be overbought");
 
