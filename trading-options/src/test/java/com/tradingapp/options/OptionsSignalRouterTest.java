@@ -153,6 +153,27 @@ public class OptionsSignalRouterTest {
                 "PUT position should be closed when premium falls to 50% of cost");
     }
 
+    /**
+     * Regression test: when BS returns exactly 0.0 (extreme deep-OTM), the stop-loss must still
+     * fire. The old guard `currentPremium > 0` silently suppressed it in this case.
+     */
+    @Test
+    void testCallClosedWhenPremiumCollapsesToZero() {
+        Account account = new Account();
+        TransactionLog log = new TransactionLog(tempDir.resolve("call_zero.db").toString());
+        OptionsSignalRouter router = buildRouter(account, log);
+
+        // Open a call ATM at $150 (strike = $150)
+        router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
+        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"));
+
+        // Price crashes to $50 — call is so deep OTM that BS callPrice rounds to 0.0;
+        // 0.0 <= premiumPaid * 0.50 must trigger the stop even though currentPremium == 0.
+        router.evaluate(SYMBOL, 50.0, 0, 0, "neutral", "");
+        assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
+                "CALL must be closed by stop-loss even when BS-computed premium collapses to 0.0");
+    }
+
     @Test
     void testCallNotClosedWhenPremiumAboveStop() {
         Account account = new Account();

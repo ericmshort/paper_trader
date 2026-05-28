@@ -224,12 +224,15 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         double T     = bsEngine.timeToExpiry(pos.getExpiry());
         double sigma = computeVol(symbol);
-        double currentPremium = (sigma > 0 && T > 0)
+        boolean canPrice = sigma > 0 && T > 0;
+        double currentPremium = canPrice
                 ? (isCall ? bsEngine.callPrice(price, pos.getStrike(), RISK_FREE_RATE, T, sigma)
                           : bsEngine.putPrice(price, pos.getStrike(), RISK_FREE_RATE, T, sigma))
                 : 0.0;
 
-        boolean premiumStop  = currentPremium > 0 && currentPremium <= pos.getPremiumPaid() * 0.50;
+        // Only fire stop-loss when we have a valid price; avoids false trigger on sentinel 0 from
+        // missing vol/expiry, while correctly catching options that have gone to zero value.
+        boolean premiumStop  = canPrice && currentPremium <= pos.getPremiumPaid() * 0.50;
         boolean profitTarget = currentPremium >= pos.getPremiumPaid() * PROFIT_TARGET;
         boolean reversal     = reversalSignals >= 2;
         boolean nearExpiry   = pos.daysToExpiry() < 3;
