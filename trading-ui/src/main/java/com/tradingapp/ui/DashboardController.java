@@ -60,7 +60,7 @@ public class DashboardController implements Initializable {
     @FXML private Label stockHoldingsLabel;
     @FXML private Label optionHoldingsLabel;
     @FXML private Label availableCashLabel;
-    @FXML private Label buyingPowerLabel;
+    @FXML private Label optionsCashDeployedLabel;
     @FXML private Label haltedLabel;
     @FXML private Label winsLabel;
     @FXML private Label lossesLabel;
@@ -447,6 +447,13 @@ public class DashboardController implements Initializable {
         return total;
     }
 
+    private double computeOptionsCashDeployed() {
+        return account.getOptionsPositions().values().stream()
+                .filter(p -> p.getContracts() > 0)
+                .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
+                .sum();
+    }
+
     private void refreshUi() {
         List<TransactionRecord> history = transactionLog.findAll();
         tradeHistoryTable.setItems(FXCollections.observableArrayList(history));
@@ -460,9 +467,7 @@ public class DashboardController implements Initializable {
         stockHoldingsLabel.setText(String.format("Stocks: $%,.2f", stockHoldings));
         optionHoldingsLabel.setText(String.format("Options: $%,.2f", optionHoldings));
         availableCashLabel.setText(String.format("Cash: $%,.2f", availableCash));
-        if (alpacaMode) {
-            buyingPowerLabel.setText(String.format("Available Cash: $%,.2f", account.getBuyingPower()));
-        }
+        optionsCashDeployedLabel.setText(String.format("Options Reserved: $%,.2f", computeOptionsCashDeployed()));
 
         double optTotalUnrealized = populateOptionsTable();
         double stkTotalUnrealized = populateStockTable();
@@ -505,9 +510,7 @@ public class DashboardController implements Initializable {
         stockHoldingsLabel.setText(String.format("Stocks: $%,.2f", stockHoldings));
         optionHoldingsLabel.setText(String.format("Options: $%,.2f", optionHoldings));
         availableCashLabel.setText(String.format("Cash: $%,.2f", availableCash));
-        if (alpacaMode) {
-            buyingPowerLabel.setText(String.format("Available Cash: $%,.2f", account.getBuyingPower()));
-        }
+        optionsCashDeployedLabel.setText(String.format("Options Reserved: $%,.2f", computeOptionsCashDeployed()));
         double unrealizedPnl = computeStockUnrealizedPnL() + computeOptionsUnrealizedPnL();
         double realizedPnl = totalPortfolio - Account.STARTING_BALANCE - unrealizedPnl;
         pnlButton.setText(String.format("P&L: $%,.2f", realizedPnl));

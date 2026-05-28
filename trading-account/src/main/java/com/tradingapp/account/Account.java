@@ -41,11 +41,18 @@ public class Account {
 
     public double totalExposureFraction() {
         double equity = positions.values().stream().mapToDouble(Position::getMarketValue).sum();
-        double options = optionsPositions.values().stream()
+        // allOptions includes short legs (negative contracts) for accurate portfolio value.
+        double allOptions = optionsPositions.values().stream()
                 .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts()).sum();
-        double totalPortfolioValue = balance + equity + options;
+        // Only long (debit) positions consumed cash and count toward the deployment cap.
+        // Short legs have negative contracts and would otherwise reduce the numerator,
+        // letting credit spreads punch a hole in the 60% cap.
+        double deployedOptions = optionsPositions.values().stream()
+                .filter(p -> p.getContracts() > 0)
+                .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts()).sum();
+        double totalPortfolioValue = balance + equity + allOptions;
         if (totalPortfolioValue <= 0) return 1.0;
-        return (equity + options) / totalPortfolioValue;
+        return (equity + deployedOptions) / totalPortfolioValue;
     }
 
     public double getTotalUnrealizedPnL() {

@@ -84,6 +84,38 @@ public class AccountTest {
         assertEquals(0.16, account.totalExposureFraction(), 0.001);
     }
 
+    /**
+     * Regression: credit spread short legs (negative contracts) used to reduce the exposure
+     * numerator, letting the 60% cap be bypassed when many spreads were open. With 20 credit
+     * spreads open the cap could effectively allow ~70k in long options instead of 60k.
+     * Short legs must not deflate the deployment count.
+     */
+    @Test
+    void testCreditSpreadShortLegsDoNotReduceExposure() {
+        Account account = new Account();
+        LocalDate expiry = LocalDate.now().plusMonths(1);
+
+        // Simulate a bull-put spread: short leg has negative contracts, long leg positive.
+        // Short leg: contracts=-5, premiumPaid=$3.00 → would have been: balance += credit
+        // Long leg:  contracts=+5, premiumPaid=$1.50 → balance -= debit
+        double creditReceived = 3.00 * 100 * 5;  // $1,500 received
+        double debitPaid      = 1.50 * 100 * 5;  // $750 paid
+        account.setBalance(100_000.0 + creditReceived - debitPaid); // $100,750
+        account.addOptionsPosition("TEST_BULLPUTSPREAD_SHORT",
+                new OptionsPosition("TEST", "PUT", 145.0, expiry, -5, 3.00));
+        account.addOptionsPosition("TEST_BULLPUTSPREAD_LONG",
+                new OptionsPosition("TEST", "PUT", 140.0, expiry,  5, 1.50));
+
+        // Exposure should reflect only the long leg's cash deployment ($750 / ~$100k ≈ 0.75%)
+        // and must NOT be negative or zero just because the short leg offsets it.
+        double exposure = account.totalExposureFraction();
+        assertTrue(exposure > 0,
+                "Exposure must be positive — short legs must not deflate it below zero");
+        // Long leg: $750 / totalPortfolio ≈ $750 / $100,000 ≈ 0.75%
+        assertEquals(0.0075, exposure, 0.001,
+                "Exposure should reflect only the long leg cash deployed");
+    }
+
     @Test
     void testDailyLossHaltedDefaultsFalse() {
         Account account = new Account();
