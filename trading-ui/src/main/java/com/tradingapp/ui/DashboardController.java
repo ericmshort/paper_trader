@@ -314,7 +314,8 @@ public class DashboardController implements Initializable {
         });
 
         colSymbol.setCellValueFactory(new PropertyValueFactory<>("symbol"));
-        colAction.setCellValueFactory(new PropertyValueFactory<>("action"));
+        colAction.setCellValueFactory(cd -> new javafx.beans.property.SimpleStringProperty(
+                cd.getValue().getAction() == null ? "" : cd.getValue().getAction().name()));
         colAction.setCellFactory(col -> new TableCell<>() {
             @Override
             protected void updateItem(String action, boolean empty) {
