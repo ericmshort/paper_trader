@@ -87,8 +87,8 @@ public class OptionsOrderExecutor {
         // ── Attempt atomic multi-leg submission ───────────────────────────────
         if (submitter != null) {
             List<MultiLegOrder> legs = List.of(
-                    new MultiLegOrder(symbol, "CALL", callStrike, callExpiry, "buy", "bto"),
-                    new MultiLegOrder(symbol, "PUT",  putStrike,  putExpiry,  "buy", "bto"));
+                    new MultiLegOrder(symbol, "CALL", callStrike, callExpiry, "buy", "buy_to_open"),
+                    new MultiLegOrder(symbol, "PUT",  putStrike,  putExpiry,  "buy", "buy_to_open"));
             String orderId = submitter.submitMultiLeg(legs, contracts);
             if (orderId != null) {
                 double totalCost = (callPremium + putPremium) * 100 * contracts;
@@ -146,8 +146,8 @@ public class OptionsOrderExecutor {
         // ── Attempt atomic multi-leg submission ───────────────────────────────
         if (submitter != null) {
             List<MultiLegOrder> legs = List.of(
-                    new MultiLegOrder(symbol, optionType, shortStrike, expiry, "sell", "sto"),
-                    new MultiLegOrder(symbol, optionType, longStrike,  expiry, "buy",  "bto"));
+                    new MultiLegOrder(symbol, optionType, shortStrike, expiry, "sell", "sell_to_open"),
+                    new MultiLegOrder(symbol, optionType, longStrike,  expiry, "buy",  "buy_to_open"));
             String orderId = submitter.submitMultiLeg(legs, contracts);
             if (orderId != null) {
                 // Net credit: short premium received minus long premium paid

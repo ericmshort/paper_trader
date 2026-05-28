@@ -10,7 +10,7 @@ import java.time.LocalDate;
  * @param strike          strike price
  * @param expiry          expiration date
  * @param side            "buy" or "sell"
- * @param positionIntent  Alpaca position intent: "bto", "btc", "sto", "stc"
+ * @param positionIntent  Alpaca position intent: "buy_to_open", "buy_to_close", "sell_to_open", "sell_to_close"
  */
 public record MultiLegOrder(
         String symbol,
