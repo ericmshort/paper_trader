@@ -167,7 +167,9 @@ public class TradingLoop implements Runnable {
                 lastDayTrackingDate = today;
                 // Seed from DB for restart resilience; take max with broker value so that
                 // switching to a different account resets the baseline to actual balance.
-                double brokerValue = account.getBalance() + account.getTotalUnrealizedPnL();
+                double stockMV = account.getPositions().values().stream()
+                        .mapToDouble(Position::getMarketValue).sum();
+                double brokerValue = account.getBalance() + stockMV;
                 double dbValue = transactionLog != null
                         ? transactionLog.getBalanceBeforeDate(today)
                         : brokerValue;
@@ -192,7 +194,12 @@ public class TradingLoop implements Runnable {
                             .filter(p -> p.getContracts() > 0)
                             .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
                             .sum();
-                    double currentValue = account.getBalance() + account.getTotalUnrealizedPnL() + optionsCostBasis;
+                    // Use market value (not just unrealized PnL) so that open stock positions
+                    // don't appear as losses: buying $14k of stock reduces cash by $14k but
+                    // adds $14k of market value — net portfolio value is unchanged.
+                    double stockValue = account.getPositions().values().stream()
+                            .mapToDouble(Position::getMarketValue).sum();
+                    double currentValue = account.getBalance() + stockValue + optionsCostBasis;
                     if (currentValue < dayStartValue * (1 - dailyLossLimitPct)) {
                         account.setDailyLossHalted(true);
                         researchCallback.accept(String.format(
