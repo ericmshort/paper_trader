@@ -146,7 +146,7 @@ public class DashboardController implements Initializable {
 
     private void startTradingComponents(AppConfig appConfig) {
         researchArea.setText("Waiting for market data...\n\nMarket hours: 9:30 AM – 4:00 PM ET"
-                + "\nWatching 50 large-cap US stocks."
+                + "\nWatching 100 large-cap and small-cap US stocks."
                 + "\nBroker: " + SettingsController.brokerTypeLabel(appConfig.getBrokerType())
                 + " | Quotes: " + appConfig.getQuoteProviderType().name());
 
