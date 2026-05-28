@@ -163,15 +163,17 @@ public class TradingLoop implements Runnable {
             brokerClient.syncAccount(account);
             if (!today.equals(lastDayTrackingDate)) {
                 lastDayTrackingDate = today;
-                // Seed from DB for restart resilience; take max with broker value so that
-                // switching to a different account resets the baseline to actual balance.
-                double stockMV = account.getPositions().values().stream()
-                        .mapToDouble(Position::getMarketValue).sum();
-                double brokerValue = account.getBalance() + stockMV;
-                double dbValue = transactionLog != null
-                        ? transactionLog.getBalanceBeforeDate(today)
-                        : brokerValue;
-                dayStartValue = Math.max(dbValue, brokerValue);
+                // Prefer last_equity from the broker (equity at prior close) — the authoritative
+                // start-of-day value. Fall back to computing balance + positions locally for
+                // simulated brokers that don't provide it.
+                double lastEquity = account.getLastEquity();
+                if (lastEquity > 0) {
+                    dayStartValue = lastEquity;
+                } else {
+                    double stockMV = account.getPositions().values().stream()
+                            .mapToDouble(Position::getMarketValue).sum();
+                    dayStartValue = account.getBalance() + stockMV;
+                }
                 account.setDailyLossHalted(false);
             }
             List<QuoteModel> quotes = dataClient.getQuotes(watchList);

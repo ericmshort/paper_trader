@@ -266,6 +266,8 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                 if (cash <= 100.0) account.setTradingHalted(true);
                 double bp = alpacaAccount.optDouble("buying_power", cash);
                 account.setBuyingPower(bp);
+                double lastEquity = alpacaAccount.optDouble("last_equity", 0.0);
+                if (lastEquity > 0) account.setLastEquity(lastEquity);
             }
 
             JSONArray positions = getJsonArray("/positions");

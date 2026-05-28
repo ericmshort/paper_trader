@@ -10,6 +10,7 @@ public class Account {
 
     private volatile double balance;
     private volatile double buyingPower;
+    private volatile double lastEquity;
     private final Map<String, Position> positions;
     private final Map<String, OptionsPosition> optionsPositions;
     private volatile double totalRealizedPnL;
@@ -26,6 +27,7 @@ public class Account {
 
     public double getBalance() { return balance; }
     public double getBuyingPower() { return buyingPower; }
+    public double getLastEquity() { return lastEquity; }
     public Map<String, Position> getPositions() { return Collections.unmodifiableMap(positions); }
     public Map<String, OptionsPosition> getOptionsPositions() { return Collections.unmodifiableMap(optionsPositions); }
     public double getTotalRealizedPnL() { return totalRealizedPnL; }
@@ -35,6 +37,7 @@ public class Account {
 
     public void setBalance(double balance) { this.balance = balance; }
     public void setBuyingPower(double buyingPower) { this.buyingPower = buyingPower; }
+    public void setLastEquity(double lastEquity) { this.lastEquity = lastEquity; }
     public void setTradingHalted(boolean tradingHalted) { this.tradingHalted = tradingHalted; }
 
     public synchronized void addRealizedPnL(double amount) { this.totalRealizedPnL += amount; }
