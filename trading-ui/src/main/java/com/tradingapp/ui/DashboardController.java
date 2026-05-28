@@ -432,7 +432,7 @@ public class DashboardController implements Initializable {
         double T = bsEngine.timeToExpiry(pos.getExpiry());
         if (T <= 0) return 0.0;
         double vol = bsEngine.historicalVol(prices);
-        if (!Double.isFinite(vol) || vol == 0) return 0.0;
+        if (!Double.isFinite(vol) || vol == 0) return pos.getPremiumPaid();
         double K = pos.getStrike();
         double r = 0.05;
         return "CALL".equals(pos.getType())
