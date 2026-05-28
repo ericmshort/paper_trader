@@ -26,7 +26,10 @@ public class AppConfig {
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
-        if (!Files.exists(CONFIG_PATH)) return config;
+        if (!Files.exists(CONFIG_PATH)) {
+            config.save(); // persist defaults so settings survive restarts
+            return config;
+        }
         try (InputStream in = Files.newInputStream(CONFIG_PATH)) {
             Properties props = new Properties();
             props.load(in);

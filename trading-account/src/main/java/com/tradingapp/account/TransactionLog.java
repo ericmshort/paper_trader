@@ -3,6 +3,7 @@ package com.tradingapp.account;
 import java.io.File;
 import java.sql.*;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -269,6 +270,26 @@ public class TransactionLog {
         if (e < 0) return null;
         String val = reason.substring(e + 4).trim();
         try { return LocalDate.parse(val); } catch (Exception ex) { return null; }
+    }
+
+    /**
+     * Returns the account balance at end-of-day for the last day before {@code today}.
+     * Used by TradingLoop to seed dayStartValue from durable storage so restarts don't
+     * reset the daily loss baseline to the current (already-depleted) balance.
+     * Returns STARTING_BALANCE if no transactions exist before today.
+     */
+    public double getBalanceBeforeDate(LocalDate today) {
+        long dayStartMs = today.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        String sql = "SELECT balance_after FROM transactions WHERE timestamp < ? ORDER BY timestamp DESC LIMIT 1";
+        try (Connection conn = connect(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, dayStartMs);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return rs.getDouble("balance_after");
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to query balance before date", e);
+        }
+        return Account.STARTING_BALANCE;
     }
 
     public int countWins() {

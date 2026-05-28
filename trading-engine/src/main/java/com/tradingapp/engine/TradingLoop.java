@@ -1,7 +1,9 @@
 package com.tradingapp.engine;
 
 import com.tradingapp.account.Account;
+import com.tradingapp.account.OptionsPosition;
 import com.tradingapp.account.Position;
+import com.tradingapp.account.TransactionLog;
 import com.tradingapp.data.EarningsCalendar;
 import com.tradingapp.data.PriceHistory;
 import com.tradingapp.data.QuoteModel;
@@ -46,6 +48,7 @@ public class TradingLoop implements Runnable {
     private double dailyLossLimitPct = 0.05;
     private double dayStartValue = -1;
     private LocalDate lastDayTrackingDate;
+    private TransactionLog transactionLog;
     private boolean avoidOvernightHolds = true;
     private boolean marketRegimeFilterEnabled = true;
     private EarningsCalendar earningsCalendar;
@@ -132,6 +135,7 @@ public class TradingLoop implements Runnable {
     }
 
     public void setDailyLossLimitPct(double pct) { this.dailyLossLimitPct = pct; }
+    public void setTransactionLog(TransactionLog log) { this.transactionLog = log; }
     public void setAvoidOvernightHolds(boolean v) { this.avoidOvernightHolds = v; }
     public void setMarketRegimeFilterEnabled(boolean v) { this.marketRegimeFilterEnabled = v; }
     public boolean isUptrend() { return isMarketInUptrend(); }
@@ -156,7 +160,13 @@ public class TradingLoop implements Runnable {
             }
             if (!today.equals(lastDayTrackingDate)) {
                 lastDayTrackingDate = today;
-                dayStartValue = account.getBalance() + account.getTotalUnrealizedPnL();
+                // Seed from durable DB balance so restarts don't reset the baseline to
+                // the current (already-depleted) balance mid-day.
+                if (transactionLog != null) {
+                    dayStartValue = transactionLog.getBalanceBeforeDate(today);
+                } else {
+                    dayStartValue = account.getBalance() + account.getTotalUnrealizedPnL();
+                }
                 account.setDailyLossHalted(false);
             }
             if (account.isTradingHalted()) {
@@ -178,7 +188,11 @@ public class TradingLoop implements Runnable {
                 }
                 account.updatePositionPrice(symbol, price);
                 if (!account.isDailyLossHalted() && dailyLossLimitPct > 0 && dayStartValue > 0) {
-                    double currentValue = account.getBalance() + account.getTotalUnrealizedPnL();
+                    double optionsCostBasis = account.getOptionsPositions().values().stream()
+                            .filter(p -> p.getContracts() > 0)
+                            .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
+                            .sum();
+                    double currentValue = account.getBalance() + account.getTotalUnrealizedPnL() + optionsCostBasis;
                     if (currentValue < dayStartValue * (1 - dailyLossLimitPct)) {
                         account.setDailyLossHalted(true);
                         researchCallback.accept(String.format(

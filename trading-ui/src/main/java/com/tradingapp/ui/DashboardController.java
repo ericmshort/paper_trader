@@ -215,6 +215,7 @@ public class DashboardController implements Initializable {
                 new IndicatorEngine(), new TrailingStopMonitor(), brokerClient, feeCalc,
                 allSymbols, researchCb, uiRefresh, account,
                 optionsRouter, mlEval, trainingCallback);
+        tradingLoop.setTransactionLog(transactionLog);
         tradingLoop.setDailyLossLimitPct(appConfig.getDailyLossLimitPct() / 100.0);
         tradingLoop.setAvoidOvernightHolds(appConfig.isAvoidOvernightHolds());
         tradingLoop.setMarketRegimeFilterEnabled(appConfig.isMarketRegimeFilterEnabled());
