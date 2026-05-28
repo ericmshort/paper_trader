@@ -221,10 +221,6 @@ public class DashboardController implements Initializable {
         tradingLoop.setMarketRegimeFilterEnabled(appConfig.isMarketRegimeFilterEnabled());
         tradingLoop.setEarningsCalendar(earningsCalendar);
         tradingLoop.setEarningsBlackoutDays(appConfig.getEarningsBlackoutDays());
-        IndicatorEngine rsiEngine = new IndicatorEngine();
-        for (String sym : allSymbols) {
-            tradingLoop.registerStrategy(sym, new RSIMomentumStrategy(rsiEngine));
-        }
         optionsRouter.setUptrendSupplier(tradingLoop::isUptrend);
 
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {

@@ -55,7 +55,6 @@ public class TradingLoop implements Runnable {
     private int earningsBlackoutDays = 3;
     private final Map<String, Double> lastKnownPrices = new HashMap<>();
     private final Map<String, LocalDate> dailyBarLastRecorded = new HashMap<>();
-    private final Map<String, RSIMomentumStrategy> symbolStrategies = new HashMap<>();
 
     public TradingLoop(QuoteProvider dataClient, PriceHistory priceHistory,
                        IndicatorEngine indicators, TrailingStopMonitor trailingStop,
@@ -141,7 +140,6 @@ public class TradingLoop implements Runnable {
     public boolean isUptrend() { return isMarketInUptrend(); }
     public void setEarningsCalendar(EarningsCalendar cal) { this.earningsCalendar = cal; }
     public void setEarningsBlackoutDays(int days) { this.earningsBlackoutDays = days; }
-    public void registerStrategy(String symbol, RSIMomentumStrategy strategy) { symbolStrategies.put(symbol, strategy); }
 
     @Override
     public void run() {
@@ -223,57 +221,7 @@ public class TradingLoop implements Runnable {
                 String featureCsv = extractFeatureCsv(signals);
                 boolean hasPosition = account.getPositions().containsKey(symbol);
 
-                // ── Leg 1: RSI Momentum ───────────────────────────────────────────────
-                RSIMomentumStrategy rsiStrategy = symbolStrategies.get(symbol);
-                if (rsiStrategy != null) {
-                    boolean stopHit = hasPosition && rsiStrategy.isTrailingStopHit(price);
-                    // Use intraday ticks so RSI reflects same-day price action and updates
-                    // every minute rather than being frozen at yesterday's daily close.
-                    SignalResult.Direction rsiDir = rsiStrategy.signal(priceHistory.getPrices(symbol));
-                    if (stopHit) {
-                        Position pos = account.getPositions().get(symbol);
-                        brokerClient.submitSell(symbol, pos.getQuantity(), price, "RSI=" + rsiDir,
-                                String.format("RSI Momentum trailing stop: %.0f%% drawdown from peak",
-                                        rsiStrategy.getTrailingStopPct() * 100));
-                        // Force-remove locally so the multi-indicator leg cannot double-sell
-                        // if the broker call timed out but the order went through at the exchange.
-                        account.removePosition(symbol);
-                        rsiStrategy.onPositionClosed();
-                        uiRefreshCallback.run();
-                    } else if (rsiDir == SignalResult.Direction.SELL && hasPosition) {
-                        Position pos = account.getPositions().get(symbol);
-                        brokerClient.submitSell(symbol, pos.getQuantity(), price,
-                                "RSI overbought", "RSI Momentum: RSI overbought");
-                        account.removePosition(symbol);
-                        rsiStrategy.onPositionClosed();
-                        uiRefreshCallback.run();
-                    } else if (rsiDir == SignalResult.Direction.BUY && !hasPosition) {
-                        int daysToEarnings = earningsCalendar != null
-                                ? earningsCalendar.daysUntilEarnings(symbol) : Integer.MAX_VALUE;
-                        if (!isMarketInUptrend()) {
-                            researchCallback.accept(symbol + " RSI BUY skipped: bear regime");
-                        } else if (daysToEarnings <= earningsBlackoutDays) {
-                            researchCallback.accept(symbol + " RSI BUY skipped: earnings in "
-                                    + daysToEarnings + " day" + (daysToEarnings == 1 ? "" : "s"));
-                        } else if (account.totalExposureFraction() >= MAX_PORTFOLIO_EXPOSURE) {
-                            researchCallback.accept(symbol + " RSI BUY skipped: portfolio at capacity");
-                        } else if (account.isDailyLossHalted()) {
-                            researchCallback.accept(symbol + " RSI BUY skipped: daily loss limit active");
-                        } else {
-                            int shares = fees.maxShares(account.getBalance(), price);
-                            if (shares > 0) {
-                                brokerClient.submitBuy(symbol, shares, price, "RSI oversold",
-                                        "RSI Momentum: RSI oversold", "");
-                                rsiStrategy.onPositionOpened(price);
-                                uiRefreshCallback.run();
-                            }
-                        }
-                    }
-                    // Refresh before the multi-indicator leg sees the updated position state.
-                    hasPosition = account.getPositions().containsKey(symbol);
-                }
-
-                // ── Leg 2: Multi-indicator ────────────────────────────────────────────
+                // ── Multi-indicator ───────────────────────────────────────────────────
                 if (trailingStop.check(symbol, price) && hasPosition) {
                     Position pos = account.getPositions().get(symbol);
                     brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Trailing stop: 5% drawdown from peak");
