@@ -248,6 +248,10 @@ public class DashboardController implements Initializable {
                         priceHistory.seed(sym, bars);
                         seeded++;
                     }
+                    Thread.sleep(120); // avoid bursting Yahoo's rate limit alongside the live-quote loop
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
                 } catch (Exception e) {
                     // Non-fatal: symbol will build history organically from live ticks
                 }

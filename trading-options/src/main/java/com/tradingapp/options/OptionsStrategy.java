@@ -13,6 +13,7 @@ public enum OptionsStrategy {
     STRADDLE("Straddle"),
     STRANGLE("Strangle"),
     BUTTERFLY("Butterfly"),
+    IRON_CONDOR("Iron Condor"),
     COVERED_CALL("Covered Call");
 
     private final String displayName;

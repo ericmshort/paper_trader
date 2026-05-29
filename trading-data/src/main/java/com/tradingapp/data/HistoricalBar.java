@@ -10,16 +10,23 @@ public class HistoricalBar {
     private final double high;
     private final double low;
     private final double close;
+    private final double adjClose;
     private final long volume;
 
     public HistoricalBar(String symbol, LocalDate date, double open, double high,
                          double low, double close, long volume) {
+        this(symbol, date, open, high, low, close, close, volume);
+    }
+
+    public HistoricalBar(String symbol, LocalDate date, double open, double high,
+                         double low, double close, double adjClose, long volume) {
         this.symbol = symbol;
         this.date = date;
         this.open = open;
         this.high = high;
         this.low = low;
         this.close = close;
+        this.adjClose = adjClose;
         this.volume = volume;
     }
 
@@ -29,5 +36,6 @@ public class HistoricalBar {
     public double getHigh() { return high; }
     public double getLow() { return low; }
     public double getClose() { return close; }
+    public double getAdjClose() { return adjClose; }
     public long getVolume() { return volume; }
 }

@@ -177,8 +177,8 @@
             </content>
         </Tab>
 
-        <!-- Backtest tab -->
-        <Tab text="Backtest">
+        <!-- Backtest/Chart tab -->
+        <Tab text="Backtest/Chart">
             <content>
                 <fx:include fx:id="backtestPanel" source="backtest-panel.fxml"/>
             </content>

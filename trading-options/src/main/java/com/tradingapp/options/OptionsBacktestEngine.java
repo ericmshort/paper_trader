@@ -234,6 +234,8 @@ public class OptionsBacktestEngine {
             case BULL_PUT_SPREAD -> buys >= 2 && sells == 0;
             case BEAR_CALL_SPREAD -> sells >= 2 && buys == 0;
             case HIGH_DELTA_SCALP, MOMENTUM_NEAR_TERM -> buys >= 3 || sells >= 3;
+            // Iron condor profits from range-bound action: need genuine mixed signals
+            case IRON_CONDOR -> (buys >= 2 && sells >= 1) || (sells >= 2 && buys >= 1);
         };
     }
 
@@ -249,7 +251,7 @@ public class OptionsBacktestEngine {
         long daysLeft = ChronoUnit.DAYS.between(currentDate, pos.expiry);
         if (daysLeft < 3) return true;
 
-        // Credit spreads use inverted exit logic (totalCostBasis < 0 = credit received)
+        // Credit strategies use inverted exit logic (totalCostBasis < 0 = credit received)
         if (pos.totalCostBasis < 0) {
             double creditReceived = -pos.totalCostBasis;
             double costToClose    = -currentValue;
@@ -258,6 +260,8 @@ public class OptionsBacktestEngine {
             return switch (strategy) {
                 case BULL_PUT_SPREAD  -> sells >= 2;
                 case BEAR_CALL_SPREAD -> buys  >= 2;
+                // Exit iron condor when a strong directional move threatens the short strikes
+                case IRON_CONDOR      -> buys >= 3 || sells >= 3;
                 default -> false;
             };
         }
@@ -277,7 +281,7 @@ public class OptionsBacktestEngine {
                  HIGH_DELTA_SCALP, MOMENTUM_NEAR_TERM -> sells >= 2;
             case LONG_PUT, BEAR_PUT_SPREAD -> buys >= 2;
             case STRADDLE, STRANGLE, ZERO_DTE -> false;
-            case BULL_PUT_SPREAD, BEAR_CALL_SPREAD -> false; // handled above
+            case BULL_PUT_SPREAD, BEAR_CALL_SPREAD, IRON_CONDOR -> false; // handled above in credit path
         };
     }
 
@@ -415,6 +419,38 @@ public class OptionsBacktestEngine {
                 if (c < 1) yield null;
                 yield new OpenPosition(symbol, expiry, c, sigma, netDebit * 100 * c, 0,
                         List.of(new Leg(K, true, true, 1), new Leg(K, false, true, 1)), 0, 0);
+            }
+            case IRON_CONDOR -> {
+                // Short OTM call + long further OTM call (bear call spread)
+                // Short OTM put  + long further OTM put  (bull put spread)
+                // Entered when mixed signals suggest range-bound action and IV is elevated.
+                // Optimal window: 30-45 DTE, short strikes ~1 spread-width OTM (moderate delta).
+                double shortCallK = K + SPREAD_WIDTH;
+                double longCallK  = K + SPREAD_WIDTH * 2;
+                double shortPutK  = K - SPREAD_WIDTH;
+                double longPutK   = Math.max(SPREAD_WIDTH, K - SPREAD_WIDTH * 2);
+
+                double shortCallPrem = bsEngine.callPrice(price, shortCallK, RISK_FREE_RATE, T, sigma);
+                double longCallPrem  = bsEngine.callPrice(price, longCallK,  RISK_FREE_RATE, T, sigma);
+                double shortPutPrem  = bsEngine.putPrice(price,  shortPutK,  RISK_FREE_RATE, T, sigma);
+                double longPutPrem   = bsEngine.putPrice(price,  longPutK,   RISK_FREE_RATE, T, sigma);
+
+                double netCredit = (shortCallPrem - longCallPrem) + (shortPutPrem - longPutPrem);
+                if (netCredit <= 0) yield null;
+
+                // Size by max loss of one wing (spread width × 100); can only lose one side
+                int c = Math.min(MAX_CONTRACTS, (int) (cash * POSITION_SIZE_PCT / (SPREAD_WIDTH * 100)));
+                if (c < 1) yield null;
+
+                yield new OpenPosition(symbol, expiry, c, sigma,
+                        -netCredit * 100 * c,   // totalCostBasis < 0 = credit received
+                        netCredit * 100 * c,     // maxProfit = net credit
+                        List.of(
+                                new Leg(shortCallK, true,  false, 1),
+                                new Leg(longCallK,  true,  true,  1),
+                                new Leg(shortPutK,  false, false, 1),
+                                new Leg(longPutK,   false, true,  1)),
+                        0, 0);
             }
             case COVERED_CALL -> {
                 // Buy stock; sell 1 OTM call per 100 shares to collect premium

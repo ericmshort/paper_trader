@@ -23,6 +23,8 @@
         <ComboBox fx:id="strategyCombo" prefWidth="175"/>
         <Button fx:id="runBacktestButton" text="Run Backtest" onAction="#runBacktest"
                 style="-fx-background-color: #00aa55; -fx-text-fill: white; -fx-font-weight: bold;"/>
+        <Button fx:id="openChartButton" text="Chart" onAction="#openChart"
+                style="-fx-background-color: #0077cc; -fx-text-fill: white; -fx-font-weight: bold;"/>
         <ProgressIndicator fx:id="backtestProgress" visible="false" prefWidth="20" prefHeight="20"/>
     </HBox>
 

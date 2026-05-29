@@ -32,9 +32,15 @@ public class HistoricalBarFetcher {
     }
 
     public List<HistoricalBar> fetchDailyBars(String symbol, LocalDate startDate, LocalDate endDate) {
+        return fetchBarsWithInterval(symbol, startDate, endDate, "1d");
+    }
+
+    public List<HistoricalBar> fetchBarsWithInterval(String symbol, LocalDate startDate,
+                                                      LocalDate endDate, String interval) {
         long period1 = startDate.atStartOfDay(ZoneOffset.UTC).toEpochSecond();
         long period2 = endDate.plusDays(1).atStartOfDay(ZoneOffset.UTC).toEpochSecond();
-        String url = BASE_URL + symbol + "?interval=1d&period1=" + period1 + "&period2=" + period2;
+        String url = BASE_URL + symbol + "?interval=" + interval
+                + "&period1=" + period1 + "&period2=" + period2;
 
         Exception lastException = null;
         for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -51,9 +57,7 @@ public class HistoricalBarFetcher {
 
                 if (response.statusCode() == 429) {
                     lastException = new DataUnavailableException("Rate limited (429) for " + symbol);
-                    if (attempt < MAX_RETRIES - 1) {
-                        Thread.sleep(BACKOFF_MS[attempt]);
-                    }
+                    if (attempt < MAX_RETRIES - 1) Thread.sleep(BACKOFF_MS[attempt]);
                     continue;
                 }
                 if (response.statusCode() != 200) {
@@ -92,13 +96,22 @@ public class HistoricalBarFetcher {
 
         JSONObject result = results.getJSONObject(0);
         JSONArray timestamps = result.getJSONArray("timestamp");
-        JSONObject quote = result.getJSONObject("indicators")
-                .getJSONArray("quote").getJSONObject(0);
+        JSONObject indicators = result.getJSONObject("indicators");
+        JSONObject quote = indicators.getJSONArray("quote").getJSONObject(0);
         JSONArray opens = quote.optJSONArray("open");
         JSONArray highs = quote.optJSONArray("high");
         JSONArray lows = quote.optJSONArray("low");
         JSONArray closes = quote.getJSONArray("close");
         JSONArray volumes = quote.getJSONArray("volume");
+
+        // Extract split/dividend-adjusted close when available
+        JSONArray adjCloses = null;
+        if (indicators.has("adjclose")) {
+            JSONArray adjCloseOuter = indicators.getJSONArray("adjclose");
+            if (!adjCloseOuter.isEmpty()) {
+                adjCloses = adjCloseOuter.getJSONObject(0).optJSONArray("adjclose");
+            }
+        }
 
         List<HistoricalBar> bars = new ArrayList<>();
         for (int i = 0; i < timestamps.length(); i++) {
@@ -110,7 +123,9 @@ public class HistoricalBarFetcher {
             double high = (highs != null && !highs.isNull(i)) ? highs.getDouble(i) : close;
             double low = (lows != null && !lows.isNull(i)) ? lows.getDouble(i) : close;
             long volume = volumes.isNull(i) ? 0L : volumes.getLong(i);
-            bars.add(new HistoricalBar(symbol, date, open, high, low, close, volume));
+            double adjClose = (adjCloses != null && !adjCloses.isNull(i))
+                    ? adjCloses.getDouble(i) : close;
+            bars.add(new HistoricalBar(symbol, date, open, high, low, close, adjClose, volume));
         }
 
         bars.sort(Comparator.comparing(HistoricalBar::getDate));

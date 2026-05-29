@@ -31,6 +31,7 @@ public class BacktestController implements Initializable {
     @FXML private DatePicker backtestEndDate;
     @FXML private TextField backtestSymbols;
     @FXML private Button runBacktestButton;
+    @FXML private Button openChartButton;
     @FXML private ProgressIndicator backtestProgress;
     @FXML private Label btReturnLabel;
     @FXML private Label btMaxDrawdownLabel;
@@ -82,14 +83,14 @@ public class BacktestController implements Initializable {
         comparisonTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         comparisonTable.setStyle("-fx-base: #1a1a2e; -fx-control-inner-background: #1a1a2e; -fx-text-fill: #e0e0e0;");
 
+        // Strategy column stretches to fill whatever the other fixed-width columns leave behind
         TableColumn<StrategyResult, String> nameCol = new TableColumn<>("Strategy");
         nameCol.setCellValueFactory(r -> new SimpleStringProperty(r.getValue().name()));
-        nameCol.setPrefWidth(160);
+        nameCol.setMinWidth(155);
 
         TableColumn<StrategyResult, String> retCol = new TableColumn<>("Return %");
         retCol.setCellValueFactory(r -> new SimpleStringProperty(
                 String.format("%+.1f%%", r.getValue().returnPct())));
-        retCol.setPrefWidth(90);
         retCol.setCellFactory(col -> new TableCell<>() {
             @Override
             protected void updateItem(String item, boolean empty) {
@@ -103,24 +104,33 @@ public class BacktestController implements Initializable {
         TableColumn<StrategyResult, String> ddCol = new TableColumn<>("Max Drawdown");
         ddCol.setCellValueFactory(r -> new SimpleStringProperty(
                 String.format("%.1f%%", r.getValue().maxDrawdownPct())));
-        ddCol.setPrefWidth(110);
 
         TableColumn<StrategyResult, String> rrCol = new TableColumn<>("Return/Risk");
         rrCol.setCellValueFactory(r -> new SimpleStringProperty(
                 String.format("%.2f", r.getValue().riskReward())));
-        rrCol.setPrefWidth(90);
 
         TableColumn<StrategyResult, String> wrCol = new TableColumn<>("Win Rate");
         wrCol.setCellValueFactory(r -> new SimpleStringProperty(
                 String.format("%.1f%%", r.getValue().winRate())));
-        wrCol.setPrefWidth(80);
 
         TableColumn<StrategyResult, String> tradeCol = new TableColumn<>("Trades");
         tradeCol.setCellValueFactory(r -> new SimpleStringProperty(
                 String.valueOf(r.getValue().trades())));
-        tradeCol.setPrefWidth(60);
+
+        // Fix all data columns to the same width so header and cells can never drift
+        fixedWidth(retCol,   92);
+        fixedWidth(ddCol,   110);
+        fixedWidth(rrCol,    92);
+        fixedWidth(wrCol,    82);
+        fixedWidth(tradeCol, 62);
 
         comparisonTable.getColumns().addAll(nameCol, retCol, ddCol, rrCol, wrCol, tradeCol);
+    }
+
+    private static void fixedWidth(TableColumn<?, ?> col, double width) {
+        col.setMinWidth(width);
+        col.setMaxWidth(width);
+        col.setPrefWidth(width);
     }
 
     private void onStrategyChanged() {
@@ -165,6 +175,13 @@ public class BacktestController implements Initializable {
         backtestEndDate.setDayCellFactory(factory);
         LocalDate defaultStart = LocalDate.now().minusYears(1);
         backtestStartDate.setValue(defaultStart.isBefore(earliest) ? earliest : defaultStart);
+    }
+
+    @FXML
+    public void openChart() {
+        String raw = backtestSymbols.getText();
+        String firstSymbol = raw.contains(",") ? raw.substring(0, raw.indexOf(',')).trim() : raw.trim();
+        ChartWindow.open(firstSymbol.isEmpty() ? "AAPL" : firstSymbol.toUpperCase());
     }
 
     @FXML

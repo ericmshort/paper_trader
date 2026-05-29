@@ -100,10 +100,14 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         String nearTermPutKey   = symbol + "_NEARTERM_PUT";
         String zeroDteCallKey   = symbol + "_ZEROTE_CALL";
         String zeroDtePutKey    = symbol + "_ZEROTE_PUT";
-        String bullPutShortKey  = symbol + "_BULLPUTSPREAD_SHORT";
-        String bullPutLongKey   = symbol + "_BULLPUTSPREAD_LONG";
-        String bearCallShortKey = symbol + "_BEARCALLSPREAD_SHORT";
-        String bearCallLongKey  = symbol + "_BEARCALLSPREAD_LONG";
+        String bullPutShortKey   = symbol + "_BULLPUTSPREAD_SHORT";
+        String bullPutLongKey    = symbol + "_BULLPUTSPREAD_LONG";
+        String bearCallShortKey  = symbol + "_BEARCALLSPREAD_SHORT";
+        String bearCallLongKey   = symbol + "_BEARCALLSPREAD_LONG";
+        String condorShortCallKey = symbol + "_IRONCONDOR_SHORTCALL";
+        String condorLongCallKey  = symbol + "_IRONCONDOR_LONGCALL";
+        String condorShortPutKey  = symbol + "_IRONCONDOR_SHORTPUT";
+        String condorLongPutKey   = symbol + "_IRONCONDOR_LONGPUT";
 
         Map<String, OptionsPosition> opts = account.getOptionsPositions();
 
@@ -121,6 +125,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         closeCreditSpreadIfNeeded(opts, bullPutShortKey,  bullPutLongKey,   false, symbol, price, "BULLPUTSPREAD");
         closeCreditSpreadIfNeeded(opts, bearCallShortKey, bearCallLongKey,  true,  symbol, price, "BEARCALLSPREAD");
+        closeIronCondorIfNeeded(opts, condorShortCallKey, condorLongCallKey,
+                condorShortPutKey, condorLongPutKey, symbol, price);
 
         // Re-read after potential closures
         opts = account.getOptionsPositions();
@@ -181,7 +187,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                               || opts.containsKey(strangleCallKey)  || opts.containsKey(stranglePutKey)
                               || opts.containsKey(bullPutShortKey)  || opts.containsKey(bullPutLongKey)
                               || opts.containsKey(bearCallShortKey) || opts.containsKey(bearCallLongKey)
-                              || opts.containsKey(zeroDteCallKey)   || opts.containsKey(zeroDtePutKey);
+                              || opts.containsKey(zeroDteCallKey)   || opts.containsKey(zeroDtePutKey)
+                              || opts.containsKey(condorShortCallKey) || opts.containsKey(condorLongCallKey);
 
         // ── 4. Entry ──────────────────────────────────────────────────────────────
         if (extremeBullish && !hasDirectional && !hasMultiLeg) {
@@ -211,8 +218,13 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         } else if (mixedStrong && !hasDirectional && !hasMultiLeg) {
             if (isZeroDteDay()) {
                 tryOpenZeroDTE(symbol, price, K, sigma, signalStr, featureCsv);
-            } else {
+            } else if (isLowRelativeIV(prices)) {
+                // Low IV: buy premium (straddle) to profit from an eventual breakout
                 tryOpenStraddleOrStrangle(symbol, price, K, expiry, T, sigma, prices, signalStr, featureCsv);
+            } else {
+                // Elevated IV: sell premium via iron condor — range-bound, theta decay works for us
+                tryOpenIronCondor(symbol, price, K, expiry, T, sigma, signalStr, featureCsv,
+                        condorShortCallKey, condorLongCallKey, condorShortPutKey, condorLongPutKey);
             }
         }
     }
@@ -510,6 +522,127 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         researchCallback.accept(String.format(
                 "%s BEAR CALL SPREAD short_K=%.0f long_K=%.0f exp=%s x%d credit=%.2f | short: %s | long: %s",
                 symbol, shortK, longK, expiry, contracts, netCredit, sg, lg));
+    }
+
+    // ── Iron Condor entry ─────────────────────────────────────────────────────────
+    // Best conditions: mixed signals (range-bound expectation), elevated IV (sell high premium),
+    // 30-45 DTE (optimal theta decay window), liquid options at all four strikes.
+    // Short strikes ~1 spread-width OTM; long strikes ~2 spread-widths OTM for defined risk.
+
+    private void tryOpenIronCondor(String symbol, double price, double K, LocalDate expiry,
+                                   double T, double sigma, String signalStr, String featureCsv,
+                                   String shortCallKey, String longCallKey,
+                                   String shortPutKey,  String longPutKey) {
+        String cooldownKey = symbol + "_IRONCONDOR";
+
+        if (sessionStopLossed.contains(cooldownKey)) {
+            researchCallback.accept(symbol + " IRON CONDOR skip: stop-loss cooldown");
+            return;
+        }
+        Long lastClose = lastMultiLegCloseMs.get(symbol);
+        if (lastClose != null && System.currentTimeMillis() - lastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
+            researchCallback.accept(symbol + " IRON CONDOR skip: re-entry cooldown ("
+                    + ((System.currentTimeMillis() - lastClose) / 60000) + "m elapsed, need 15m)");
+            return;
+        }
+
+        // Short strikes 1 spread-width OTM; long strikes 2 spread-widths OTM (defined risk)
+        double shortCallK = K + STRANGLE_SPREAD;
+        double longCallK  = K + STRANGLE_SPREAD * 2;
+        double shortPutK  = K - STRANGLE_SPREAD;
+        double longPutK   = Math.max(STRANGLE_SPREAD, K - STRANGLE_SPREAD * 2);
+
+        double shortCallPrem = resolvePremium(symbol, shortCallK, expiry, true,  T, sigma, price);
+        double longCallPrem  = resolvePremium(symbol, longCallK,  expiry, true,  T, sigma, price);
+        double shortPutPrem  = resolvePremium(symbol, shortPutK,  expiry, false, T, sigma, price);
+        double longPutPrem   = resolvePremium(symbol, longPutK,   expiry, false, T, sigma, price);
+
+        if (shortCallPrem < MIN_PREMIUM || longCallPrem < MIN_PREMIUM
+                || shortPutPrem < MIN_PREMIUM || longPutPrem < MIN_PREMIUM) {
+            researchCallback.accept(symbol + " IRON CONDOR skip: premium too low on one or more legs");
+            return;
+        }
+
+        double netCredit = (shortCallPrem - longCallPrem) + (shortPutPrem - longPutPrem);
+        if (netCredit <= 0) {
+            researchCallback.accept(symbol + " IRON CONDOR skip: no net credit available");
+            return;
+        }
+
+        // Size by max loss of one wing; iron condor can only lose one side at a time
+        int contracts = Math.min(5, (int) (account.getBalance() * 0.05 / (STRANGLE_SPREAD * 100)));
+        if (contracts < 1) return;
+
+        boolean opened = optExec.openIronCondor(shortCallKey, longCallKey, shortPutKey, longPutKey,
+                symbol, shortCallK, longCallK, shortPutK, longPutK, expiry, contracts,
+                shortCallPrem, longCallPrem, shortPutPrem, longPutPrem, signalStr, featureCsv);
+        if (!opened) {
+            researchCallback.accept(symbol + " IRON CONDOR did not open (legs rejected)");
+            return;
+        }
+
+        GreeksResult scg = bsEngine.greeks(price, shortCallK, RISK_FREE_RATE, T, sigma, true);
+        GreeksResult spg = bsEngine.greeks(price, shortPutK,  RISK_FREE_RATE, T, sigma, false);
+        researchCallback.accept(String.format(
+                "%s IRON CONDOR scK=%.0f lcK=%.0f spK=%.0f lpK=%.0f exp=%s x%d netCredit=%.2f"
+                + " | shortCall: %s | shortPut: %s",
+                symbol, shortCallK, longCallK, shortPutK, longPutK,
+                expiry, contracts, netCredit, scg, spg));
+    }
+
+    // ── Iron Condor close ─────────────────────────────────────────────────────────
+
+    private void closeIronCondorIfNeeded(Map<String, OptionsPosition> opts,
+                                         String shortCallKey, String longCallKey,
+                                         String shortPutKey,  String longPutKey,
+                                         String symbol, double price) {
+        OptionsPosition scPos = opts.get(shortCallKey);
+        OptionsPosition lcPos = opts.get(longCallKey);
+        OptionsPosition spPos = opts.get(shortPutKey);
+        OptionsPosition lpPos = opts.get(longPutKey);
+        if (scPos == null || lcPos == null || spPos == null || lpPos == null) return;
+
+        double sigma = computeVol(symbol);
+        double T = bsEngine.timeToExpiry(scPos.getExpiry());
+        int c = Math.abs(scPos.getContracts());
+
+        double scPrem = (sigma > 0 && T > 0)
+                ? bsEngine.callPrice(price, scPos.getStrike(), RISK_FREE_RATE, T, sigma)
+                : Math.max(0, price - scPos.getStrike());
+        double lcPrem = (sigma > 0 && T > 0)
+                ? bsEngine.callPrice(price, lcPos.getStrike(), RISK_FREE_RATE, T, sigma)
+                : Math.max(0, price - lcPos.getStrike());
+        double spPrem = (sigma > 0 && T > 0)
+                ? bsEngine.putPrice(price, spPos.getStrike(), RISK_FREE_RATE, T, sigma)
+                : Math.max(0, spPos.getStrike() - price);
+        double lpPrem = (sigma > 0 && T > 0)
+                ? bsEngine.putPrice(price, lpPos.getStrike(), RISK_FREE_RATE, T, sigma)
+                : Math.max(0, lpPos.getStrike() - price);
+
+        // Credit received at entry: premiums of the two short legs
+        double creditReceived = (scPos.getPremiumPaid() + spPos.getPremiumPaid()) * 100 * c;
+        // Current cost to close (net debit to buy back both spreads)
+        double netCostToClose = ((scPrem - lcPrem) + (spPrem - lpPrem)) * 100 * c;
+
+        boolean profitTarget = netCostToClose <= creditReceived * 0.50; // kept 50% of credit
+        boolean stopLoss     = netCostToClose >= creditReceived * 2.0;  // paying 2x credit received
+        boolean nearExpiry   = scPos.daysToExpiry() < 3;
+
+        if (!profitTarget && !stopLoss && !nearExpiry) return;
+
+        String reason;
+        if (nearExpiry)        reason = "Expiry <3 days";
+        else if (profitTarget) reason = String.format("Profit target: close=%.2f <= 50%% of credit=%.2f",
+                                        netCostToClose, creditReceived);
+        else                   reason = String.format("Stop-loss: close=%.2f >= 2x credit=%.2f",
+                                        netCostToClose, creditReceived);
+
+        if (stopLoss) sessionStopLossed.add(symbol + "_IRONCONDOR");
+        lastMultiLegCloseMs.put(symbol, System.currentTimeMillis());
+        optExec.closeIronCondor(shortCallKey, longCallKey, shortPutKey, longPutKey,
+                scPrem, lcPrem, spPrem, lpPrem, reason);
+        researchCallback.accept(String.format("%s IRON CONDOR closed: %s credit=%.2f costToClose=%.2f",
+                symbol, reason, creditReceived, netCostToClose));
     }
 
     // ── High-Delta Scalp entry ────────────────────────────────────────────────────

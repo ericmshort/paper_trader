@@ -371,6 +371,137 @@ public class OptionsOrderExecutor {
         tagLastTwoRecords(groupId);
     }
 
+    /**
+     * Opens an iron condor atomically: short OTM call + long further OTM call (bear call spread)
+     * combined with short OTM put + long further OTM put (bull put spread).
+     *
+     * Net credit is received upfront. Max loss is limited to one spread wing's width.
+     * Returns true if all four legs opened; rolls back any partial opens on failure.
+     */
+    public boolean openIronCondor(
+            String shortCallKey, String longCallKey,
+            String shortPutKey,  String longPutKey,
+            String symbol,
+            double shortCallK, double longCallK,
+            double shortPutK,  double longPutK,
+            LocalDate expiry, int contracts,
+            double shortCallPrem, double longCallPrem,
+            double shortPutPrem,  double longPutPrem,
+            String signalStr, String featureCsv) {
+
+        double netCredit = (shortCallPrem - longCallPrem) + (shortPutPrem - longPutPrem);
+        if (netCredit <= 0) return false;
+
+        // Pre-flight: long legs must be fundable (credit from shorts arrives simultaneously)
+        double longLegsRequired = (longCallPrem + OPTION_BUY_SLIPPAGE + longPutPrem + OPTION_BUY_SLIPPAGE)
+                * 100 * contracts + 4 * CONTRACT_FEE * contracts;
+        if (account.getBalance() < longLegsRequired) {
+            LOG.warning(symbol + " iron condor skip: insufficient balance "
+                    + String.format("%.2f < %.2f required", account.getBalance(), longLegsRequired));
+            return false;
+        }
+
+        String groupId = UUID.randomUUID().toString();
+
+        // ── Attempt atomic 4-leg submission ──────────────────────────────────
+        if (submitter != null) {
+            List<MultiLegOrder> legs = List.of(
+                    new MultiLegOrder(symbol, "CALL", shortCallK, expiry, "sell", "sell_to_open"),
+                    new MultiLegOrder(symbol, "CALL", longCallK,  expiry, "buy",  "buy_to_open"),
+                    new MultiLegOrder(symbol, "PUT",  shortPutK,  expiry, "sell", "sell_to_open"),
+                    new MultiLegOrder(symbol, "PUT",  longPutK,   expiry, "buy",  "buy_to_open"));
+            String orderId = submitter.submitMultiLeg(legs, contracts);
+            if (orderId != null) {
+                account.setBalance(account.getBalance() + netCredit * 100 * contracts);
+                account.addOptionsPosition(shortCallKey, new OptionsPosition(symbol, "CALL", shortCallK, expiry, -contracts, shortCallPrem));
+                account.addOptionsPosition(longCallKey,  new OptionsPosition(symbol, "CALL", longCallK,  expiry,  contracts, longCallPrem));
+                account.addOptionsPosition(shortPutKey,  new OptionsPosition(symbol, "PUT",  shortPutK,  expiry, -contracts, shortPutPrem));
+                account.addOptionsPosition(longPutKey,   new OptionsPosition(symbol, "PUT",  longPutK,   expiry,  contracts, longPutPrem));
+                logRecord(symbol, TransactionAction.CALL_SELL, contracts, shortCallPrem, 0.0,
+                        "IRON CONDOR CALL K=" + shortCallK + " (SHORT)", signalStr, featureCsv, orderId, groupId);
+                logRecord(symbol, TransactionAction.CALL_BUY,  contracts, longCallPrem,  0.0,
+                        "IRON CONDOR CALL K=" + longCallK  + " (LONG)",  signalStr, featureCsv, orderId, groupId);
+                logRecord(symbol, TransactionAction.PUT_SELL,  contracts, shortPutPrem,  0.0,
+                        "IRON CONDOR PUT K="  + shortPutK  + " (SHORT)", signalStr, featureCsv, orderId, groupId);
+                logRecord(symbol, TransactionAction.PUT_BUY,   contracts, longPutPrem,   0.0,
+                        "IRON CONDOR PUT K="  + longPutK   + " (LONG)",  signalStr, featureCsv, orderId, groupId);
+                return true;
+            }
+            LOG.warning(symbol + " iron condor rejected by broker; not attempting individual legs");
+            return false;
+        }
+
+        // ── Paper-trading: sequential ─────────────────────────────────────────
+        sellCallAs(shortCallKey, symbol, shortCallK, expiry, contracts, shortCallPrem, signalStr, featureCsv);
+        buyCallAs(longCallKey,   symbol, longCallK,  expiry, contracts, longCallPrem,  signalStr, featureCsv);
+        sellPutAs(shortPutKey,   symbol, shortPutK,  expiry, contracts, shortPutPrem,  signalStr, featureCsv);
+        buyPutAs(longPutKey,     symbol, longPutK,   expiry, contracts, longPutPrem,   signalStr, featureCsv);
+
+        Map<String, OptionsPosition> opts = account.getOptionsPositions();
+        boolean allOpened = opts.containsKey(shortCallKey) && opts.containsKey(longCallKey)
+                         && opts.containsKey(shortPutKey)  && opts.containsKey(longPutKey);
+
+        if (!allOpened) {
+            String rollbackReason = "Rollback: iron condor leg failed";
+            if (opts.containsKey(shortCallKey)) closePosition(shortCallKey, shortCallPrem, rollbackReason);
+            if (opts.containsKey(longCallKey))  closePosition(longCallKey,  longCallPrem,  rollbackReason);
+            if (opts.containsKey(shortPutKey))  closePosition(shortPutKey,  shortPutPrem,  rollbackReason);
+            if (opts.containsKey(longPutKey))   closePosition(longPutKey,   longPutPrem,   rollbackReason);
+            return false;
+        }
+
+        tagLastFourRecords(groupId);
+        return true;
+    }
+
+    /**
+     * Closes all four legs of an iron condor.
+     * Attempts atomic 4-leg close via broker; falls back to sequential close.
+     */
+    public void closeIronCondor(
+            String shortCallKey, String longCallKey,
+            String shortPutKey,  String longPutKey,
+            double shortCallPrem, double longCallPrem,
+            double shortPutPrem,  double longPutPrem,
+            String reason) {
+        Map<String, OptionsPosition> opts = account.getOptionsPositions();
+        OptionsPosition scPos = opts.get(shortCallKey);
+        OptionsPosition lcPos = opts.get(longCallKey);
+        OptionsPosition spPos = opts.get(shortPutKey);
+        OptionsPosition lpPos = opts.get(longPutKey);
+        if (scPos == null && lcPos == null && spPos == null && lpPos == null) return;
+
+        int contracts = scPos != null ? Math.abs(scPos.getContracts())
+                      : lcPos != null ? lcPos.getContracts()
+                      : spPos != null ? Math.abs(spPos.getContracts())
+                      : lpPos.getContracts();
+        String groupId = UUID.randomUUID().toString();
+
+        // ── Attempt atomic 4-leg close ────────────────────────────────────────
+        if (submitter != null && scPos != null && lcPos != null && spPos != null && lpPos != null) {
+            List<MultiLegOrder> legs = List.of(
+                    new MultiLegOrder(scPos.getSymbol(), "CALL", scPos.getStrike(), scPos.getExpiry(), "buy",  "buy_to_close"),
+                    new MultiLegOrder(lcPos.getSymbol(), "CALL", lcPos.getStrike(), lcPos.getExpiry(), "sell", "sell_to_close"),
+                    new MultiLegOrder(spPos.getSymbol(), "PUT",  spPos.getStrike(), spPos.getExpiry(), "buy",  "buy_to_close"),
+                    new MultiLegOrder(lpPos.getSymbol(), "PUT",  lpPos.getStrike(), lpPos.getExpiry(), "sell", "sell_to_close"));
+            String orderId = submitter.submitMultiLeg(legs, contracts);
+            if (orderId != null) {
+                recordClose(shortCallKey, scPos, shortCallPrem, 0.0, reason, orderId, groupId);
+                recordClose(longCallKey,  lcPos, longCallPrem,  0.0, reason, orderId, groupId);
+                recordClose(shortPutKey,  spPos, shortPutPrem,  0.0, reason, orderId, groupId);
+                recordClose(longPutKey,   lpPos, longPutPrem,   0.0, reason, orderId, groupId);
+                return;
+            }
+        }
+
+        // ── Sequential fallback ───────────────────────────────────────────────
+        if (scPos != null) closePosition(shortCallKey, shortCallPrem, reason);
+        if (lcPos != null) closePosition(longCallKey,  longCallPrem,  reason);
+        if (spPos != null) closePosition(shortPutKey,  shortPutPrem,  reason);
+        if (lpPos != null) closePosition(longPutKey,   longPutPrem,   reason);
+        tagLastFourRecords(groupId);
+    }
+
     /** Updates account state and logs a single leg close. Does not submit to broker. */
     private void recordClose(String posKey, OptionsPosition pos, double currentPremium,
                              double fee, String reason, String externalId, String groupId) {
@@ -414,6 +545,14 @@ public class OptionsOrderExecutor {
      * they were submitted as individual single-leg orders.
      */
     private void tagLastTwoRecords(String groupId) {
+        tagLastNRecords(groupId, 2);
+    }
+
+    private void tagLastFourRecords(String groupId) {
+        tagLastNRecords(groupId, 4);
+    }
+
+    private void tagLastNRecords(String groupId, int n) {
         try {
             List<TransactionRecord> recent = transactionLog.findAll();
             int tagged = 0;
@@ -421,7 +560,7 @@ public class OptionsOrderExecutor {
                 if (r.getGroupId() == null) {
                     r.setGroupId(groupId);
                     transactionLog.updateGroupId(r.getId(), groupId);
-                    if (++tagged == 2) break;
+                    if (++tagged == n) break;
                 }
             }
         } catch (Exception e) {
