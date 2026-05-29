@@ -226,6 +226,13 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                 tryOpenIronCondor(symbol, price, K, expiry, T, sigma, signalStr, featureCsv,
                         condorShortCallKey, condorLongCallKey, condorShortPutKey, condorLongPutKey);
             }
+
+        } else if (buySignals + sellSignals <= 1 && !hasDirectional && !hasMultiLeg
+                && !isZeroDteDay() && !isLowRelativeIV(prices)) {
+            // Flat market: no directional conviction, but IV is elevated relative to actual movement.
+            // The market is pricing in a move that isn't materialising — sell that premium via condor.
+            tryOpenIronCondor(symbol, price, K, expiry, T, sigma, signalStr, featureCsv,
+                    condorShortCallKey, condorLongCallKey, condorShortPutKey, condorLongPutKey);
         }
     }
 
