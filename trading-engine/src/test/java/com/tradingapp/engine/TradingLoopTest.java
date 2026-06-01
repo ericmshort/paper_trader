@@ -160,7 +160,7 @@ public class TradingLoopTest {
 
         // Force buy signal for AAPL via weightEvaluator
         SignalWeightEvaluator alwaysBuy = new SignalWeightEvaluator() {
-            @Override public double weightedBuyScore(List<SignalResult> signals) { return 2.0; }
+            @Override public double weightedBuyScore(List<SignalResult> signals) { return 3.0; }
             @Override public double weightedSellScore(List<SignalResult> signals) { return 0.0; }
         };
 
@@ -206,7 +206,7 @@ public class TradingLoopTest {
         };
 
         SignalWeightEvaluator alwaysBuy = new SignalWeightEvaluator() {
-            @Override public double weightedBuyScore(List<SignalResult> signals) { return 2.0; }
+            @Override public double weightedBuyScore(List<SignalResult> signals) { return 3.0; }
             @Override public double weightedSellScore(List<SignalResult> signals) { return 0.0; }
         };
 
@@ -308,7 +308,7 @@ public class TradingLoopTest {
         BrokerClient broker = new SimulatedBroker(new OrderExecutor(account, safety, log, fees));
 
         SignalWeightEvaluator alwaysBuy = new SignalWeightEvaluator() {
-            @Override public double weightedBuyScore(List<SignalResult> s) { return 2.0; }
+            @Override public double weightedBuyScore(List<SignalResult> s) { return 3.0; }
             @Override public double weightedSellScore(List<SignalResult> s) { return 0.0; }
         };
 
@@ -348,7 +348,7 @@ public class TradingLoopTest {
         ph.recordDaily("SPY", 400.0, 1_000_000);
 
         SignalWeightEvaluator alwaysBuy = new SignalWeightEvaluator() {
-            @Override public double weightedBuyScore(List<SignalResult> s) { return 2.0; }
+            @Override public double weightedBuyScore(List<SignalResult> s) { return 3.0; }
             @Override public double weightedSellScore(List<SignalResult> s) { return 0.0; }
         };
 
@@ -381,7 +381,7 @@ public class TradingLoopTest {
         ph.recordDaily("SPY", 500.0, 1_000_000);
 
         SignalWeightEvaluator alwaysBuy = new SignalWeightEvaluator() {
-            @Override public double weightedBuyScore(List<SignalResult> s) { return 2.0; }
+            @Override public double weightedBuyScore(List<SignalResult> s) { return 3.0; }
             @Override public double weightedSellScore(List<SignalResult> s) { return 0.0; }
         };
 

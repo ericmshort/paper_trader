@@ -365,22 +365,22 @@ public class OptionsSignalRouterTest {
     // ── Mixed-signal: straddle / strangle ─────────────────────────────────────────
 
     @Test
-    void testStrangleOpenedOnMixedSignalsWithNormalIV() {
+    void testIronCondorOpenedOnMixedSignalsWithNormalIV() {
         // Zero-DTE takes precedence on Fridays; skip this assertion then
         assumeTrue(LocalDate.now().getDayOfWeek() != DayOfWeek.FRIDAY,
-                "Skipped on Fridays: zero-DTE replaces strangle/straddle");
-        // Consistent zigzag history → recent/full vol ratio ~1.0 → strangle territory
+                "Skipped on Fridays: zero-DTE replaces iron condor");
+        // Consistent zigzag history → recent/full vol ratio ~1.0 → elevated IV → iron condor
         Account account = new Account();
-        TransactionLog log = new TransactionLog(tempDir.resolve("strangle.db").toString());
+        TransactionLog log = new TransactionLog(tempDir.resolve("condor_mixed.db").toString());
         OptionsSignalRouter router = buildRouter(account, log);
 
-        // buys=2, sells=1 → mixedStrong signal
+        // buys=2, sells=1 → mixedStrong signal; normal IV routes to iron condor
         router.evaluate(SYMBOL, PRICE, 2, 1, "mixed", "");
 
-        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_STRANGLE_CALL"),
-                "STRANGLE_CALL should open on mixed signals with normal IV");
-        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_STRANGLE_PUT"),
-                "STRANGLE_PUT should open on mixed signals with normal IV");
+        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_IRONCONDOR_SHORTCALL"),
+                "Iron condor short call should open on mixed signals with normal IV");
+        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_IRONCONDOR_SHORTPUT"),
+                "Iron condor short put should open on mixed signals with normal IV");
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.tradingapp.broker;
 
 import com.tradingapp.data.HistoricalBar;
 import com.tradingapp.data.OptionsChain;
+import com.tradingapp.data.OptionsQuote;
 import com.tradingapp.data.QuoteModel;
 import com.tradingapp.data.QuoteProvider;
 import org.json.JSONArray;
@@ -15,7 +16,9 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class AlpacaQuoteProvider implements QuoteProvider {
 
@@ -73,7 +76,71 @@ public class AlpacaQuoteProvider implements QuoteProvider {
 
     @Override
     public OptionsChain getOptionsChain(String symbol, LocalDate expiry) {
-        return OptionsChain.empty();
+        Map<Double, OptionsQuote> calls = new HashMap<>();
+        Map<Double, OptionsQuote> puts  = new HashMap<>();
+        String expiryStr = expiry.format(DateTimeFormatter.ISO_LOCAL_DATE);
+        String pageToken = null;
+
+        try {
+            do {
+                String url = config.getAlpacaDataUrl()
+                        + "/v1beta1/options/snapshots/" + symbol
+                        + "?feed=indicative&limit=1000"
+                        + "&expiration_date=" + expiryStr
+                        + (pageToken != null ? "&page_token=" + pageToken : "");
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .header("APCA-API-KEY-ID", config.getAlpacaApiKey())
+                        .header("APCA-API-SECRET-KEY", config.getAlpacaApiSecret())
+                        .GET()
+                        .timeout(Duration.ofSeconds(15))
+                        .build();
+                HttpResponse<String> resp = http.send(request, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() != 200) {
+                    System.err.println("Alpaca options snapshot failed for " + symbol
+                            + " exp=" + expiryStr + ": HTTP " + resp.statusCode());
+                    break;
+                }
+                JSONObject body = new JSONObject(resp.body());
+                JSONObject snapshots = body.optJSONObject("snapshots");
+                if (snapshots == null) break;
+
+                for (String contractSymbol : snapshots.keySet()) {
+                    JSONObject snap = snapshots.getJSONObject(contractSymbol);
+                    JSONObject details = snap.optJSONObject("details");
+                    if (details == null) continue;
+
+                    String contractType = details.optString("contractType", "");
+                    double strike;
+                    try {
+                        strike = Double.parseDouble(details.optString("strikePrice", "0"));
+                    } catch (NumberFormatException e) {
+                        continue;
+                    }
+                    if (strike <= 0) continue;
+
+                    JSONObject quote = snap.optJSONObject("latestQuote");
+                    JSONObject trade = snap.optJSONObject("latestTrade");
+                    double bid  = quote != null ? quote.optDouble("bp", 0.0) : 0.0;
+                    double ask  = quote != null ? quote.optDouble("ap", 0.0) : 0.0;
+                    double last = trade != null ? trade.optDouble("p", 0.0) : 0.0;
+                    long   vol  = trade != null ? trade.optLong("s", 0L) : 0L;
+                    long   oi   = snap.optLong("openInterest", 0L);
+
+                    OptionsQuote optQuote = new OptionsQuote(bid, ask, last, vol, oi);
+                    if ("call".equalsIgnoreCase(contractType)) {
+                        calls.put(strike, optQuote);
+                    } else if ("put".equalsIgnoreCase(contractType)) {
+                        puts.put(strike, optQuote);
+                    }
+                }
+                pageToken = body.isNull("nextPageToken") ? null : body.optString("nextPageToken", null);
+            } while (pageToken != null && !pageToken.isEmpty());
+        } catch (Exception e) {
+            System.err.println("Alpaca options chain failed for " + symbol + ": " + e.getMessage());
+        }
+
+        return new OptionsChain(calls, puts);
     }
 
     @Override
