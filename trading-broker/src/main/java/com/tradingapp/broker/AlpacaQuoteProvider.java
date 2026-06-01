@@ -107,24 +107,31 @@ public class AlpacaQuoteProvider implements QuoteProvider {
 
                 for (String contractSymbol : snapshots.keySet()) {
                     JSONObject snap = snapshots.getJSONObject(contractSymbol);
-                    JSONObject details = snap.optJSONObject("details");
-                    if (details == null) continue;
 
-                    String contractType = details.optString("contractType", "");
+                    // OCC symbol: {underlying}{YYMMDD}{C|P}{8-digit strike x 1000}
+                    // e.g. AAPL260717C00110000 → Call, strike $110.00
+                    if (contractSymbol.length() < 9) continue;
+                    char typeChar = contractSymbol.charAt(contractSymbol.length() - 9);
+                    String contractType;
+                    if (typeChar == 'C') contractType = "call";
+                    else if (typeChar == 'P') contractType = "put";
+                    else continue;
+
                     double strike;
                     try {
-                        strike = Double.parseDouble(details.optString("strikePrice", "0"));
+                        strike = Long.parseLong(contractSymbol.substring(contractSymbol.length() - 8)) / 1000.0;
                     } catch (NumberFormatException e) {
                         continue;
                     }
                     if (strike <= 0) continue;
 
-                    JSONObject quote = snap.optJSONObject("latestQuote");
-                    JSONObject trade = snap.optJSONObject("latestTrade");
+                    JSONObject quote    = snap.optJSONObject("latestQuote");
+                    JSONObject trade    = snap.optJSONObject("latestTrade");
+                    JSONObject dailyBar = snap.optJSONObject("dailyBar");
                     double bid  = quote != null ? quote.optDouble("bp", 0.0) : 0.0;
                     double ask  = quote != null ? quote.optDouble("ap", 0.0) : 0.0;
                     double last = trade != null ? trade.optDouble("p", 0.0) : 0.0;
-                    long   vol  = trade != null ? trade.optLong("s", 0L) : 0L;
+                    long   vol  = dailyBar != null ? dailyBar.optLong("v", 0L) : 0L;
                     long   oi   = snap.optLong("openInterest", 0L);
 
                     OptionsQuote optQuote = new OptionsQuote(bid, ask, last, vol, oi);
