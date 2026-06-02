@@ -46,7 +46,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
     private static final double RISK_FREE_RATE    = 0.04;
     private static final double MIN_PREMIUM       = 0.10;
-    private static final double MAX_PORTFOLIO_EXPOSURE = 0.60;
+    private double maxPortfolioExposure = 0.60;
     private static final double IV_SURGE_THRESHOLD = 1.5;
     private static final int    IV_WINDOW         = 20;
     private static final double PROFIT_TARGET     = 2.0;
@@ -64,6 +64,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private BooleanSupplier uptrendSupplier;
 
     public void setUptrendSupplier(BooleanSupplier s) { this.uptrendSupplier = s; }
+    public void setMaxPortfolioExposure(double fraction) { this.maxPortfolioExposure = fraction; }
 
     public OptionsSignalRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
                                Account account, PriceHistory priceHistory,
@@ -136,9 +137,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         List<Double> prices  = dailyPs.size() >= 2 ? dailyPs : priceHistory.getPrices(symbol);
         if (prices.size() < 2) return;
 
-        if (account.totalExposureFraction() >= MAX_PORTFOLIO_EXPOSURE) {
+        if (account.totalExposureFraction() >= maxPortfolioExposure) {
             researchCallback.accept(symbol + " options skip: portfolio at capacity ("
-                    + String.format("%.0f%%", account.totalExposureFraction() * 100) + " deployed)");
+                    + String.format("%.0f%%", account.totalExposureFraction() * 100)
+                    + " deployed, limit " + String.format("%.0f%%", maxPortfolioExposure * 100) + ")");
             return;
         }
         if (account.isDailyLossHalted()) {

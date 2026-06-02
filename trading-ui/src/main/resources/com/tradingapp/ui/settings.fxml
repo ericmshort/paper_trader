@@ -77,6 +77,15 @@
     </HBox>
 
     <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Max Exposure:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="maxPortfolioExposureField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="60"/>
+        <Label text="(% of portfolio that can be committed to stock and options positions, 1–100)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
         <Label text="Avoid Overnight:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
         <CheckBox fx:id="avoidOvernightCheck"
                   style="-fx-text-fill: #e0e0e0;"

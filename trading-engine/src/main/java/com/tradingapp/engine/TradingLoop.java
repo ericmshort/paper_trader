@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
 public class TradingLoop implements Runnable {
 
     static final double SIGNAL_THRESHOLD = 2.5;
-    static final double MAX_PORTFOLIO_EXPOSURE = 0.60;
+    private double maxPortfolioExposure = 0.60;
     private static final LocalTime MARKET_OPEN = LocalTime.of(9, 30);
     private static final LocalTime MARKET_CLOSE = LocalTime.of(16, 0);
     private static final LocalTime PRE_CLOSE_CUTOFF = LocalTime.of(15, 45);
@@ -134,6 +134,7 @@ public class TradingLoop implements Runnable {
     }
 
     public void setDailyLossLimitPct(double pct) { this.dailyLossLimitPct = pct; }
+    public void setMaxPortfolioExposure(double fraction) { this.maxPortfolioExposure = fraction; }
     public void setTransactionLog(TransactionLog log) { this.transactionLog = log; }
     public void setAvoidOvernightHolds(boolean v) { this.avoidOvernightHolds = v; }
     public void setMarketRegimeFilterEnabled(boolean v) { this.marketRegimeFilterEnabled = v; }
@@ -244,9 +245,10 @@ public class TradingLoop implements Runnable {
                     } else if (daysToEarnings <= earningsBlackoutDays) {
                         researchCallback.accept(symbol + " BUY skipped: earnings in "
                                 + daysToEarnings + " day" + (daysToEarnings == 1 ? "" : "s"));
-                    } else if (account.totalExposureFraction() >= MAX_PORTFOLIO_EXPOSURE) {
+                    } else if (account.totalExposureFraction() >= maxPortfolioExposure) {
                         researchCallback.accept(symbol + " BUY skipped: portfolio at capacity ("
-                                + String.format("%.0f%%", account.totalExposureFraction() * 100) + " deployed)");
+                                + String.format("%.0f%%", account.totalExposureFraction() * 100)
+                                + " deployed, limit " + String.format("%.0f%%", maxPortfolioExposure * 100) + ")");
                     } else if (account.isDailyLossHalted()) {
                         researchCallback.accept(symbol + " BUY skipped: daily loss limit active");
                     } else {

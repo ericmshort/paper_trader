@@ -25,6 +25,7 @@ public class SettingsController implements Initializable {
     @FXML private ComboBox<String> quoteProviderCombo;
     @FXML private Label quoteProviderNote;
     @FXML private TextField dailyLossLimitField;
+    @FXML private TextField maxPortfolioExposureField;
     @FXML private CheckBox avoidOvernightCheck;
     @FXML private CheckBox marketRegimeFilterCheck;
     @FXML private TextField earningsBlackoutField;
@@ -67,6 +68,7 @@ public class SettingsController implements Initializable {
         quoteProviderCombo.setValue(cfg.getQuoteProviderType() == AppConfig.QuoteProviderType.ALPACA
                 ? "Alpaca" : "Yahoo Finance");
         dailyLossLimitField.setText(String.valueOf(cfg.getDailyLossLimitPct()));
+        maxPortfolioExposureField.setText(String.valueOf(cfg.getMaxPortfolioExposurePct()));
         avoidOvernightCheck.setSelected(cfg.isAvoidOvernightHolds());
         marketRegimeFilterCheck.setSelected(cfg.isMarketRegimeFilterEnabled());
         earningsBlackoutField.setText(String.valueOf(cfg.getEarningsBlackoutDays()));
@@ -199,6 +201,10 @@ public class SettingsController implements Initializable {
         try {
             double limit = Double.parseDouble(dailyLossLimitField.getText().strip());
             cfg.setDailyLossLimitPct(Math.max(0, limit));
+        } catch (NumberFormatException ignored) {}
+        try {
+            double exposure = Double.parseDouble(maxPortfolioExposureField.getText().strip());
+            cfg.setMaxPortfolioExposurePct(Math.min(100, Math.max(1, exposure)));
         } catch (NumberFormatException ignored) {}
         cfg.setAvoidOvernightHolds(avoidOvernightCheck.isSelected());
         cfg.setMarketRegimeFilterEnabled(marketRegimeFilterCheck.isSelected());

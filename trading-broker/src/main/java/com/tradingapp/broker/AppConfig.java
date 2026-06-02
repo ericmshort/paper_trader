@@ -20,6 +20,7 @@ public class AppConfig {
     private String alpacaApiSecret = "";
     private QuoteProviderType quoteProviderType = QuoteProviderType.YAHOO;
     private double dailyLossLimitPct = 5.0;
+    private double maxPortfolioExposurePct = 60.0;
     private boolean avoidOvernightHolds = true;
     private boolean marketRegimeFilterEnabled = true;
     private int earningsBlackoutDays = 3;
@@ -45,6 +46,10 @@ public class AppConfig {
                 config.dailyLossLimitPct = Double.parseDouble(
                         props.getProperty("risk.daily_loss_limit_pct", "5.0"));
             } catch (NumberFormatException ignored) {}
+            try {
+                config.maxPortfolioExposurePct = Double.parseDouble(
+                        props.getProperty("risk.max_portfolio_exposure_pct", "60.0"));
+            } catch (NumberFormatException ignored) {}
             config.avoidOvernightHolds = Boolean.parseBoolean(
                     props.getProperty("risk.avoid_overnight_holds", "true"));
             config.marketRegimeFilterEnabled = Boolean.parseBoolean(
@@ -66,6 +71,7 @@ public class AppConfig {
             props.setProperty("broker.alpaca.api_secret", alpacaApiSecret);
             props.setProperty("quote.provider", quoteProviderType.name());
             props.setProperty("risk.daily_loss_limit_pct", String.valueOf(dailyLossLimitPct));
+            props.setProperty("risk.max_portfolio_exposure_pct", String.valueOf(maxPortfolioExposurePct));
             props.setProperty("risk.avoid_overnight_holds", String.valueOf(avoidOvernightHolds));
             props.setProperty("risk.market_regime_filter", String.valueOf(marketRegimeFilterEnabled));
             props.setProperty("risk.earnings_blackout_days", String.valueOf(earningsBlackoutDays));
@@ -91,6 +97,9 @@ public class AppConfig {
 
     public double getDailyLossLimitPct() { return dailyLossLimitPct; }
     public void setDailyLossLimitPct(double pct) { this.dailyLossLimitPct = pct; }
+
+    public double getMaxPortfolioExposurePct() { return maxPortfolioExposurePct; }
+    public void setMaxPortfolioExposurePct(double pct) { this.maxPortfolioExposurePct = pct; }
 
     public boolean isAvoidOvernightHolds() { return avoidOvernightHolds; }
     public void setAvoidOvernightHolds(boolean v) { this.avoidOvernightHolds = v; }

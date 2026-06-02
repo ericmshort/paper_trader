@@ -78,8 +78,8 @@ public class DashboardController implements Initializable {
     @FXML private TableColumn<OptionsPositionRow, String> optColStrike;
     @FXML private TableColumn<OptionsPositionRow, String> optColExpiry;
     @FXML private TableColumn<OptionsPositionRow, Integer> optColContracts;
-    @FXML private TableColumn<OptionsPositionRow, String> optColEntryPrem;
-    @FXML private TableColumn<OptionsPositionRow, String> optColCurrentPrem;
+    @FXML private TableColumn<OptionsPositionRow, String> optColCost;
+    @FXML private TableColumn<OptionsPositionRow, String> optColCurrentValue;
     @FXML private TableColumn<OptionsPositionRow, String> optColUnrealizedPnl;
     @FXML private TableView<StockPositionRow> stockPositionsTable;
     @FXML private TableColumn<StockPositionRow, String> stkColSymbol;
@@ -107,6 +107,8 @@ public class DashboardController implements Initializable {
     private PriceHistory priceHistory;
     private BlackScholesEngine bsEngine;
     private ScheduledExecutorService scheduler;
+    private TradingLoop tradingLoop;
+    private OptionsSignalRouter optionsRouter;
     private XYChart.Series<Number, Number> equitySeries;
     private int tickCount = 0;
     private boolean alpacaMode = false;
@@ -138,9 +140,20 @@ public class DashboardController implements Initializable {
 
         if (settingsPanelController != null) {
             settingsPanelController.setActiveBrokerType(appConfig.getBrokerType());
-            settingsPanelController.setOnSettingsSaved(cfg ->
-                    Platform.runLater(() -> researchArea.appendText(
-                            "\nSettings saved. Broker/quote changes take effect on next restart.\n")));
+            settingsPanelController.setOnSettingsSaved(cfg -> {
+                if (tradingLoop != null) {
+                    tradingLoop.setMaxPortfolioExposure(cfg.getMaxPortfolioExposurePct() / 100.0);
+                    tradingLoop.setDailyLossLimitPct(cfg.getDailyLossLimitPct() / 100.0);
+                    tradingLoop.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
+                    tradingLoop.setMarketRegimeFilterEnabled(cfg.isMarketRegimeFilterEnabled());
+                    tradingLoop.setEarningsBlackoutDays(cfg.getEarningsBlackoutDays());
+                }
+                if (optionsRouter != null) {
+                    optionsRouter.setMaxPortfolioExposure(cfg.getMaxPortfolioExposurePct() / 100.0);
+                }
+                Platform.runLater(() -> researchArea.appendText(
+                        "\nRisk settings updated (effective next tick). Broker/quote changes take effect on next restart.\n"));
+            });
             settingsPanelController.setOnBrokerReset(this::handleBrokerReset);
         }
     }
@@ -190,7 +203,7 @@ public class DashboardController implements Initializable {
                 appConfig.isAlpacaBroker()
                         ? (AlpacaBroker) brokerClient
                         : null);
-        OptionsSignalRouter optionsRouter = new OptionsSignalRouter(
+        optionsRouter = new OptionsSignalRouter(
                 bsEngine, optExec, account, priceHistory, researchCb, quoteProvider);
 
         Path weightsPath = Path.of(System.getProperty("user.home"), ".tradingapp", "signal-weights.json");
@@ -212,12 +225,14 @@ public class DashboardController implements Initializable {
         allSymbols.addAll(LargeCapWatchList.SYMBOLS);
         allSymbols.addAll(SmallCapWatchList.SYMBOLS);
 
-        TradingLoop tradingLoop = new TradingLoop(quoteProvider, priceHistory,
+        tradingLoop = new TradingLoop(quoteProvider, priceHistory,
                 new IndicatorEngine(), new TrailingStopMonitor(), brokerClient, feeCalc,
                 allSymbols, researchCb, uiRefresh, account,
                 optionsRouter, mlEval, trainingCallback);
         tradingLoop.setTransactionLog(transactionLog);
         tradingLoop.setDailyLossLimitPct(appConfig.getDailyLossLimitPct() / 100.0);
+        tradingLoop.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
+        optionsRouter.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
         tradingLoop.setAvoidOvernightHolds(appConfig.isAvoidOvernightHolds());
         tradingLoop.setMarketRegimeFilterEnabled(appConfig.isMarketRegimeFilterEnabled());
         tradingLoop.setEarningsCalendar(earningsCalendar);
@@ -232,8 +247,9 @@ public class DashboardController implements Initializable {
         scheduler.scheduleAtFixedRate(tradingLoop, 0, 30, TimeUnit.SECONDS);
 
         // Seed price history from 200 days of daily bars so MACrossover is immediately usable.
+        // Always use Yahoo for seeding — Alpaca's data API lacks historical depth at startup.
         // Runs in background — does not block the trading loop or the UI.
-        QuoteProvider seedProvider = quoteProvider;
+        QuoteProvider seedProvider = new YahooFinanceQuoteProvider();
         Thread seedThread = new Thread(() -> {
             LocalDate end = LocalDate.now();
             LocalDate start = end.minusDays(280); // extra buffer for weekends/holidays
@@ -369,9 +385,21 @@ public class DashboardController implements Initializable {
         optColStrike.setCellValueFactory(new PropertyValueFactory<>("strike"));
         optColExpiry.setCellValueFactory(new PropertyValueFactory<>("expiry"));
         optColContracts.setCellValueFactory(new PropertyValueFactory<>("contracts"));
-        optColEntryPrem.setCellValueFactory(new PropertyValueFactory<>("entryPremium"));
-        optColCurrentPrem.setCellValueFactory(new PropertyValueFactory<>("currentPremium"));
+        optColCost.setCellValueFactory(new PropertyValueFactory<>("cost"));
+        optColCurrentValue.setCellValueFactory(new PropertyValueFactory<>("currentValue"));
         optColUnrealizedPnl.setCellValueFactory(new PropertyValueFactory<>("unrealizedPnl"));
+        optColUnrealizedPnl.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String value, boolean empty) {
+                super.updateItem(value, empty);
+                if (empty || value == null) { setText(null); setStyle(""); return; }
+                setText(value);
+                OptionsPositionRow row = getTableView().getItems().get(getIndex());
+                setStyle(row.getPnlRaw() >= 0
+                        ? "-fx-text-fill: #00ff88; -fx-font-weight: bold;"
+                        : "-fx-text-fill: #ff4444; -fx-font-weight: bold;");
+            }
+        });
     }
 
     private void setupStockTableColumns() {
@@ -386,16 +414,85 @@ public class DashboardController implements Initializable {
     private double populateOptionsTable() {
         List<OptionsPositionRow> rows = new ArrayList<>();
         double totalUnrealized = 0.0;
-        for (OptionsPosition pos : account.getOptionsPositions().values()) {
-            double currentPrem = computeOptionCurrentPremium(pos);
-            totalUnrealized += (currentPrem - pos.getPremiumPaid()) * 100 * pos.getContracts();
-            rows.add(new OptionsPositionRow(
-                    pos.getSymbol(), pos.getType(), pos.getStrike(),
-                    pos.getExpiry().toString(), pos.getContracts(),
-                    pos.getPremiumPaid(), currentPrem));
+
+        // Group legs that belong to the same multi-leg strategy into one display row
+        Map<String, List<Map.Entry<String, OptionsPosition>>> groups = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, OptionsPosition> entry : account.getOptionsPositions().entrySet()) {
+            String gk = strategyGroupKey(entry.getKey(), entry.getValue().getSymbol());
+            groups.computeIfAbsent(gk, k -> new ArrayList<>()).add(entry);
         }
+
+        for (List<Map.Entry<String, OptionsPosition>> legs : groups.values()) {
+            if (legs.size() == 1) {
+                OptionsPosition pos = legs.get(0).getValue();
+                double currentPrem = computeOptionCurrentPremium(pos);
+                double costRaw = -pos.getPremiumPaid() * 100.0 * pos.getContracts();
+                double currentValueRaw = currentPrem * 100.0 * pos.getContracts();
+                totalUnrealized += costRaw + currentValueRaw;
+                rows.add(new OptionsPositionRow(
+                        pos.getSymbol(), pos.getType(),
+                        String.format("$%.2f", pos.getStrike()),
+                        pos.getExpiry().toString(),
+                        Math.abs(pos.getContracts()), costRaw, currentValueRaw));
+            } else {
+                OptionsPosition first = legs.get(0).getValue();
+                String symbol  = first.getSymbol();
+                String type    = strategyLabel(legs.get(0).getKey(), symbol);
+                String strike  = legs.stream()
+                        .map(e -> e.getValue().getStrike())
+                        .distinct().sorted()
+                        .map(k -> String.format("$%.0f", k))
+                        .collect(java.util.stream.Collectors.joining("/"));
+                String expiry  = legs.stream()
+                        .map(e -> e.getValue().getExpiry())
+                        .min(Comparator.naturalOrder())
+                        .map(Object::toString).orElse("");
+                int contracts  = Math.abs(first.getContracts());
+                double costRaw = 0.0, currentValueRaw = 0.0;
+                for (Map.Entry<String, OptionsPosition> e : legs) {
+                    OptionsPosition pos = e.getValue();
+                    double currentPrem = computeOptionCurrentPremium(pos);
+                    costRaw         += -pos.getPremiumPaid() * 100.0 * pos.getContracts();
+                    currentValueRaw += currentPrem * 100.0 * pos.getContracts();
+                }
+                totalUnrealized += costRaw + currentValueRaw;
+                rows.add(new OptionsPositionRow(symbol, type, strike, expiry,
+                        contracts, costRaw, currentValueRaw));
+            }
+        }
+
         optionsTable.setItems(FXCollections.observableArrayList(rows));
         return totalUnrealized;
+    }
+
+    /**
+     * Returns the group key for a position by stripping the leg-type suffix.
+     * Standalone "SYMBOL_CALL" / "SYMBOL_PUT" keys are returned unchanged so they
+     * never merge with each other or with multi-leg legs.
+     */
+    private static String strategyGroupKey(String posKey, String symbol) {
+        if (posKey.equals(symbol + "_CALL") || posKey.equals(symbol + "_PUT")) return posKey;
+        for (String suffix : new String[]{"_SHORTCALL", "_LONGCALL", "_SHORTPUT", "_LONGPUT",
+                                          "_SHORT", "_LONG", "_CALL", "_PUT"}) {
+            if (posKey.endsWith(suffix)) return posKey.substring(0, posKey.length() - suffix.length());
+        }
+        return posKey;
+    }
+
+    private static String strategyLabel(String posKey, String symbol) {
+        String root = strategyGroupKey(posKey, symbol);
+        String name = root.startsWith(symbol + "_") ? root.substring(symbol.length() + 1) : root;
+        return switch (name) {
+            case "IRONCONDOR"    -> "Iron Condor";
+            case "STRADDLE"      -> "Straddle";
+            case "STRANGLE"      -> "Strangle";
+            case "BULLPUTSPREAD" -> "Bull Put Spread";
+            case "BEARCALLSPREAD"-> "Bear Call Spread";
+            case "ZEROTE"        -> "Zero DTE";
+            case "HIGHDELTA"     -> "High Delta";
+            case "NEARTERM"      -> "Near Term";
+            default              -> name;
+        };
     }
 
     private double populateStockTable() {
@@ -428,13 +525,29 @@ public class DashboardController implements Initializable {
     }
 
     private double computeOptionCurrentPremium(OptionsPosition pos) {
-        List<Double> prices = priceHistory.getPrices(pos.getSymbol());
-        if (prices.isEmpty()) return pos.getPremiumPaid();
-        double S = prices.get(prices.size() - 1);
+        // Use the most recent intraday tick for the spot price, falling back to daily
+        List<Double> intradayPrices = priceHistory.getPrices(pos.getSymbol());
+        List<Double> dailyPrices    = priceHistory.getDailyPrices(pos.getSymbol());
+
+        // Need a spot price — prefer the freshest intraday tick
+        double S;
+        if (!intradayPrices.isEmpty()) {
+            S = intradayPrices.get(intradayPrices.size() - 1);
+        } else if (!dailyPrices.isEmpty()) {
+            S = dailyPrices.get(dailyPrices.size() - 1);
+        } else {
+            return pos.getPremiumPaid();
+        }
+
         double T = bsEngine.timeToExpiry(pos.getExpiry());
         if (T <= 0) return 0.0;
-        double vol = bsEngine.historicalVol(prices);
+
+        // Vol must come from DAILY returns — sqrt(252) annualization is correct only for
+        // daily prices. Intraday 30-second ticks would need sqrt(252*780) and would
+        // still be noisy; daily bars seeded from Yahoo are the right input.
+        double vol = bsEngine.historicalVol(dailyPrices.isEmpty() ? intradayPrices : dailyPrices);
         if (!Double.isFinite(vol) || vol == 0) return pos.getPremiumPaid();
+
         double K = pos.getStrike();
         double r = 0.05;
         return "CALL".equals(pos.getType())
@@ -494,7 +607,11 @@ public class DashboardController implements Initializable {
         double optTotalUnrealized = populateOptionsTable();
         double stkTotalUnrealized = populateStockTable();
         unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", optTotalUnrealized + stkTotalUnrealized));
-        optionsTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", optTotalUnrealized));
+        optionsTotalUnrealizedLabel.setText(String.format(
+                "Market Value: $%,.2f  |  P&L: %s$%,.2f",
+                optionHoldings,
+                optTotalUnrealized >= 0 ? "+" : "-",
+                Math.abs(optTotalUnrealized)));
         stockTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", stkTotalUnrealized));
 
         List<ClosedTradeRecord> closedTrades = computeClosedTrades();

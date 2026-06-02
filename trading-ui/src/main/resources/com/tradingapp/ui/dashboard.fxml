@@ -137,9 +137,9 @@
                             <TableColumn fx:id="optColStrike" text="Strike" prefWidth="90"/>
                             <TableColumn fx:id="optColExpiry" text="Expiry" prefWidth="110"/>
                             <TableColumn fx:id="optColContracts" text="Qty" prefWidth="50"/>
-                            <TableColumn fx:id="optColEntryPrem" text="Entry Prem" prefWidth="110"/>
-                            <TableColumn fx:id="optColCurrentPrem" text="Curr Prem" prefWidth="110"/>
-                            <TableColumn fx:id="optColUnrealizedPnl" text="Unrealized P&amp;L" prefWidth="130"/>
+                            <TableColumn fx:id="optColCost" text="Cost / Credit" prefWidth="120"/>
+                            <TableColumn fx:id="optColCurrentValue" text="Current Value" prefWidth="120"/>
+                            <TableColumn fx:id="optColUnrealizedPnl" text="P&amp;L" prefWidth="120"/>
                         </columns>
                     </TableView>
                     <Separator/>
