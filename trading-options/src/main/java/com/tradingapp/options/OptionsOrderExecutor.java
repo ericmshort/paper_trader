@@ -293,13 +293,16 @@ public class OptionsOrderExecutor {
         double fee;
 
         if (submitter != null) {
-            String side = "sell";
+            // Short positions (contracts < 0) require "buy" to close; long require "sell".
+            // Always send a positive qty — Alpaca rejects negative quantities.
+            int qty = Math.abs(pos.getContracts());
+            String side = pos.getContracts() < 0 ? "buy" : "sell";
             externalId = submitter.submit(pos.getSymbol(), pos.getType(), pos.getStrike(), pos.getExpiry(),
-                    pos.getContracts(), side);
+                    qty, side);
             if (externalId == null) return; // broker rejected
             fee = 0.0;
         } else {
-            fee = CONTRACT_FEE * pos.getContracts();
+            fee = CONTRACT_FEE * Math.abs(pos.getContracts());
         }
 
         recordClose(positionKey, pos, currentPremium, fee, reason, externalId, null);

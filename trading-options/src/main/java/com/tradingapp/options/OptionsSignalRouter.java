@@ -190,7 +190,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                               || opts.containsKey(bullPutShortKey)  || opts.containsKey(bullPutLongKey)
                               || opts.containsKey(bearCallShortKey) || opts.containsKey(bearCallLongKey)
                               || opts.containsKey(zeroDteCallKey)   || opts.containsKey(zeroDtePutKey)
-                              || opts.containsKey(condorShortCallKey) || opts.containsKey(condorLongCallKey);
+                              || opts.containsKey(condorShortCallKey) || opts.containsKey(condorLongCallKey)
+                              || opts.containsKey(condorShortPutKey)  || opts.containsKey(condorLongPutKey);
 
         // ── 4. Entry ──────────────────────────────────────────────────────────────
         if (extremeBullish && !hasDirectional && !hasMultiLeg) {
@@ -615,18 +616,24 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         double T = bsEngine.timeToExpiry(scPos.getExpiry());
         int c = Math.abs(scPos.getContracts());
 
-        double scPrem = (sigma > 0 && T > 0)
-                ? bsEngine.callPrice(price, scPos.getStrike(), RISK_FREE_RATE, T, sigma)
-                : Math.max(0, price - scPos.getStrike());
-        double lcPrem = (sigma > 0 && T > 0)
-                ? bsEngine.callPrice(price, lcPos.getStrike(), RISK_FREE_RATE, T, sigma)
-                : Math.max(0, price - lcPos.getStrike());
-        double spPrem = (sigma > 0 && T > 0)
-                ? bsEngine.putPrice(price, spPos.getStrike(), RISK_FREE_RATE, T, sigma)
-                : Math.max(0, spPos.getStrike() - price);
-        double lpPrem = (sigma > 0 && T > 0)
-                ? bsEngine.putPrice(price, lpPos.getStrike(), RISK_FREE_RATE, T, sigma)
-                : Math.max(0, lpPos.getStrike() - price);
+        boolean nearExpiry = scPos.daysToExpiry() < 3;
+
+        // Without valid vol/time we can't price the legs; intrinsic-only fallback gives 0 for all
+        // OTM strikes, making netCostToClose=0 and falsely triggering profitTarget every tick.
+        // Only allow expiry-driven close when pricing is unavailable.
+        if (sigma == 0 || T <= 0) {
+            if (!nearExpiry) return;
+            optExec.closeIronCondor(shortCallKey, longCallKey, shortPutKey, longPutKey,
+                    0, 0, 0, 0, "Expiry <3 days");
+            lastMultiLegCloseMs.put(symbol, System.currentTimeMillis());
+            researchCallback.accept(symbol + " IRON CONDOR closed: Expiry <3 days (no vol data)");
+            return;
+        }
+
+        double scPrem = bsEngine.callPrice(price, scPos.getStrike(), RISK_FREE_RATE, T, sigma);
+        double lcPrem = bsEngine.callPrice(price, lcPos.getStrike(), RISK_FREE_RATE, T, sigma);
+        double spPrem = bsEngine.putPrice(price, spPos.getStrike(), RISK_FREE_RATE, T, sigma);
+        double lpPrem = bsEngine.putPrice(price, lpPos.getStrike(), RISK_FREE_RATE, T, sigma);
 
         // Credit received at entry: premiums of the two short legs
         double creditReceived = (scPos.getPremiumPaid() + spPos.getPremiumPaid()) * 100 * c;
@@ -635,7 +642,6 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         boolean profitTarget = netCostToClose <= creditReceived * 0.50; // kept 50% of credit
         boolean stopLoss     = netCostToClose >= creditReceived * 2.0;  // paying 2x credit received
-        boolean nearExpiry   = scPos.daysToExpiry() < 3;
 
         if (!profitTarget && !stopLoss && !nearExpiry) return;
 
