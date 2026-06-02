@@ -281,7 +281,12 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                 Map<String, com.tradingapp.account.OptionsPosition> posByFingerprint = new HashMap<>();
                 for (Map.Entry<String, com.tradingapp.account.OptionsPosition> e : account.getOptionsPositions().entrySet()) {
                     com.tradingapp.account.OptionsPosition p = e.getValue();
-                    String fp = p.getSymbol() + "|" + p.getType() + "|" + p.getStrike() + "|" + p.getExpiry();
+                    // Omit expiry from fingerprint: the local position stores the TARGET expiry
+                    // from bsEngine.selectExpiry(), but the actual OCC contract filled by Alpaca
+                    // can differ by ±14 days (lookupBestContract search window). Including expiry
+                    // caused every condor/straddle leg to lose its strategy key on each sync tick,
+                    // collapsing to generic SYMBOL_CALL / SYMBOL_PUT and firing closeDirectionalLeg.
+                    String fp = p.getSymbol() + "|" + p.getType() + "|" + p.getStrike();
                     keyByFingerprint.put(fp, e.getKey());
                     posByFingerprint.put(fp, p);
                 }
@@ -291,22 +296,26 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                 for (int i = 0; i < positions.length(); i++) {
                     JSONObject pos = positions.getJSONObject(i);
                     String symbol = pos.getString("symbol");
-                    int qty = (int) pos.optDouble("qty", 0);
+                    // Alpaca reports short options with negative qty; take abs so we don't skip them.
+                    // Direction is preserved by reusing the existing OptionsPosition (negative contracts).
+                    int qty = (int) Math.abs(pos.optDouble("qty", 0));
+                    String side = pos.optString("side", "long");
                     double avgCost = pos.optDouble("avg_entry_price", 0.0);
                     double currentPrice = pos.optDouble("current_price", avgCost);
-                    if (qty <= 0) continue;
+                    if (qty == 0) continue;
                     if (isOccSymbol(symbol)) {
                         OccComponents occ = parseOcc(symbol);
                         if (occ != null) {
-                            String fp = occ.underlying + "|" + occ.type + "|" + occ.strike + "|" + occ.expiry;
+                            String fp = occ.underlying + "|" + occ.type + "|" + occ.strike;
                             String posKey = keyByFingerprint.getOrDefault(fp, occ.underlying + "_" + occ.type);
                             // Reuse the existing position object to preserve negative contracts on short
                             // legs and the original premiumPaid. Fall back to a new object only for
                             // positions that appeared in Alpaca but weren't locally tracked.
                             com.tradingapp.account.OptionsPosition existing = posByFingerprint.get(fp);
+                            int signedQty = "short".equals(side) ? -qty : qty;
                             com.tradingapp.account.OptionsPosition optPos = (existing != null) ? existing :
                                     new com.tradingapp.account.OptionsPosition(
-                                            occ.underlying, occ.type, occ.strike, occ.expiry, qty, avgCost);
+                                            occ.underlying, occ.type, occ.strike, occ.expiry, signedQty, avgCost);
                             account.addOptionsPosition(posKey, optPos);
                         }
                     } else {
