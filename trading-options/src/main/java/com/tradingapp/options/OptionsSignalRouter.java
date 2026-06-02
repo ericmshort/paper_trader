@@ -59,6 +59,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
     private final Set<String> sessionStopLossed = new HashSet<>();
     private final Map<String, Long> lastMultiLegCloseMs = new HashMap<>();
+    private final Map<String, Long> lastDirectionalCloseMs = new HashMap<>();
     private static final long MULTILEG_REENTRY_COOLDOWN_MS = 15 * 60 * 1000L; // 15 minutes
     private LocalDate stopLossResetDate;
     private BooleanSupplier uptrendSupplier;
@@ -273,6 +274,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         else                   reason = "Signal reversal: " + (isCall ? "SELL" : "BUY");
 
         if (premiumStop) sessionStopLossed.add(posKey);
+        lastDirectionalCloseMs.put(posKey, System.currentTimeMillis());
         optExec.closePosition(posKey, currentPremium, reason);
         researchCallback.accept(symbol + (isCall ? " CALL" : " PUT") + " closed: " + reason
                 + " prem=" + String.format("%.2f", currentPremium));
@@ -369,6 +371,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                                         netCostToClose, creditReceived);
 
         if (stopLoss) sessionStopLossed.add(symbol + "_" + strategyName);
+        lastMultiLegCloseMs.put(symbol + "_" + strategyName, System.currentTimeMillis());
         optExec.closeCreditSpread(shortKey, longKey, shortPrem, longPrem, reason);
         researchCallback.accept(String.format("%s %s closed: %s credit=%.2f costToClose=%.2f",
                 symbol, strategyName, reason, creditReceived, netCostToClose));
@@ -381,6 +384,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                                  String callKey, Map<String, OptionsPosition> opts) {
         if (sessionStopLossed.contains(callKey)) {
             researchCallback.accept(symbol + " CALL skip: stop-loss cooldown");
+            return;
+        }
+        Long callLastClose = lastDirectionalCloseMs.get(callKey);
+        if (callLastClose != null && System.currentTimeMillis() - callLastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
+            researchCallback.accept(symbol + " CALL skip: re-entry cooldown ("
+                    + ((System.currentTimeMillis() - callLastClose) / 60000) + "m elapsed, need 15m)");
             return;
         }
         if (account.getPositions().containsKey(symbol)) {
@@ -409,6 +418,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                                 String putKey, int sellSignals, Map<String, OptionsPosition> opts) {
         if (sessionStopLossed.contains(putKey)) {
             researchCallback.accept(symbol + " PUT skip: stop-loss cooldown");
+            return;
+        }
+        Long putLastClose = lastDirectionalCloseMs.get(putKey);
+        if (putLastClose != null && System.currentTimeMillis() - putLastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
+            researchCallback.accept(symbol + " PUT skip: re-entry cooldown ("
+                    + ((System.currentTimeMillis() - putLastClose) / 60000) + "m elapsed, need 15m)");
             return;
         }
         if (uptrendSupplier != null && uptrendSupplier.getAsBoolean()) {
@@ -443,6 +458,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         if (sessionStopLossed.contains(cooldownKey)) {
             researchCallback.accept(symbol + " BULL PUT SPREAD skip: stop-loss cooldown");
+            return;
+        }
+        Long bpsLastClose = lastMultiLegCloseMs.get(symbol + "_BULLPUTSPREAD");
+        if (bpsLastClose != null && System.currentTimeMillis() - bpsLastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
+            researchCallback.accept(symbol + " BULL PUT SPREAD skip: re-entry cooldown ("
+                    + ((System.currentTimeMillis() - bpsLastClose) / 60000) + "m elapsed, need 15m)");
             return;
         }
         if (uptrendSupplier != null && !uptrendSupplier.getAsBoolean()) {
@@ -494,6 +515,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         if (sessionStopLossed.contains(cooldownKey)) {
             researchCallback.accept(symbol + " BEAR CALL SPREAD skip: stop-loss cooldown");
+            return;
+        }
+        Long bcsLastClose = lastMultiLegCloseMs.get(symbol + "_BEARCALLSPREAD");
+        if (bcsLastClose != null && System.currentTimeMillis() - bcsLastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
+            researchCallback.accept(symbol + " BEAR CALL SPREAD skip: re-entry cooldown ("
+                    + ((System.currentTimeMillis() - bcsLastClose) / 60000) + "m elapsed, need 15m)");
             return;
         }
         if (uptrendSupplier != null && uptrendSupplier.getAsBoolean()) {
@@ -671,6 +698,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             researchCallback.accept(symbol + (isCall ? " HIGH-DELTA CALL" : " HIGH-DELTA PUT") + " skip: stop-loss cooldown");
             return;
         }
+        Long hdLastClose = lastDirectionalCloseMs.get(posKey);
+        if (hdLastClose != null && System.currentTimeMillis() - hdLastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
+            researchCallback.accept(symbol + (isCall ? " HIGH-DELTA CALL" : " HIGH-DELTA PUT") + " skip: re-entry cooldown ("
+                    + ((System.currentTimeMillis() - hdLastClose) / 60000) + "m elapsed, need 15m)");
+            return;
+        }
         if (!isCall && uptrendSupplier != null && uptrendSupplier.getAsBoolean()) {
             researchCallback.accept(symbol + " HIGH-DELTA PUT skip: bull market");
             return;
@@ -712,6 +745,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         if (sessionStopLossed.contains(posKey)) {
             researchCallback.accept(symbol + (isCall ? " NEARTERM CALL" : " NEARTERM PUT") + " skip: stop-loss cooldown");
+            return;
+        }
+        Long ntLastClose = lastDirectionalCloseMs.get(posKey);
+        if (ntLastClose != null && System.currentTimeMillis() - ntLastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
+            researchCallback.accept(symbol + (isCall ? " NEARTERM CALL" : " NEARTERM PUT") + " skip: re-entry cooldown ("
+                    + ((System.currentTimeMillis() - ntLastClose) / 60000) + "m elapsed, need 15m)");
             return;
         }
         if (!isCall && uptrendSupplier != null && uptrendSupplier.getAsBoolean()) {
@@ -910,6 +949,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (!today.equals(stopLossResetDate)) {
             sessionStopLossed.clear();
             lastMultiLegCloseMs.clear();
+            lastDirectionalCloseMs.clear();
             stopLossResetDate = today;
         }
     }
