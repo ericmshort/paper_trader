@@ -258,6 +258,13 @@ public class OptionsOrderExecutor {
         double fee;
 
         if (submitter != null) {
+            double estimatedCost = bsPremium * 100 * contracts;
+            double bp = account.getBuyingPower();
+            if (bp > 0 && bp < estimatedCost) {
+                LOG.warning(symbol + " " + optionType + " buy skipped: options buying power "
+                        + String.format("%.2f", bp) + " < estimated cost " + String.format("%.2f", estimatedCost));
+                return;
+            }
             externalId = submitter.submit(symbol, optionType, strike, expiry, contracts, "buy");
             if (externalId == null) return; // broker rejected the order
             fillPremium = bsPremium; // Alpaca market orders fill at market; use BS as display price
@@ -299,7 +306,16 @@ public class OptionsOrderExecutor {
             String side = pos.getContracts() < 0 ? "buy" : "sell";
             externalId = submitter.submit(pos.getSymbol(), pos.getType(), pos.getStrike(), pos.getExpiry(),
                     qty, side);
-            if (externalId == null) return; // broker rejected
+            if (externalId == null) {
+                // A sell-to-close rejection almost always means the position doesn't exist on the broker
+                // (expired, already closed, or never filled). Remove the stale paper position so it
+                // doesn't retry every tick and generate "uncovered option" errors on the next submit.
+                if ("sell".equals(side)) {
+                    LOG.warning(positionKey + " sell-to-close rejected — removing stale paper position");
+                    account.removeOptionsPosition(positionKey);
+                }
+                return;
+            }
             fee = 0.0;
         } else {
             fee = CONTRACT_FEE * Math.abs(pos.getContracts());
