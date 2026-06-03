@@ -125,10 +125,16 @@ public class TransactionLog {
     }
 
     public void purgeUnmatched(java.util.Set<String> knownExternalIds) {
-        // Delete every record whose external_id is NULL (never sent to broker)
-        // or whose external_id is not in the set of known broker order IDs.
-        try (Connection conn = connect(); Statement stmt = conn.createStatement()) {
-            stmt.execute("DELETE FROM transactions WHERE external_id IS NULL");
+        // Delete simulation records (external_id IS NULL, never sent to broker).
+        // Preserve broker-sync compensating closes — these are inserted by syncAccount when a
+        // position exists in the local DB but not in the broker, and must survive across restarts
+        // so restoreAccount doesn't reconstruct the ghost position next time.
+        try (Connection conn = connect();
+             PreparedStatement ps = conn.prepareStatement(
+                     "DELETE FROM transactions WHERE external_id IS NULL "
+                     + "AND (reason IS NULL OR reason NOT LIKE ?)")) {
+            ps.setString(1, "Broker sync close%");
+            ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to purge unmatched transactions", e);
         }
