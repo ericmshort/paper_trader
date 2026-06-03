@@ -307,8 +307,15 @@ public class OptionsOrderExecutor {
             boolean isShort = pos.getContracts() < 0;
             String side = isShort ? "buy" : "sell";
             String positionIntent = isShort ? "buy_to_close" : "sell_to_close";
-            externalId = submitter.submit(pos.getSymbol(), pos.getType(), pos.getStrike(), pos.getExpiry(),
-                    qty, side, positionIntent);
+            // Use the pinned Alpaca OCC symbol when available. Re-looking up by target strike/expiry
+            // can resolve a different contract than the one actually held, causing position_intent mismatch.
+            String occSymbol = pos.getBrokerOccSymbol();
+            if (occSymbol != null) {
+                externalId = submitter.submitDirect(occSymbol, qty, side, positionIntent);
+            } else {
+                externalId = submitter.submit(pos.getSymbol(), pos.getType(), pos.getStrike(), pos.getExpiry(),
+                        qty, side, positionIntent);
+            }
             if (externalId == null) {
                 // Only remove from memory if this position is NOT confirmed by the broker.
                 // Broker-verified positions still exist in Alpaca — removing them causes a churn
@@ -346,8 +353,8 @@ public class OptionsOrderExecutor {
         // ── Attempt atomic multi-leg close ────────────────────────────────────
         if (submitter != null) {
             List<MultiLegOrder> legs = List.of(
-                    new MultiLegOrder(callPos.getSymbol(), "CALL", callPos.getStrike(), callPos.getExpiry(), "sell", "sell_to_close"),
-                    new MultiLegOrder(putPos.getSymbol(),  "PUT",  putPos.getStrike(),  putPos.getExpiry(),  "sell", "sell_to_close"));
+                    new MultiLegOrder(callPos.getSymbol(), "CALL", callPos.getStrike(), callPos.getExpiry(), "sell", "sell_to_close", callPos.getBrokerOccSymbol()),
+                    new MultiLegOrder(putPos.getSymbol(),  "PUT",  putPos.getStrike(),  putPos.getExpiry(),  "sell", "sell_to_close", putPos.getBrokerOccSymbol()));
             String orderId = submitter.submitMultiLeg(legs, callPos.getContracts());
             if (orderId != null) {
                 recordClose(callPosKey, callPos, callPremium, 0.0, reason, orderId, groupId);
@@ -379,8 +386,8 @@ public class OptionsOrderExecutor {
         // ── Attempt atomic multi-leg close ────────────────────────────────────
         if (submitter != null) {
             List<MultiLegOrder> legs = List.of(
-                    new MultiLegOrder(shortPos.getSymbol(), shortPos.getType(), shortPos.getStrike(), shortPos.getExpiry(), "buy",  "buy_to_close"),
-                    new MultiLegOrder(longPos.getSymbol(),  longPos.getType(),  longPos.getStrike(),  longPos.getExpiry(),  "sell", "sell_to_close"));
+                    new MultiLegOrder(shortPos.getSymbol(), shortPos.getType(), shortPos.getStrike(), shortPos.getExpiry(), "buy",  "buy_to_close",  shortPos.getBrokerOccSymbol()),
+                    new MultiLegOrder(longPos.getSymbol(),  longPos.getType(),  longPos.getStrike(),  longPos.getExpiry(),  "sell", "sell_to_close", longPos.getBrokerOccSymbol()));
             String orderId = submitter.submitMultiLeg(legs, contracts);
             if (orderId != null) {
                 recordClose(shortPosKey, shortPos, shortPremium, 0.0, reason, orderId, groupId);
@@ -504,10 +511,10 @@ public class OptionsOrderExecutor {
         // ── Attempt atomic 4-leg close ────────────────────────────────────────
         if (submitter != null && scPos != null && lcPos != null && spPos != null && lpPos != null) {
             List<MultiLegOrder> legs = List.of(
-                    new MultiLegOrder(scPos.getSymbol(), "CALL", scPos.getStrike(), scPos.getExpiry(), "buy",  "buy_to_close"),
-                    new MultiLegOrder(lcPos.getSymbol(), "CALL", lcPos.getStrike(), lcPos.getExpiry(), "sell", "sell_to_close"),
-                    new MultiLegOrder(spPos.getSymbol(), "PUT",  spPos.getStrike(), spPos.getExpiry(), "buy",  "buy_to_close"),
-                    new MultiLegOrder(lpPos.getSymbol(), "PUT",  lpPos.getStrike(), lpPos.getExpiry(), "sell", "sell_to_close"));
+                    new MultiLegOrder(scPos.getSymbol(), "CALL", scPos.getStrike(), scPos.getExpiry(), "buy",  "buy_to_close",  scPos.getBrokerOccSymbol()),
+                    new MultiLegOrder(lcPos.getSymbol(), "CALL", lcPos.getStrike(), lcPos.getExpiry(), "sell", "sell_to_close", lcPos.getBrokerOccSymbol()),
+                    new MultiLegOrder(spPos.getSymbol(), "PUT",  spPos.getStrike(), spPos.getExpiry(), "buy",  "buy_to_close",  spPos.getBrokerOccSymbol()),
+                    new MultiLegOrder(lpPos.getSymbol(), "PUT",  lpPos.getStrike(), lpPos.getExpiry(), "sell", "sell_to_close", lpPos.getBrokerOccSymbol()));
             String orderId = submitter.submitMultiLeg(legs, contracts);
             if (orderId != null) {
                 recordClose(shortCallKey, scPos, shortCallPrem, 0.0, reason, orderId, groupId);

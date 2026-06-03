@@ -129,6 +129,32 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
         return submitOptionsOrder(symbol, optionType, strike, expiry, contracts, side, positionIntent);
     }
 
+    @Override
+    public String submitDirect(String occSymbol, int contracts, String side, String positionIntent) {
+        try {
+            LOG.info("Alpaca options close (direct): " + occSymbol + " side=" + side + " intent=" + positionIntent);
+            JSONObject body = new JSONObject()
+                    .put("symbol", occSymbol)
+                    .put("qty", contracts)
+                    .put("side", side)
+                    .put("type", "market")
+                    .put("time_in_force", "day");
+            if (positionIntent != null) {
+                body.put("position_intent", positionIntent);
+            }
+            HttpResponse<String> resp = post("/orders", body.toString());
+            if (resp.statusCode() != 200 && resp.statusCode() != 201) {
+                System.err.println("Alpaca options direct close rejected (" + resp.statusCode() + "): " + resp.body());
+                return null;
+            }
+            JSONObject order = new JSONObject(resp.body());
+            return order.optString("id");
+        } catch (Exception e) {
+            System.err.println("Alpaca options direct close failed: " + e.getMessage());
+            return null;
+        }
+    }
+
     /**
      * OptionsSubmitter.submitMultiLeg — submits an all-or-nothing multi-leg order via Alpaca's
      * {@code order_class: "mleg"} endpoint. All legs are resolved to OCC symbols before submission;
@@ -139,11 +165,15 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
         try {
             JSONArray legsArray = new JSONArray();
             for (MultiLegOrder leg : legs) {
-                String occSymbol = lookupBestContract(leg.symbol(), leg.optionType(), leg.strike(), leg.expiry());
+                // Use pinned OCC symbol when available (close orders); look up for new opens.
+                String occSymbol = leg.occSymbol();
                 if (occSymbol == null) {
-                    LOG.warning("Multi-leg: no contract found for " + leg.symbol()
-                            + " " + leg.optionType() + " K=" + leg.strike() + " exp=" + leg.expiry());
-                    return null;
+                    occSymbol = lookupBestContract(leg.symbol(), leg.optionType(), leg.strike(), leg.expiry());
+                    if (occSymbol == null) {
+                        LOG.warning("Multi-leg: no contract found for " + leg.symbol()
+                                + " " + leg.optionType() + " K=" + leg.strike() + " exp=" + leg.expiry());
+                        return null;
+                    }
                 }
                 legsArray.put(new JSONObject()
                         .put("symbol", occSymbol)
@@ -329,6 +359,10 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                             com.tradingapp.account.OptionsPosition optPos = (existing != null) ? existing :
                                     new com.tradingapp.account.OptionsPosition(
                                             occ.underlying, occ.type, occ.strike, occ.expiry, signedQty, avgCost);
+                            // Pin the exact Alpaca OCC symbol so close orders bypass re-lookup.
+                            // Re-lookup finds the nearest contract by strike/expiry which may differ
+                            // from what we actually hold, causing a position_intent mismatch on close.
+                            optPos.setBrokerOccSymbol(symbol);
                             account.addOptionsPosition(posKey, optPos);
                             account.markOptionVerified(posKey);
                         }

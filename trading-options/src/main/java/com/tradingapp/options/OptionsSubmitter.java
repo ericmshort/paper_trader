@@ -18,6 +18,16 @@ public interface OptionsSubmitter {
     }
 
     /**
+     * Submit a close order using the exact OCC symbol already held in the broker account,
+     * bypassing contract re-lookup. This avoids position_intent mismatch when the actual
+     * filled contract differs from the originally targeted strike/expiry.
+     * Defaults to a no-op (returns null) for paper-trading implementations.
+     */
+    default String submitDirect(String occSymbol, int contracts, String side, String positionIntent) {
+        return null;
+    }
+
+    /**
      * Submit a multi-leg options order atomically (all-or-nothing).
      * Returns the broker order ID on success, or null if multi-leg is not supported or the order was rejected.
      * The default returns null, which causes callers to fall back to sequential single-leg submission.

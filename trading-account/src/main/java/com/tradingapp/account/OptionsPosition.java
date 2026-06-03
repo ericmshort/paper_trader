@@ -11,6 +11,9 @@ public class OptionsPosition {
     private final LocalDate expiry;
     private final int contracts;
     private final double premiumPaid;
+    // Set during broker sync to the exact OCC symbol held in the account.
+    // Used for close orders to skip re-lookup and avoid position_intent mismatch.
+    private volatile String brokerOccSymbol;
 
     public OptionsPosition(String symbol, String type, double strike, LocalDate expiry, int contracts, double premiumPaid) {
         this.symbol = symbol;
@@ -27,6 +30,8 @@ public class OptionsPosition {
     public LocalDate getExpiry() { return expiry; }
     public int getContracts() { return contracts; }
     public double getPremiumPaid() { return premiumPaid; }
+    public String getBrokerOccSymbol() { return brokerOccSymbol; }
+    public void setBrokerOccSymbol(String brokerOccSymbol) { this.brokerOccSymbol = brokerOccSymbol; }
 
     public long daysToExpiry() {
         return ChronoUnit.DAYS.between(LocalDate.now(), expiry);
