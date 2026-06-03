@@ -8,6 +8,16 @@ public interface OptionsSubmitter {
     String submit(String symbol, String optionType, double strike, LocalDate expiry, int contracts, String side);
 
     /**
+     * Submit a single-leg options order with an explicit position_intent.
+     * Required for closing orders so the broker doesn't treat them as naked writes.
+     * Defaults to the side-only form for paper-trading implementations.
+     */
+    default String submit(String symbol, String optionType, double strike, LocalDate expiry,
+                          int contracts, String side, String positionIntent) {
+        return submit(symbol, optionType, strike, expiry, contracts, side);
+    }
+
+    /**
      * Submit a multi-leg options order atomically (all-or-nothing).
      * Returns the broker order ID on success, or null if multi-leg is not supported or the order was rejected.
      * The default returns null, which causes callers to fall back to sequential single-leg submission.

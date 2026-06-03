@@ -162,6 +162,11 @@ public class TradingLoop implements Runnable {
                 return;
             }
             brokerClient.syncAccount(account);
+            if (!account.isBrokerSyncComplete()) {
+                researchCallback.accept("WARNING: Broker sync did not complete — trading suspended this tick.");
+                uiRefreshCallback.run();
+                return;
+            }
             if (!today.equals(lastDayTrackingDate)) {
                 lastDayTrackingDate = today;
                 // Prefer last_equity from the broker (equity at prior close) — the authoritative
@@ -222,7 +227,7 @@ public class TradingLoop implements Runnable {
                         ? weightEvaluator.weightedSellScore(signals) : (double) sells;
                 String signalStr = signals.stream().map(SignalResult::toString).collect(Collectors.joining(", "));
                 String featureCsv = extractFeatureCsv(signals);
-                boolean hasPosition = account.getPositions().containsKey(symbol);
+                boolean hasPosition = account.isStockVerified(symbol);
 
                 // ── Multi-indicator ───────────────────────────────────────────────────
                 if (trailingStop.check(symbol, price) && hasPosition) {
@@ -270,6 +275,7 @@ public class TradingLoop implements Runnable {
             // Gap 5: liquidate all equity positions at 15:45 to avoid overnight gap risk
             if (avoidOvernightHolds && !time.isBefore(PRE_CLOSE_CUTOFF)) {
                 for (String sym : new ArrayList<>(account.getPositions().keySet())) {
+                    if (!account.isStockVerified(sym)) continue;
                     Position pos = account.getPositions().get(sym);
                     if (pos == null) continue;
                     double closePrice = lastKnownPrices.getOrDefault(sym, pos.getCurrentPrice());

@@ -300,19 +300,24 @@ public class OptionsOrderExecutor {
         double fee;
 
         if (submitter != null) {
-            // Short positions (contracts < 0) require "buy" to close; long require "sell".
+            // Short positions (contracts < 0) require "buy_to_close"; long require "sell_to_close".
             // Always send a positive qty — Alpaca rejects negative quantities.
+            // position_intent is mandatory: without it Alpaca treats the order as a new naked write.
             int qty = Math.abs(pos.getContracts());
-            String side = pos.getContracts() < 0 ? "buy" : "sell";
+            boolean isShort = pos.getContracts() < 0;
+            String side = isShort ? "buy" : "sell";
+            String positionIntent = isShort ? "buy_to_close" : "sell_to_close";
             externalId = submitter.submit(pos.getSymbol(), pos.getType(), pos.getStrike(), pos.getExpiry(),
-                    qty, side);
+                    qty, side, positionIntent);
             if (externalId == null) {
-                // A sell-to-close rejection almost always means the position doesn't exist on the broker
-                // (expired, already closed, or never filled). Remove the stale paper position so it
-                // doesn't retry every tick and generate "uncovered option" errors on the next submit.
-                if ("sell".equals(side)) {
-                    LOG.warning(positionKey + " sell-to-close rejected — removing stale paper position");
+                // Only remove from memory if this position is NOT confirmed by the broker.
+                // Broker-verified positions still exist in Alpaca — removing them causes a churn
+                // loop where syncAccount re-adds them every tick and we retry the rejection forever.
+                if (!account.isOptionVerified(positionKey)) {
+                    LOG.warning(positionKey + " close rejected — removing unverified paper position");
                     account.removeOptionsPosition(positionKey);
+                } else {
+                    LOG.warning(positionKey + " close rejected — position still exists in broker, will retry next tick");
                 }
                 return;
             }

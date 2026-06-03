@@ -2,6 +2,7 @@ package com.tradingapp.account;
 
 import java.util.Collections;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class Account {
@@ -16,6 +17,8 @@ public class Account {
     private volatile double totalRealizedPnL;
     private volatile boolean tradingHalted;
     private volatile boolean dailyLossHalted;
+    private final Set<String> verifiedOptionsKeys = ConcurrentHashMap.newKeySet();
+    private volatile boolean brokerSyncComplete = false;
 
     public Account() {
         this.balance = STARTING_BALANCE;
@@ -34,6 +37,8 @@ public class Account {
     public boolean isTradingHalted() { return tradingHalted; }
     public boolean isDailyLossHalted() { return dailyLossHalted; }
     public void setDailyLossHalted(boolean v) { this.dailyLossHalted = v; }
+    public boolean isBrokerSyncComplete() { return brokerSyncComplete; }
+    public void setBrokerSyncComplete(boolean v) { this.brokerSyncComplete = v; }
 
     public void setBalance(double balance) { this.balance = balance; }
     public void setBuyingPower(double buyingPower) { this.buyingPower = buyingPower; }
@@ -71,6 +76,28 @@ public class Account {
         }
     }
 
+    public void markAllUnverified() {
+        brokerSyncComplete = false;
+        positions.values().forEach(p -> p.setBrokerVerified(false));
+        verifiedOptionsKeys.clear();
+    }
+
+    public void markStockVerified(String key) {
+        Position pos = positions.get(key);
+        if (pos != null) pos.setBrokerVerified(true);
+    }
+
+    public void markOptionVerified(String key) { verifiedOptionsKeys.add(key); }
+    public boolean isStockVerified(String key) {
+        Position pos = positions.get(key);
+        return pos != null && pos.isBrokerVerified();
+    }
+    public boolean isOptionVerified(String key) { return verifiedOptionsKeys.contains(key); }
+
+    public synchronized void setPositionFromBroker(String symbol, int quantity, double avgCost, Position.PositionType type) {
+        positions.put(symbol, new Position(symbol, quantity, avgCost, type));
+    }
+
     public synchronized void addOrUpdatePosition(String symbol, int quantity, double price, Position.PositionType type) {
         positions.merge(symbol,
                 new Position(symbol, quantity, price, type),
@@ -96,5 +123,7 @@ public class Account {
         this.totalRealizedPnL = 0.0;
         this.tradingHalted = false;
         this.dailyLossHalted = false;
+        this.brokerSyncComplete = false;
+        this.verifiedOptionsKeys.clear();
     }
 }

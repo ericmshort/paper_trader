@@ -25,7 +25,10 @@ public class SimulatedBroker implements BrokerClient {
 
     @Override
     public void syncAccount(Account account) {
-        // local account is already authoritative in simulated mode
+        // Simulated mode: local account is authoritative; mark all existing positions verified.
+        account.getPositions().keySet().forEach(account::markStockVerified);
+        account.getOptionsPositions().keySet().forEach(account::markOptionVerified);
+        account.setBrokerSyncComplete(true);
     }
 
     @Override

@@ -61,7 +61,7 @@ class AlpacaOptionsIntegrationTest {
         System.out.println("Using contract: " + occSymbol + " K=" + strike + " exp=" + expiry);
 
         AlpacaBroker broker = new AlpacaBroker(config, null, null);
-        String orderId = broker.submitOptionsOrder("AAPL", "CALL", strike, expiry, 1, "buy");
+        String orderId = broker.submitOptionsOrder("AAPL", "CALL", strike, expiry, 1, "buy", "buy_to_open");
 
         assertNotNull(orderId,
                 "Options order was rejected by Alpaca. Check stderr — possible causes: "

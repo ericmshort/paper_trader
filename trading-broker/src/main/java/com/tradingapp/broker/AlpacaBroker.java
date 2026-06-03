@@ -17,6 +17,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -119,7 +120,13 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
     /** OptionsSubmitter.submit — delegates to the single-leg options order path. */
     @Override
     public String submit(String symbol, String optionType, double strike, LocalDate expiry, int contracts, String side) {
-        return submitOptionsOrder(symbol, optionType, strike, expiry, contracts, side);
+        return submitOptionsOrder(symbol, optionType, strike, expiry, contracts, side, null);
+    }
+
+    @Override
+    public String submit(String symbol, String optionType, double strike, LocalDate expiry,
+                         int contracts, String side, String positionIntent) {
+        return submitOptionsOrder(symbol, optionType, strike, expiry, contracts, side, positionIntent);
     }
 
     /**
@@ -169,7 +176,8 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
     }
 
     /** Submits a single-leg options order to Alpaca using OCC symbol format. */
-    public String submitOptionsOrder(String symbol, String optionType, double strike, LocalDate expiry, int contracts, String side) {
+    public String submitOptionsOrder(String symbol, String optionType, double strike, LocalDate expiry,
+                                     int contracts, String side, String positionIntent) {
         try {
             String occSymbol = lookupBestContract(symbol, optionType, strike, expiry);
             if (occSymbol == null) {
@@ -185,6 +193,9 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                     .put("side", side)
                     .put("type", "market")
                     .put("time_in_force", "day");
+            if (positionIntent != null) {
+                body.put("position_intent", positionIntent);
+            }
 
             HttpResponse<String> resp = post("/orders", body.toString());
             if (resp.statusCode() != 200 && resp.statusCode() != 201) {
@@ -272,8 +283,12 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
 
             JSONArray positions = getJsonArray("/positions");
             if (positions != null) {
-                // Build fingerprint → (key, existing position) map before clearing.
-                // This preserves strategy-specific keys (e.g. NKE_STRADDLE_CALL,
+                // Mark every in-memory position as unverified. Only positions confirmed
+                // by the broker will be re-verified; the rest are removed after the loop.
+                account.markAllUnverified();
+
+                // Build fingerprint → (key, existing position) map before any removals.
+                // Preserves strategy-specific keys (e.g. NKE_STRADDLE_CALL,
                 // BRZE_BULLPUTSPREAD_SHORT) across sync ticks. Without this, every sync
                 // collapses multi-leg positions into SYMBOL_CALL / SYMBOL_PUT, causing
                 // closeDirectionalLeg to fire on straddle and credit-spread legs.
@@ -291,8 +306,6 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                     posByFingerprint.put(fp, p);
                 }
 
-                account.getPositions().keySet().stream().toList().forEach(account::removePosition);
-                account.getOptionsPositions().keySet().stream().toList().forEach(account::removeOptionsPosition);
                 for (int i = 0; i < positions.length(); i++) {
                     JSONObject pos = positions.getJSONObject(i);
                     String symbol = pos.getString("symbol");
@@ -317,12 +330,53 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                                     new com.tradingapp.account.OptionsPosition(
                                             occ.underlying, occ.type, occ.strike, occ.expiry, signedQty, avgCost);
                             account.addOptionsPosition(posKey, optPos);
+                            account.markOptionVerified(posKey);
                         }
                     } else {
-                        account.addOrUpdatePosition(symbol, qty, avgCost, Position.PositionType.STOCK);
+                        // Replace position entirely with broker data — don't accumulate.
+                        account.setPositionFromBroker(symbol, qty, avgCost, Position.PositionType.STOCK);
                         account.updatePositionPrice(symbol, currentPrice);
+                        account.markStockVerified(symbol);
                     }
                 }
+
+                // Remove any positions that were in the DB but NOT confirmed by the broker.
+                // For stocks, also insert a compensating SELL so they don't resurrect on restart.
+                List<com.tradingapp.account.Position> staleStocks = account.getPositions().values().stream()
+                        .filter(p -> !p.isBrokerVerified())
+                        .collect(java.util.stream.Collectors.toList());
+                List<String> staleOptions = account.getOptionsPositions().keySet().stream()
+                        .filter(k -> !account.isOptionVerified(k))
+                        .collect(java.util.stream.Collectors.toList());
+
+                if (!staleStocks.isEmpty() || !staleOptions.isEmpty()) {
+                    LOG.warning("[BrokerSync] Positions in local DB not found in broker — removing: stocks="
+                            + staleStocks.stream().map(com.tradingapp.account.Position::getSymbol)
+                                         .collect(java.util.stream.Collectors.joining(", "))
+                            + " options=" + staleOptions);
+                }
+
+                for (com.tradingapp.account.Position stale : staleStocks) {
+                    account.removePosition(stale.getSymbol());
+                    // Insert a compensating SELL so restoreAccount won't reconstruct this position
+                    if (log != null) {
+                        TransactionRecord r = new TransactionRecord();
+                        r.setTimestamp(System.currentTimeMillis());
+                        r.setSymbol(stale.getSymbol());
+                        r.setAction(TransactionRecord.TransactionAction.SELL);
+                        r.setQuantity(stale.getQuantity());
+                        r.setPricePerUnit(stale.getAverageCost());
+                        r.setFeeCharged(0.0);
+                        r.setBalanceAfter(account.getBalance());
+                        r.setReason("Broker sync close: position not found in brokerage account");
+                        tryInsertLog(r);
+                    }
+                }
+                staleOptions.forEach(account::removeOptionsPosition);
+
+                account.setBrokerSyncComplete(true);
+                LOG.info("[BrokerSync] Verified " + account.getPositions().size()
+                        + " stock(s) and " + account.getOptionsPositions().size() + " option(s) against broker.");
             }
         } catch (Exception e) {
             System.err.println("Alpaca account sync failed: " + e.getMessage());

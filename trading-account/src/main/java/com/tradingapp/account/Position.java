@@ -9,6 +9,7 @@ public class Position {
     private double averageCost;
     private double currentPrice;
     private final PositionType type;
+    private volatile boolean brokerVerified = false;
 
     public Position(String symbol, int quantity, double averageCost, PositionType type) {
         this.symbol = symbol;
@@ -43,4 +44,6 @@ public class Position {
     public PositionType getType() { return type; }
 
     public void setCurrentPrice(double currentPrice) { this.currentPrice = currentPrice; }
+    public boolean isBrokerVerified() { return brokerVerified; }
+    public void setBrokerVerified(boolean brokerVerified) { this.brokerVerified = brokerVerified; }
 }
