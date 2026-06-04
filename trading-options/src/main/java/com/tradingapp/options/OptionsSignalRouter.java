@@ -60,6 +60,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private final Set<String> sessionStopLossed = new HashSet<>();
     private final Map<String, Long> lastMultiLegCloseMs = new HashMap<>();
     private final Map<String, Long> lastDirectionalCloseMs = new HashMap<>();
+    private final Map<String, Long> lastAnyCloseMs = new HashMap<>();
     private static final long MULTILEG_REENTRY_COOLDOWN_MS = 15 * 60 * 1000L; // 15 minutes
     private LocalDate stopLossResetDate;
     private BooleanSupplier uptrendSupplier;
@@ -195,6 +196,15 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                               || opts.containsKey(condorShortPutKey)  || opts.containsKey(condorLongPutKey);
 
         // ── 4. Entry ──────────────────────────────────────────────────────────────
+        // Per-symbol cooldown: block ALL new entries for 15 min after any position closes.
+        // Without this gate the per-posKey cooldown only covers the exact key that closed;
+        // a different strategy variant (e.g. HIGHDELTA_CALL after CALL closes) can re-enter
+        // immediately on the same tick using a different key with no cooldown recorded.
+        Long lastClose = lastAnyCloseMs.getOrDefault(symbol, 0L);
+        if (System.currentTimeMillis() - lastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
+            return;
+        }
+
         if (extremeBullish && !hasDirectional && !hasMultiLeg) {
             tryOpenHighDeltaScalp(symbol, price, K, expiry, T, sigma, true, signalStr, featureCsv);
 
@@ -275,6 +285,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         if (premiumStop) sessionStopLossed.add(posKey);
         lastDirectionalCloseMs.put(posKey, System.currentTimeMillis());
+        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
         optExec.closePosition(posKey, currentPremium, reason);
         researchCallback.accept(symbol + (isCall ? " CALL" : " PUT") + " closed: " + reason
                 + " prem=" + String.format("%.2f", currentPremium));
@@ -324,6 +335,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         if (premiumStop) sessionStopLossed.add(symbol + "_MULTILEG");
         lastMultiLegCloseMs.put(symbol, System.currentTimeMillis());
+        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
         optExec.closeBuyPair(callKey, putKey, callPrem, putPrem, reason);
         researchCallback.accept(String.format("%s %s closed: %s combined=%.2f",
                 symbol, strategyName, reason, totalCurrent));
@@ -372,6 +384,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         if (stopLoss) sessionStopLossed.add(symbol + "_" + strategyName);
         lastMultiLegCloseMs.put(symbol + "_" + strategyName, System.currentTimeMillis());
+        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
         optExec.closeCreditSpread(shortKey, longKey, shortPrem, longPrem, reason);
         researchCallback.accept(String.format("%s %s closed: %s credit=%.2f costToClose=%.2f",
                 symbol, strategyName, reason, creditReceived, netCostToClose));
@@ -653,6 +666,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             optExec.closeIronCondor(shortCallKey, longCallKey, shortPutKey, longPutKey,
                     0, 0, 0, 0, "Expiry <3 days");
             lastMultiLegCloseMs.put(symbol, System.currentTimeMillis());
+            lastAnyCloseMs.put(symbol, System.currentTimeMillis());
             researchCallback.accept(symbol + " IRON CONDOR closed: Expiry <3 days (no vol data)");
             return;
         }
@@ -681,6 +695,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         if (stopLoss) sessionStopLossed.add(symbol + "_IRONCONDOR");
         lastMultiLegCloseMs.put(symbol, System.currentTimeMillis());
+        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
         optExec.closeIronCondor(shortCallKey, longCallKey, shortPutKey, longPutKey,
                 scPrem, lcPrem, spPrem, lpPrem, reason);
         researchCallback.accept(String.format("%s IRON CONDOR closed: %s credit=%.2f costToClose=%.2f",
