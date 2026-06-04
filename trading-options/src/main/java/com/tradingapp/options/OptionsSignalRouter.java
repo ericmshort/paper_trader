@@ -368,7 +368,9 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                 : (isCall ? Math.max(0, price - longPos.getStrike())
                           : Math.max(0, longPos.getStrike() - price));
 
-        double creditReceived = shortPos.getPremiumPaid() * 100 * c;
+        // Net credit = short premium received minus long premium paid at entry.
+        // Using only the short premium inflates creditReceived and triggers profit target too early.
+        double creditReceived = (shortPos.getPremiumPaid() - longPos.getPremiumPaid()) * 100 * c;
         double netCostToClose = (shortPrem - longPrem) * 100 * c; // what we'd pay to buy back the spread
 
         boolean profitTarget = netCostToClose <= creditReceived * 0.50; // kept 50% of credit
@@ -683,8 +685,11 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         double spPrem = bsEngine.putPrice(price, spPos.getStrike(), RISK_FREE_RATE, T, sigma);
         double lpPrem = bsEngine.putPrice(price, lpPos.getStrike(), RISK_FREE_RATE, T, sigma);
 
-        // Credit received at entry: premiums of the two short legs
-        double creditReceived = (scPos.getPremiumPaid() + spPos.getPremiumPaid()) * 100 * c;
+        // Net credit received at entry = (short premiums) − (long premiums).
+        // Using gross short-only premiums inflates this ~4× relative to netCostToClose
+        // (which is already net), causing the profit target to fire on the first tick.
+        double creditReceived = (scPos.getPremiumPaid() - lcPos.getPremiumPaid()
+                               + spPos.getPremiumPaid() - lpPos.getPremiumPaid()) * 100 * c;
         // Current cost to close (net debit to buy back both spreads)
         double netCostToClose = ((scPrem - lcPrem) + (spPrem - lpPrem)) * 100 * c;
 
