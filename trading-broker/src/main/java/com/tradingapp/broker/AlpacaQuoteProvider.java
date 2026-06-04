@@ -19,11 +19,18 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class AlpacaQuoteProvider implements QuoteProvider {
 
     private final AppConfig config;
     private final HttpClient http;
+
+    // Cache options chains for 60 s — each symbol can be evaluated by multiple strategies
+    // per tick (iron condor alone calls resolvePremium 4×), causing burst 429s without caching.
+    private static final long CHAIN_CACHE_TTL_MS = 60_000;
+    private final Map<String, OptionsChain> chainCache = new ConcurrentHashMap<>();
+    private final Map<String, Long> chainCacheTime = new ConcurrentHashMap<>();
 
     public AlpacaQuoteProvider(AppConfig config) {
         this.config = config;
@@ -76,6 +83,12 @@ public class AlpacaQuoteProvider implements QuoteProvider {
 
     @Override
     public OptionsChain getOptionsChain(String symbol, LocalDate expiry) {
+        String cacheKey = symbol + "|" + expiry;
+        Long cachedAt = chainCacheTime.get(cacheKey);
+        if (cachedAt != null && System.currentTimeMillis() - cachedAt < CHAIN_CACHE_TTL_MS) {
+            return chainCache.get(cacheKey);
+        }
+
         Map<Double, OptionsQuote> calls = new HashMap<>();
         Map<Double, OptionsQuote> puts  = new HashMap<>();
         String expiryStr = expiry.format(DateTimeFormatter.ISO_LOCAL_DATE);
@@ -147,7 +160,10 @@ public class AlpacaQuoteProvider implements QuoteProvider {
             System.err.println("Alpaca options chain failed for " + symbol + ": " + e.getMessage());
         }
 
-        return new OptionsChain(calls, puts);
+        OptionsChain result = new OptionsChain(calls, puts);
+        chainCache.put(cacheKey, result);
+        chainCacheTime.put(cacheKey, System.currentTimeMillis());
+        return result;
     }
 
     @Override
