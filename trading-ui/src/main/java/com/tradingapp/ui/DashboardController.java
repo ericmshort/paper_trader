@@ -604,9 +604,7 @@ public class DashboardController implements Initializable {
         winsLabel.setText("Wins: " + wins);
         lossesLabel.setText("Losses: " + losses);
         winRateLabel.setText(String.format("Win Rate: %.1f%%", winRate));
-        // Derive realized P&L from actual Alpaca cash/positions rather than transaction log prices,
-        // which may have stale BS-computed buy prices that haven't been corrected yet.
-        double realizedPnl = totalPortfolio - Account.STARTING_BALANCE - (optTotalUnrealized + stkTotalUnrealized);
+        double realizedPnl = closedTrades.stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
         pnlButton.setText(String.format("P&L: $%,.2f", realizedPnl));
 
         equitySeries.getData().add(new XYChart.Data<>(tickCount++, totalPortfolio));
@@ -633,7 +631,7 @@ public class DashboardController implements Initializable {
         availableCashLabel.setText(String.format("Cash: $%,.2f", availableCash));
         optionsCashDeployedLabel.setText(String.format("Options Reserved: $%,.2f", computeOptionsCashDeployed()));
         double unrealizedPnl = computeStockUnrealizedPnL() + computeOptionsUnrealizedPnL();
-        double realizedPnl = account.getTotalRealizedPnL();
+        double realizedPnl = computeClosedTrades().stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
         pnlButton.setText(String.format("P&L: $%,.2f", realizedPnl));
         unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", unrealizedPnl));
 
@@ -919,7 +917,7 @@ public class DashboardController implements Initializable {
         table.setItems(FXCollections.observableArrayList(trades));
         VBox.setVgrow(table, Priority.ALWAYS);
 
-        double totalPnl = account.getTotalRealizedPnL();
+        double totalPnl = trades.stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
         String totalText = totalPnl >= 0
                 ? String.format("Total Realised P&L:  +$%,.2f", totalPnl)
                 : String.format("Total Realised P&L:  -$%,.2f", Math.abs(totalPnl));
