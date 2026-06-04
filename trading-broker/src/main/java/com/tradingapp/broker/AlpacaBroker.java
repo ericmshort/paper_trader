@@ -133,16 +133,12 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
     public String submitDirect(String occSymbol, int contracts, String side, String positionIntent) {
         try {
             LOG.info("Alpaca options close (direct): " + occSymbol + " side=" + side + " intent=" + positionIntent);
-            JSONObject body = new JSONObject()
-                    .put("symbol", occSymbol)
-                    .put("qty", contracts)
-                    .put("side", side)
-                    .put("type", "market")
-                    .put("time_in_force", "day");
-            if (positionIntent != null) {
-                body.put("position_intent", positionIntent);
-            }
-            HttpResponse<String> resp = post("/orders", body.toString());
+            // Use DELETE /positions/{symbol} rather than POST /orders with position_intent.
+            // Alpaca rejects sell_to_close/buy_to_close via the orders endpoint with 403
+            // ("account not eligible to trade uncovered option contracts") when it can't
+            // confirm the position on its side, treating the sell as a naked write.
+            // The DELETE endpoint closes an existing position directly and bypasses that check.
+            HttpResponse<String> resp = deletePosition(occSymbol);
             if (resp.statusCode() != 200 && resp.statusCode() != 201) {
                 System.err.println("Alpaca options direct close rejected (" + resp.statusCode() + "): " + resp.body());
                 return null;
@@ -580,6 +576,18 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
         } catch (Exception e) {
             return System.currentTimeMillis();
         }
+    }
+
+    private HttpResponse<String> deletePosition(String symbol) throws Exception {
+        String encoded = java.net.URLEncoder.encode(symbol, java.nio.charset.StandardCharsets.UTF_8);
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(config.getAlpacaBaseUrl() + "/positions/" + encoded))
+                .header("APCA-API-KEY-ID", config.getAlpacaApiKey())
+                .header("APCA-API-SECRET-KEY", config.getAlpacaApiSecret())
+                .DELETE()
+                .timeout(Duration.ofSeconds(15))
+                .build();
+        return http.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
     private HttpResponse<String> post(String path, String jsonBody) throws Exception {
