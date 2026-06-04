@@ -633,7 +633,7 @@ public class DashboardController implements Initializable {
         availableCashLabel.setText(String.format("Cash: $%,.2f", availableCash));
         optionsCashDeployedLabel.setText(String.format("Options Reserved: $%,.2f", computeOptionsCashDeployed()));
         double unrealizedPnl = computeStockUnrealizedPnL() + computeOptionsUnrealizedPnL();
-        double realizedPnl = totalPortfolio - Account.STARTING_BALANCE - unrealizedPnl;
+        double realizedPnl = account.getTotalRealizedPnL();
         pnlButton.setText(String.format("P&L: $%,.2f", realizedPnl));
         unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", unrealizedPnl));
 
@@ -656,7 +656,8 @@ public class DashboardController implements Initializable {
 
         Map<String, Integer> openShares = new HashMap<>();
         Map<String, Double> avgCost = new HashMap<>();
-        Map<String, double[]> openOptionPremiums = new HashMap<>(); // key -> {premium, contracts}
+        Map<String, double[]> openLongPremiums  = new HashMap<>(); // long opens: key -> {premium, contracts}
+        Map<String, double[]> openShortPremiums = new HashMap<>(); // short opens: key -> {premium, contracts}
         List<ClosedTradeRecord> closed = new ArrayList<>();
 
         for (TransactionRecord r : records) {
@@ -685,26 +686,12 @@ public class DashboardController implements Initializable {
                         openShares.put(r.getSymbol(), remaining);
                     }
                 }
-                case CALL_BUY -> accumulateOption(openOptionPremiums, r, "_CALL");
-                case PUT_BUY  -> accumulateOption(openOptionPremiums, r, "_PUT");
-                case CALL_SELL -> {
-                    double[] entry = openOptionPremiums.getOrDefault(r.getSymbol() + "_CALL",
-                            new double[]{r.getPricePerUnit(), r.getQuantity()});
-                    int sellQty = r.getQuantity();
-                    double pnl = (r.getPricePerUnit() - entry[0]) * 100 * sellQty - r.getFeeCharged();
-                    closed.add(new ClosedTradeRecord(r.getSymbol(), "Call Option", sellQty,
-                            entry[0], r.getPricePerUnit(), pnl, r.getTimestamp(), r.getGroupId()));
-                    reduceOptionPosition(openOptionPremiums, r.getSymbol() + "_CALL", entry, sellQty);
-                }
-                case PUT_SELL -> {
-                    double[] entry = openOptionPremiums.getOrDefault(r.getSymbol() + "_PUT",
-                            new double[]{r.getPricePerUnit(), r.getQuantity()});
-                    int sellQty = r.getQuantity();
-                    double pnl = (r.getPricePerUnit() - entry[0]) * 100 * sellQty - r.getFeeCharged();
-                    closed.add(new ClosedTradeRecord(r.getSymbol(), "Put Option", sellQty,
-                            entry[0], r.getPricePerUnit(), pnl, r.getTimestamp(), r.getGroupId()));
-                    reduceOptionPosition(openOptionPremiums, r.getSymbol() + "_PUT", entry, sellQty);
-                }
+                case CALL_BUY -> accumulateOption(openLongPremiums, r, "_CALL");
+                case PUT_BUY  -> accumulateOption(openLongPremiums, r, "_PUT");
+                case CALL_SELL -> processOptionSell(r, "_CALL", "Call Option",
+                        openLongPremiums, openShortPremiums, closed);
+                case PUT_SELL  -> processOptionSell(r, "_PUT",  "Put Option",
+                        openLongPremiums, openShortPremiums, closed);
             }
         }
 
@@ -721,6 +708,45 @@ public class DashboardController implements Initializable {
                 ? (existing[0] * existing[1] + effectivePremium * r.getQuantity()) / totalContracts
                 : effectivePremium;
         map.put(r.getSymbol() + suffix, new double[]{weightedAvg, totalContracts});
+    }
+
+    /**
+     * Handles a CALL_SELL or PUT_SELL record.
+     *
+     * Three distinct cases:
+     * 1. Opening a short leg: reason contains "(SHORT)" → store as a short credit entry, no closed record yet.
+     * 2. Closing a short leg: quantity < 0 → buying back a short; P&L = (openPrice - closePrice) × qty × 100.
+     * 3. Closing a long leg: quantity > 0, no "(SHORT)" in reason → selling a long; P&L = (closePrice - openPrice) × qty × 100.
+     */
+    private static void processOptionSell(TransactionRecord r, String suffix, String type,
+                                          Map<String, double[]> openLongPremiums,
+                                          Map<String, double[]> openShortPremiums,
+                                          List<ClosedTradeRecord> closed) {
+        String key = r.getSymbol() + suffix;
+        boolean isShortOpen = r.getReason() != null && r.getReason().contains("(SHORT)");
+
+        if (isShortOpen) {
+            // Opening a short leg — store credit received; no closed record yet
+            accumulateOption(openShortPremiums, r, suffix);
+            return;
+        }
+
+        if (r.getQuantity() < 0) {
+            // Buying back a short (quantity is negative in the log for buy-to-close)
+            int qty = Math.abs(r.getQuantity());
+            double[] entry = openShortPremiums.getOrDefault(key, new double[]{r.getPricePerUnit(), qty});
+            double pnl = (entry[0] - r.getPricePerUnit()) * 100.0 * qty - r.getFeeCharged();
+            closed.add(new ClosedTradeRecord(r.getSymbol(), type + " (Short)", qty,
+                    entry[0], r.getPricePerUnit(), pnl, r.getTimestamp(), r.getGroupId()));
+            reduceOptionPosition(openShortPremiums, key, entry, qty);
+        } else {
+            // Selling a long leg
+            double[] entry = openLongPremiums.getOrDefault(key, new double[]{r.getPricePerUnit(), r.getQuantity()});
+            double pnl = (r.getPricePerUnit() - entry[0]) * 100.0 * r.getQuantity() - r.getFeeCharged();
+            closed.add(new ClosedTradeRecord(r.getSymbol(), type, r.getQuantity(),
+                    entry[0], r.getPricePerUnit(), pnl, r.getTimestamp(), r.getGroupId()));
+            reduceOptionPosition(openLongPremiums, key, entry, r.getQuantity());
+        }
     }
 
     /**
@@ -893,10 +919,7 @@ public class DashboardController implements Initializable {
         table.setItems(FXCollections.observableArrayList(trades));
         VBox.setVgrow(table, Priority.ALWAYS);
 
-        double availableCash = account.getBalance();
-        double totalPortfolio = availableCash + computeStockHoldings() + computeOptionHoldings();
-        double unrealizedPnl = computeStockUnrealizedPnL() + computeOptionsUnrealizedPnL();
-        double totalPnl = totalPortfolio - Account.STARTING_BALANCE - unrealizedPnl;
+        double totalPnl = account.getTotalRealizedPnL();
         String totalText = totalPnl >= 0
                 ? String.format("Total Realised P&L:  +$%,.2f", totalPnl)
                 : String.format("Total Realised P&L:  -$%,.2f", Math.abs(totalPnl));
