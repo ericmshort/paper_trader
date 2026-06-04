@@ -202,6 +202,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         // immediately on the same tick using a different key with no cooldown recorded.
         Long lastClose = lastAnyCloseMs.getOrDefault(symbol, 0L);
         if (System.currentTimeMillis() - lastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
+            researchCallback.accept(symbol + " skip: options cooldown ("
+                    + ((System.currentTimeMillis() - lastClose) / 60000) + "m elapsed, need 15m)");
             return;
         }
 
@@ -419,6 +421,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (contracts < 1) return;
 
         optExec.buyCall(symbol, K, expiry, contracts, premium, signalStr, featureCsv);
+        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
         GreeksResult g = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, true);
         researchCallback.accept(symbol + " CALL K=" + K + " exp=" + expiry
                 + " x" + contracts + " prem=" + String.format("%.2f", premium) + " | " + g);
@@ -456,6 +459,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (contracts < 1) return;
 
         optExec.buyPut(symbol, K, expiry, contracts, premium, signalStr, featureCsv);
+        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
         GreeksResult g = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, false);
         researchCallback.accept(symbol + " PUT K=" + K + " exp=" + expiry
                 + " x" + contracts + " prem=" + String.format("%.2f", premium) + " | " + g);
@@ -510,6 +514,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             researchCallback.accept(symbol + " BULL PUT SPREAD did not open (legs rejected)");
             return;
         }
+        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
 
         GreeksResult sg = bsEngine.greeks(price, shortK, RISK_FREE_RATE, T, sigma, false);
         GreeksResult lg = bsEngine.greeks(price, longK,  RISK_FREE_RATE, T, sigma, false);
@@ -566,6 +571,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             researchCallback.accept(symbol + " BEAR CALL SPREAD did not open (legs rejected)");
             return;
         }
+        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
 
         GreeksResult sg = bsEngine.greeks(price, shortK, RISK_FREE_RATE, T, sigma, true);
         GreeksResult lg = bsEngine.greeks(price, longK,  RISK_FREE_RATE, T, sigma, true);
@@ -630,6 +636,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             researchCallback.accept(symbol + " IRON CONDOR did not open (legs rejected)");
             return;
         }
+        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
 
         GreeksResult scg = bsEngine.greeks(price, shortCallK, RISK_FREE_RATE, T, sigma, true);
         GreeksResult spg = bsEngine.greeks(price, shortPutK,  RISK_FREE_RATE, T, sigma, false);
@@ -746,6 +753,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             optExec.buyPutAs(posKey, symbol, deepK, nearExpiry, contracts, premium, signalStr, featureCsv);
         }
         if (!account.getOptionsPositions().containsKey(posKey)) return;
+        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
 
         GreeksResult g = bsEngine.greeks(price, deepK, RISK_FREE_RATE, nearT, sigma, isCall);
         researchCallback.accept(String.format("%s HIGH-DELTA %s K=%.0f (deep ITM) exp=%s x%d prem=%.2f | %s",
@@ -792,6 +800,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             optExec.buyPutAs(posKey, symbol, K, nearExpiry, contracts, premium, signalStr, featureCsv);
         }
         if (!account.getOptionsPositions().containsKey(posKey)) return;
+        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
 
         GreeksResult g = bsEngine.greeks(price, K, RISK_FREE_RATE, nearT, sigma, isCall);
         researchCallback.accept(String.format("%s NEAR-TERM %s K=%.0f exp=%s x%d prem=%.2f | %s",
@@ -843,6 +852,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             researchCallback.accept(symbol + " ZERO-DTE did not open (legs rejected)");
             return;
         }
+        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
 
         GreeksResult cg = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, true);
         GreeksResult pg = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, false);
@@ -906,6 +916,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             researchCallback.accept(symbol + " " + strategyName + " did not open (legs rejected)");
             return;
         }
+        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
 
         GreeksResult cg = bsEngine.greeks(price, callK, RISK_FREE_RATE, T, sigma, true);
         GreeksResult pg = bsEngine.greeks(price, putK,  RISK_FREE_RATE, T, sigma, false);
