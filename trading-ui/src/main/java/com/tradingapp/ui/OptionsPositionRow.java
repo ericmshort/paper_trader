@@ -9,8 +9,6 @@ public class OptionsPositionRow {
     private final int contracts;
     private final String cost;
     private final String currentValue;
-    private final String unrealizedPnl;
-    private final double pnlRaw;
 
     /**
      * @param costRaw          -premiumPaid * 100 * contracts (negative = paid, positive = collected)
@@ -31,11 +29,6 @@ public class OptionsPositionRow {
         this.currentValue = currentValueRaw >= 0
                 ? String.format("+$%.2f", currentValueRaw)
                 : String.format("-$%.2f", Math.abs(currentValueRaw));
-
-        this.pnlRaw = costRaw + currentValueRaw;
-        this.unrealizedPnl = pnlRaw >= 0
-                ? String.format("+$%.2f", pnlRaw)
-                : String.format("-$%.2f", Math.abs(pnlRaw));
     }
 
     public String getSymbol() { return symbol; }
@@ -45,6 +38,4 @@ public class OptionsPositionRow {
     public int getContracts() { return contracts; }
     public String getCost() { return cost; }
     public String getCurrentValue() { return currentValue; }
-    public String getUnrealizedPnl() { return unrealizedPnl; }
-    public double getPnlRaw() { return pnlRaw; }
 }

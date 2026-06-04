@@ -137,14 +137,13 @@
                             <TableColumn fx:id="optColStrike" text="Strike" prefWidth="90"/>
                             <TableColumn fx:id="optColExpiry" text="Expiry" prefWidth="110"/>
                             <TableColumn fx:id="optColContracts" text="Qty" prefWidth="50"/>
-                            <TableColumn fx:id="optColCost" text="Cost / Credit" prefWidth="120"/>
-                            <TableColumn fx:id="optColCurrentValue" text="Current Value" prefWidth="120"/>
-                            <TableColumn fx:id="optColUnrealizedPnl" text="P&amp;L" prefWidth="120"/>
+                            <TableColumn fx:id="optColCost" text="Cost / Credit" prefWidth="140"/>
+                            <TableColumn fx:id="optColCurrentValue" text="Current Value" prefWidth="140"/>
                         </columns>
                     </TableView>
                     <Separator/>
                     <Label fx:id="optionsTotalUnrealizedLabel"
-                           text="Total Unrealized P&amp;L: $0.00"
+                           text=""
                            style="-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #e0e0e0;"/>
                 </VBox>
             </content>

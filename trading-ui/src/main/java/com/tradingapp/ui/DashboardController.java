@@ -80,7 +80,6 @@ public class DashboardController implements Initializable {
     @FXML private TableColumn<OptionsPositionRow, Integer> optColContracts;
     @FXML private TableColumn<OptionsPositionRow, String> optColCost;
     @FXML private TableColumn<OptionsPositionRow, String> optColCurrentValue;
-    @FXML private TableColumn<OptionsPositionRow, String> optColUnrealizedPnl;
     @FXML private TableView<StockPositionRow> stockPositionsTable;
     @FXML private TableColumn<StockPositionRow, String> stkColSymbol;
     @FXML private TableColumn<StockPositionRow, Integer> stkColQuantity;
@@ -387,19 +386,6 @@ public class DashboardController implements Initializable {
         optColContracts.setCellValueFactory(new PropertyValueFactory<>("contracts"));
         optColCost.setCellValueFactory(new PropertyValueFactory<>("cost"));
         optColCurrentValue.setCellValueFactory(new PropertyValueFactory<>("currentValue"));
-        optColUnrealizedPnl.setCellValueFactory(new PropertyValueFactory<>("unrealizedPnl"));
-        optColUnrealizedPnl.setCellFactory(col -> new TableCell<>() {
-            @Override
-            protected void updateItem(String value, boolean empty) {
-                super.updateItem(value, empty);
-                if (empty || value == null) { setText(null); setStyle(""); return; }
-                setText(value);
-                OptionsPositionRow row = getTableView().getItems().get(getIndex());
-                setStyle(row.getPnlRaw() >= 0
-                        ? "-fx-text-fill: #00ff88; -fx-font-weight: bold;"
-                        : "-fx-text-fill: #ff4444; -fx-font-weight: bold;");
-            }
-        });
     }
 
     private void setupStockTableColumns() {
@@ -607,11 +593,7 @@ public class DashboardController implements Initializable {
         double optTotalUnrealized = populateOptionsTable();
         double stkTotalUnrealized = populateStockTable();
         unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", optTotalUnrealized + stkTotalUnrealized));
-        optionsTotalUnrealizedLabel.setText(String.format(
-                "Market Value: $%,.2f  |  P&L: %s$%,.2f",
-                optionHoldings,
-                optTotalUnrealized >= 0 ? "+" : "-",
-                Math.abs(optTotalUnrealized)));
+        optionsTotalUnrealizedLabel.setText(String.format("Market Value: $%,.2f", optionHoldings));
         stockTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", stkTotalUnrealized));
 
         List<ClosedTradeRecord> closedTrades = computeClosedTrades();
