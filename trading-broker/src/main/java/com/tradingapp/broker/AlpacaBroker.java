@@ -20,6 +20,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -301,7 +302,11 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                 double cash = alpacaAccount.optDouble("cash", account.getBalance());
                 account.setBalance(cash);
                 if (cash <= 100.0) account.setTradingHalted(true);
-                double bp = alpacaAccount.optDouble("buying_power", cash);
+                // Use options_buying_power when available — it reflects the remaining
+                // margin available for options orders, which is lower than buying_power
+                // when the account has open short legs consuming margin.
+                double bp = alpacaAccount.optDouble("options_buying_power",
+                        alpacaAccount.optDouble("buying_power", cash));
                 account.setBuyingPower(bp);
                 double lastEquity = alpacaAccount.optDouble("last_equity", 0.0);
                 if (lastEquity > 0) account.setLastEquity(lastEquity);
@@ -332,6 +337,10 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                     posByFingerprint.put(fp, p);
                 }
 
+                // Collect new (broker-discovered) options that have no existing local match.
+                // Processed after the loop so spread pairs can be detected before key assignment.
+                List<Object[]> newBrokerOptions = new ArrayList<>();
+
                 for (int i = 0; i < positions.length(); i++) {
                     JSONObject pos = positions.getJSONObject(i);
                     String symbol = pos.getString("symbol");
@@ -346,27 +355,92 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                         OccComponents occ = parseOcc(symbol);
                         if (occ != null) {
                             String fp = occ.underlying + "|" + occ.type + "|" + occ.strike;
-                            String posKey = keyByFingerprint.getOrDefault(fp, occ.underlying + "_" + occ.type);
+                            String existingKey = keyByFingerprint.get(fp);
                             // Reuse the existing position object to preserve negative contracts on short
                             // legs and the original premiumPaid. Fall back to a new object only for
                             // positions that appeared in Alpaca but weren't locally tracked.
                             com.tradingapp.account.OptionsPosition existing = posByFingerprint.get(fp);
-                            int signedQty = "short".equals(side) ? -qty : qty;
-                            com.tradingapp.account.OptionsPosition optPos = (existing != null) ? existing :
-                                    new com.tradingapp.account.OptionsPosition(
-                                            occ.underlying, occ.type, occ.strike, occ.expiry, signedQty, avgCost);
-                            // Pin the exact Alpaca OCC symbol so close orders bypass re-lookup.
-                            // Re-lookup finds the nearest contract by strike/expiry which may differ
-                            // from what we actually hold, causing a position_intent mismatch on close.
-                            optPos.setBrokerOccSymbol(symbol);
-                            account.addOptionsPosition(posKey, optPos);
-                            account.markOptionVerified(posKey);
+                            if (existingKey != null && existing != null) {
+                                // Matched: update broker OCC symbol and re-verify
+                                existing.setBrokerOccSymbol(symbol);
+                                account.addOptionsPosition(existingKey, existing);
+                                account.markOptionVerified(existingKey);
+                            } else {
+                                // New position: collect for spread-pair detection below
+                                int signedQty = "short".equals(side) ? -qty : qty;
+                                com.tradingapp.account.OptionsPosition optPos =
+                                        new com.tradingapp.account.OptionsPosition(
+                                                occ.underlying, occ.type, occ.strike, occ.expiry, signedQty, avgCost);
+                                // Pin the exact Alpaca OCC symbol so close orders bypass re-lookup.
+                                optPos.setBrokerOccSymbol(symbol);
+                                newBrokerOptions.add(new Object[]{occ, optPos});
+                            }
                         }
                     } else {
                         // Replace position entirely with broker data — don't accumulate.
                         account.setPositionFromBroker(symbol, qty, avgCost, Position.PositionType.STOCK);
                         account.updatePositionPrice(symbol, currentPrice);
                         account.markStockVerified(symbol);
+                    }
+                }
+
+                // Assign keys to new broker-discovered options. Group by underlying+type+expiry
+                // so that credit spread pairs (one short + one long) get strategy-specific keys
+                // (BEARCALLSPREAD_SHORT/LONG, BULLPUTSPREAD_SHORT/LONG) instead of the generic
+                // SYMBOL_CALL / SYMBOL_PUT key, which collapses both legs and causes
+                // closeDirectionalLeg to attempt single-leg closes that Alpaca rejects as uncovered.
+                Map<String, List<Object[]>> byTypeGroup = new LinkedHashMap<>();
+                for (Object[] entry : newBrokerOptions) {
+                    OccComponents occ = (OccComponents) entry[0];
+                    String gk = occ.underlying + "|" + occ.type + "|" + occ.expiry;
+                    byTypeGroup.computeIfAbsent(gk, k -> new ArrayList<>()).add(entry);
+                }
+                for (List<Object[]> group : byTypeGroup.values()) {
+                    OccComponents firstOcc = (OccComponents) group.get(0)[0];
+                    String underlying = firstOcc.underlying;
+                    String type = firstOcc.type;
+
+                    if (group.size() == 2) {
+                        com.tradingapp.account.OptionsPosition p0 =
+                                (com.tradingapp.account.OptionsPosition) group.get(0)[1];
+                        com.tradingapp.account.OptionsPosition p1 =
+                                (com.tradingapp.account.OptionsPosition) group.get(1)[1];
+                        com.tradingapp.account.OptionsPosition shortLeg = null, longLeg = null;
+                        if (p0.getContracts() < 0 && p1.getContracts() > 0) {
+                            shortLeg = p0; longLeg = p1;
+                        } else if (p0.getContracts() > 0 && p1.getContracts() < 0) {
+                            shortLeg = p1; longLeg = p0;
+                        }
+                        if (shortLeg != null) {
+                            // Credit spread: assign strategy-specific keys so closeCreditSpreadIfNeeded
+                            // handles them atomically rather than closeDirectionalLeg doing single-leg closes.
+                            String shortKey = "CALL".equals(type)
+                                    ? underlying + "_BEARCALLSPREAD_SHORT"
+                                    : underlying + "_BULLPUTSPREAD_SHORT";
+                            String longKey = "CALL".equals(type)
+                                    ? underlying + "_BEARCALLSPREAD_LONG"
+                                    : underlying + "_BULLPUTSPREAD_LONG";
+                            account.addOptionsPosition(shortKey, shortLeg);
+                            account.markOptionVerified(shortKey);
+                            account.addOptionsPosition(longKey, longLeg);
+                            account.markOptionVerified(longKey);
+                            LOG.info("[BrokerSync] Detected " + ("CALL".equals(type) ? "bear call" : "bull put")
+                                    + " spread for " + underlying + ": short K=" + shortLeg.getStrike()
+                                    + " long K=" + longLeg.getStrike());
+                            continue;
+                        }
+                    }
+                    // Standalone or non-credit-spread: use generic key with strike suffix for uniqueness
+                    for (Object[] entry : group) {
+                        com.tradingapp.account.OptionsPosition pos =
+                                (com.tradingapp.account.OptionsPosition) entry[1];
+                        OccComponents occ = (OccComponents) entry[0];
+                        String defaultKey = underlying + "_" + type;
+                        String key = account.getOptionsPositions().containsKey(defaultKey)
+                                ? defaultKey + "_K" + (int) occ.strike
+                                : defaultKey;
+                        account.addOptionsPosition(key, pos);
+                        account.markOptionVerified(key);
                     }
                 }
 
