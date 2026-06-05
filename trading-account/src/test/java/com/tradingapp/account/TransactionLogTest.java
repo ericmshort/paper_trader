@@ -61,7 +61,7 @@ public class TransactionLogTest {
                 100, 2.0, 0.05, 99800.0, "sell signal", "RSI=72"));
         log.insert(new TransactionRecord("TSLA", TransactionRecord.TransactionAction.SELL,
                 1, 0.02, 1.0, 99799.0, "sell signal", "MACD"));
-        assertEquals(1, log.countWins(), "Should count 1 win (revenue > fee)");
-        assertEquals(1, log.countLosses(), "Should count 1 loss (revenue <= fee)");
+        assertEquals(1, log.countWins(), "Should count 1 win (revenue >= fee)");
+        assertEquals(1, log.countLosses(), "Should count 1 loss (revenue < fee)");
     }
 }

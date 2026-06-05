@@ -597,8 +597,8 @@ public class DashboardController implements Initializable {
         stockTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", stkTotalUnrealized));
 
         List<ClosedTradeRecord> closedTrades = computeClosedTrades();
-        int wins = (int) closedTrades.stream().filter(t -> t.getPnlRaw() > 0).count();
-        int losses = (int) closedTrades.stream().filter(t -> t.getPnlRaw() <= 0).count();
+        int wins = (int) closedTrades.stream().filter(t -> t.getPnlRaw() >= 0).count();
+        int losses = (int) closedTrades.stream().filter(t -> t.getPnlRaw() < 0).count();
         int total = wins + losses;
         double winRate = total > 0 ? (wins * 100.0 / total) : 0.0;
         winsLabel.setText("Wins: " + wins);

@@ -299,7 +299,7 @@ public class TransactionLog {
     }
 
     public int countWins() {
-        String sql = "SELECT COUNT(*) FROM transactions WHERE action='SELL' AND (price_per_unit * quantity) > fee_charged";
+        String sql = "SELECT COUNT(*) FROM transactions WHERE action='SELL' AND (price_per_unit * quantity) >= fee_charged";
         try (Connection conn = connect();
              Statement stmt = conn.createStatement();
              ResultSet rs = stmt.executeQuery(sql)) {
@@ -318,7 +318,7 @@ public class TransactionLog {
     }
 
     public int countLosses() {
-        String sql = "SELECT COUNT(*) FROM transactions WHERE action='SELL' AND (price_per_unit * quantity) <= fee_charged";
+        String sql = "SELECT COUNT(*) FROM transactions WHERE action='SELL' AND (price_per_unit * quantity) < fee_charged";
         try (Connection conn = connect();
              Statement stmt = conn.createStatement();
              ResultSet rs = stmt.executeQuery(sql)) {
