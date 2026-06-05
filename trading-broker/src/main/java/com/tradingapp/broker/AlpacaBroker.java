@@ -669,6 +669,48 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
     }
 
     @Override
+    public String buyStock(String symbol, int shares) {
+        try {
+            JSONObject body = new JSONObject()
+                    .put("symbol", symbol)
+                    .put("qty", shares)
+                    .put("side", "buy")
+                    .put("type", "market")
+                    .put("time_in_force", "day");
+            HttpResponse<String> resp = post("/orders", body.toString());
+            if (resp.statusCode() == 200 || resp.statusCode() == 201) {
+                return new JSONObject(resp.body()).optString("id");
+            }
+            System.err.println("Alpaca buyStock rejected (" + resp.statusCode() + "): " + resp.body());
+            return null;
+        } catch (Exception e) {
+            System.err.println("Alpaca buyStock failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    @Override
+    public String sellStock(String symbol, int shares) {
+        try {
+            JSONObject body = new JSONObject()
+                    .put("symbol", symbol)
+                    .put("qty", shares)
+                    .put("side", "sell")
+                    .put("type", "market")
+                    .put("time_in_force", "day");
+            HttpResponse<String> resp = post("/orders", body.toString());
+            if (resp.statusCode() == 200 || resp.statusCode() == 201) {
+                return new JSONObject(resp.body()).optString("id");
+            }
+            System.err.println("Alpaca sellStock rejected (" + resp.statusCode() + "): " + resp.body());
+            return null;
+        } catch (Exception e) {
+            System.err.println("Alpaca sellStock failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    @Override
     public String getName() {
         return config.getBrokerType() == AppConfig.BrokerType.ALPACA_LIVE ? "Alpaca Live" : "Alpaca Paper";
     }

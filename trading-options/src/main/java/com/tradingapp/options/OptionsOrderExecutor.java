@@ -7,6 +7,7 @@ import com.tradingapp.account.TransactionRecord;
 import com.tradingapp.account.TransactionRecord.TransactionAction;
 
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -22,6 +23,10 @@ public class OptionsOrderExecutor {
     private final Account account;
     private final TransactionLog transactionLog;
     private final OptionsSubmitter submitter;
+
+    // Tracks stock legs of open covered-call positions (keyed by posKey)
+    private final Map<String, Integer> coveredCallStockShares = new HashMap<>();
+    private final Map<String, Double> coveredCallStockEntries = new HashMap<>();
 
     public OptionsOrderExecutor(Account account, TransactionLog transactionLog) {
         this(account, transactionLog, (OptionsSubmitter) null);
@@ -554,6 +559,131 @@ public class OptionsOrderExecutor {
             LOG.warning("Options close placed but failed to log: " + e.getMessage());
         }
     }
+
+    // ── Covered Call ──────────────────────────────────────────────────────────
+
+    /**
+     * Opens a covered call: buys stock shares and sells one OTM call per 100 shares.
+     * Position sizing ignores the standard 5% cap — sized by available capital / share price.
+     */
+    public void openCoveredCall(String posKey, String symbol, double stockPrice,
+                                double callStrike, LocalDate callExpiry, int maxContracts,
+                                double callPremium, String signalStr, String featureCsv) {
+        int contracts = Math.min(maxContracts, (int) (account.getBalance() / (stockPrice * 100)));
+        if (contracts < 1) return;
+        int stockShares = contracts * 100;
+        double stockCost = stockShares * stockPrice;
+        double callCredit = callPremium * 100 * contracts * (1 - OPTION_SELL_SLIPPAGE);
+        if (account.getBalance() < stockCost - callCredit) return;
+
+        String stockOrderId = null;
+        if (submitter != null) {
+            stockOrderId = submitter.buyStock(symbol, stockShares);
+            if (stockOrderId == null) {
+                LOG.warning("Covered call aborted: broker rejected stock buy for " + symbol);
+                return;
+            }
+        }
+
+        // Sell the call leg
+        String callOrderId = null;
+        if (submitter != null) {
+            callOrderId = submitter.submit(symbol, "CALL", callStrike, callExpiry, contracts, "sell", "sell_to_open");
+        }
+
+        account.setBalance(account.getBalance() - stockCost + callCredit);
+        account.addOrUpdatePosition(symbol, stockShares, stockPrice, com.tradingapp.account.Position.PositionType.STOCK);
+        OptionsPosition callPos = new OptionsPosition(symbol, "CALL", callStrike, callExpiry, -contracts, callPremium);
+        account.addOptionsPosition(posKey, callPos);
+
+        coveredCallStockShares.put(posKey, stockShares);
+        coveredCallStockEntries.put(posKey, stockPrice);
+
+        String groupId = UUID.randomUUID().toString();
+        String stockReason = "Covered call stock leg K=" + callStrike + " exp=" + callExpiry;
+        TransactionRecord stockRec = new TransactionRecord(symbol, TransactionAction.BUY,
+                stockShares, stockPrice, 0.0, account.getBalance(), stockReason, signalStr);
+        stockRec.setFeatures(featureCsv);
+        stockRec.setExternalId(stockOrderId);
+        stockRec.setGroupId(groupId);
+        try { transactionLog.insert(stockRec); } catch (Exception e) {
+            LOG.warning("Covered call stock buy log failed: " + e.getMessage());
+        }
+
+        String callReason = "Covered call CALL K=" + callStrike + " exp=" + callExpiry + " (SHORT)";
+        TransactionRecord callRec = new TransactionRecord(symbol, TransactionAction.CALL_SELL,
+                -contracts, callPremium, 0.0, account.getBalance(), callReason, signalStr);
+        callRec.setFeatures(featureCsv);
+        callRec.setExternalId(callOrderId);
+        callRec.setGroupId(groupId);
+        try { transactionLog.insert(callRec); } catch (Exception e) {
+            LOG.warning("Covered call option sell log failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Closes a covered call: buys back the short call and sells the underlying stock shares.
+     */
+    public void closeCoveredCall(String posKey, double callPremium, double stockPrice, String reason) {
+        OptionsPosition callPos = account.getOptionsPositions().get(posKey);
+        if (callPos == null) return;
+        String symbol = callPos.getSymbol();
+        int contracts = Math.abs(callPos.getContracts());
+        int stockShares = coveredCallStockShares.getOrDefault(posKey, contracts * 100);
+
+        double callCost = callPremium * 100 * contracts * (1 + OPTION_BUY_SLIPPAGE);
+        double stockProceeds = stockShares * stockPrice;
+        double callFee = contracts * CONTRACT_FEE;
+
+        String callOrderId = null;
+        if (submitter != null) {
+            callOrderId = submitter.submit(symbol, "CALL", callPos.getStrike(), callPos.getExpiry(),
+                    contracts, "buy", "buy_to_close");
+        }
+        String stockOrderId = null;
+        if (submitter != null) {
+            stockOrderId = submitter.sellStock(symbol, stockShares);
+        }
+
+        account.setBalance(account.getBalance() - callCost + stockProceeds - callFee);
+        account.removeOptionsPosition(posKey);
+        account.removePosition(symbol);
+
+        double callPnl = (callPos.getPremiumPaid() - callPremium) * 100 * contracts - callFee;
+        double stockEntry = coveredCallStockEntries.getOrDefault(posKey, callPos.getPremiumPaid());
+        double stockPnl = (stockPrice - stockEntry) * stockShares;
+        account.addRealizedPnL(callPnl + stockPnl);
+
+        coveredCallStockShares.remove(posKey);
+        coveredCallStockEntries.remove(posKey);
+
+        String groupId = UUID.randomUUID().toString();
+        TransactionRecord callRec = new TransactionRecord(symbol, TransactionAction.CALL_BUY,
+                contracts, callPremium, callFee, account.getBalance(), reason, "");
+        callRec.setExternalId(callOrderId);
+        callRec.setGroupId(groupId);
+        try { transactionLog.insert(callRec); } catch (Exception e) {
+            LOG.warning("Covered call close call-buy log failed: " + e.getMessage());
+        }
+
+        TransactionRecord stockRec = new TransactionRecord(symbol, TransactionAction.SELL,
+                stockShares, stockPrice, 0.0, account.getBalance(), reason, "");
+        stockRec.setExternalId(stockOrderId);
+        stockRec.setGroupId(groupId);
+        try { transactionLog.insert(stockRec); } catch (Exception e) {
+            LOG.warning("Covered call close stock-sell log failed: " + e.getMessage());
+        }
+    }
+
+    public double getStockEntryPrice(String posKey) {
+        return coveredCallStockEntries.getOrDefault(posKey, 0.0);
+    }
+
+    public boolean hasCoveredCallPosition(String posKey) {
+        return account.getOptionsPositions().containsKey(posKey);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
 
     private void logRecord(String symbol, TransactionAction action, int contracts, double premium,
                            double fee, String reason, String signalStr, String featureCsv,

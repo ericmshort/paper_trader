@@ -35,4 +35,21 @@ public interface OptionsSubmitter {
     default String submitMultiLeg(List<MultiLegOrder> legs, int contracts) {
         return null;
     }
+
+    /**
+     * Submit a market order to buy stock shares.
+     * Returns the broker order ID on success, or null if unsupported or rejected.
+     * The default returns null (paper-trading path uses direct account manipulation).
+     */
+    default String buyStock(String symbol, int shares) {
+        return null;
+    }
+
+    /**
+     * Submit a market order to sell stock shares.
+     * Returns the broker order ID on success, or null if unsupported or rejected.
+     */
+    default String sellStock(String symbol, int shares) {
+        return null;
+    }
 }

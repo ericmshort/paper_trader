@@ -64,9 +64,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private static final long MULTILEG_REENTRY_COOLDOWN_MS = 15 * 60 * 1000L; // 15 minutes
     private LocalDate stopLossResetDate;
     private BooleanSupplier uptrendSupplier;
+    private Set<String> enabledStrategies = new HashSet<>(); // empty = all enabled; populated from AppConfig at startup
 
     public void setUptrendSupplier(BooleanSupplier s) { this.uptrendSupplier = s; }
     public void setMaxPortfolioExposure(double fraction) { this.maxPortfolioExposure = fraction; }
+    public void setEnabledStrategies(Set<String> strategies) { this.enabledStrategies = new HashSet<>(strategies); }
+    private boolean isStrategyEnabled(String name) { return enabledStrategies.isEmpty() || enabledStrategies.contains(name); }
 
     public OptionsSignalRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
                                Account account, PriceHistory priceHistory,
@@ -91,6 +94,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         resetIfNewDay();
 
         // ── Position keys ─────────────────────────────────────────────────────────
+        String coveredCallKey   = symbol + "_COVEREDCALL";
         String callKey          = symbol + "_CALL";
         String putKey           = symbol + "_PUT";
         String straddleCallKey  = symbol + "_STRADDLE_CALL";
@@ -115,6 +119,9 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         Map<String, OptionsPosition> opts = account.getOptionsPositions();
 
         // ── 1. Close existing positions ───────────────────────────────────────────
+        // Covered call close runs unconditionally (bypasses IV surge guard below)
+        closeCoveredCallIfNeeded(opts, coveredCallKey, symbol, price, sellSignals);
+
         closeDirectionalLeg(opts, callKey,          true,  symbol, price, sellSignals, signalStr);
         closeDirectionalLeg(opts, putKey,           false, symbol, price, buySignals,  signalStr);
         closeDirectionalLeg(opts, highDeltaCallKey, true,  symbol, price, sellSignals, signalStr);
@@ -139,12 +146,6 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         List<Double> prices  = dailyPs.size() >= 2 ? dailyPs : priceHistory.getPrices(symbol);
         if (prices.size() < 2) return;
 
-        if (account.totalExposureFraction() >= maxPortfolioExposure) {
-            researchCallback.accept(symbol + " options skip: portfolio at capacity ("
-                    + String.format("%.0f%%", account.totalExposureFraction() * 100)
-                    + " deployed, limit " + String.format("%.0f%%", maxPortfolioExposure * 100) + ")");
-            return;
-        }
         if (account.isDailyLossHalted()) {
             researchCallback.accept(symbol + " options skip: daily loss limit active");
             return;
@@ -156,6 +157,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             return;
         }
 
+        // ── 3. IV surge guard ─────────────────────────────────────────────────────
         if (prices.size() >= IV_WINDOW + 2) {
             double recentVol = bsEngine.historicalVol(
                     prices.subList(prices.size() - IV_WINDOW, prices.size()));
@@ -167,12 +169,19 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             }
         }
 
+        if (account.totalExposureFraction() >= maxPortfolioExposure) {
+            researchCallback.accept(symbol + " options skip: portfolio at capacity ("
+                    + String.format("%.0f%%", account.totalExposureFraction() * 100)
+                    + " deployed, limit " + String.format("%.0f%%", maxPortfolioExposure * 100) + ")");
+            return;
+        }
+
         LocalDate expiry = bsEngine.selectExpiry(symbol);
         double K = bsEngine.roundStrike(price);
         double T = bsEngine.timeToExpiry(expiry);
         if (T <= 0) return;
 
-        // ── 3. Signal classification ──────────────────────────────────────────────
+        // ── 4. Signal classification ──────────────────────────────────────────────
         boolean extremeBullish   = buySignals >= 5 && sellSignals == 0;
         boolean veryStrongBull   = buySignals == 4 && sellSignals == 0;
         boolean purelyBullish    = buySignals == 3 && sellSignals == 0;
@@ -184,10 +193,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         boolean mixedStrong      = (buySignals >= 2 && sellSignals >= 1)
                                 || (sellSignals >= 2 && buySignals >= 1);
 
+        boolean hasCoveredCall = opts.containsKey(coveredCallKey);
         boolean hasDirectional = opts.containsKey(callKey)         || opts.containsKey(putKey)
                               || opts.containsKey(highDeltaCallKey) || opts.containsKey(highDeltaPutKey)
                               || opts.containsKey(nearTermCallKey)  || opts.containsKey(nearTermPutKey);
-        boolean hasMultiLeg    = opts.containsKey(straddleCallKey) || opts.containsKey(straddlePutKey)
+        boolean hasMultiLeg    = hasCoveredCall
+                              || opts.containsKey(straddleCallKey) || opts.containsKey(straddlePutKey)
                               || opts.containsKey(strangleCallKey)  || opts.containsKey(stranglePutKey)
                               || opts.containsKey(bullPutShortKey)  || opts.containsKey(bullPutLongKey)
                               || opts.containsKey(bearCallShortKey) || opts.containsKey(bearCallLongKey)
@@ -195,11 +206,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                               || opts.containsKey(condorShortCallKey) || opts.containsKey(condorLongCallKey)
                               || opts.containsKey(condorShortPutKey)  || opts.containsKey(condorLongPutKey);
 
-        // ── 4. Entry ──────────────────────────────────────────────────────────────
-        // Per-symbol cooldown: block ALL new entries for 15 min after any position closes.
-        // Without this gate the per-posKey cooldown only covers the exact key that closed;
-        // a different strategy variant (e.g. HIGHDELTA_CALL after CALL closes) can re-enter
-        // immediately on the same tick using a different key with no cooldown recorded.
+        // ── 6. Entry ──────────────────────────────────────────────────────────────
         Long lastClose = lastAnyCloseMs.getOrDefault(symbol, 0L);
         if (System.currentTimeMillis() - lastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
             researchCallback.accept(symbol + " skip: options cooldown ("
@@ -208,45 +215,64 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         }
 
         if (extremeBullish && !hasDirectional && !hasMultiLeg) {
-            tryOpenHighDeltaScalp(symbol, price, K, expiry, T, sigma, true, signalStr, featureCsv);
+            if (isStrategyEnabled("HIGH_DELTA_SCALP")) {
+                tryOpenHighDeltaScalp(symbol, price, K, expiry, T, sigma, true, signalStr, featureCsv);
+            } else if (isStrategyEnabled("COVERED_CALL")) {
+                tryOpenCoveredCall(symbol, price, sigma, signalStr, featureCsv);
+            }
 
         } else if (veryStrongBull && !hasDirectional && !hasMultiLeg) {
-            tryOpenMomentumNearTerm(symbol, price, true, sigma, signalStr, featureCsv);
+            if (isStrategyEnabled("MOMENTUM_NEAR_TERM")) {
+                tryOpenMomentumNearTerm(symbol, price, true, sigma, signalStr, featureCsv);
+            } else if (isStrategyEnabled("COVERED_CALL")) {
+                tryOpenCoveredCall(symbol, price, sigma, signalStr, featureCsv);
+            }
 
         } else if (purelyBullish && !hasDirectional && !hasMultiLeg) {
-            tryOpenLongCall(symbol, price, K, expiry, T, sigma, signalStr, featureCsv, callKey, opts);
+            if (isStrategyEnabled("LONG_CALL")) {
+                tryOpenLongCall(symbol, price, K, expiry, T, sigma, signalStr, featureCsv, callKey, opts);
+            } else if (isStrategyEnabled("COVERED_CALL")) {
+                tryOpenCoveredCall(symbol, price, sigma, signalStr, featureCsv);
+            }
 
         } else if (moderateBullish && !hasDirectional && !hasMultiLeg) {
-            tryOpenBullPutSpread(symbol, price, K, expiry, T, sigma, signalStr, featureCsv);
+            if (isStrategyEnabled("BULL_PUT_SPREAD")) {
+                tryOpenBullPutSpread(symbol, price, K, expiry, T, sigma, signalStr, featureCsv);
+            }
 
         } else if (extremeBearish && !hasDirectional && !hasMultiLeg) {
-            tryOpenHighDeltaScalp(symbol, price, K, expiry, T, sigma, false, signalStr, featureCsv);
+            if (isStrategyEnabled("HIGH_DELTA_SCALP")) {
+                tryOpenHighDeltaScalp(symbol, price, K, expiry, T, sigma, false, signalStr, featureCsv);
+            }
 
         } else if (veryStrongBear && !hasDirectional && !hasMultiLeg) {
-            tryOpenMomentumNearTerm(symbol, price, false, sigma, signalStr, featureCsv);
+            if (isStrategyEnabled("MOMENTUM_NEAR_TERM")) {
+                tryOpenMomentumNearTerm(symbol, price, false, sigma, signalStr, featureCsv);
+            }
 
         } else if (purelyBearish && !hasDirectional && !hasMultiLeg) {
-            tryOpenLongPut(symbol, price, K, expiry, T, sigma, signalStr, featureCsv, putKey, sellSignals, opts);
+            if (isStrategyEnabled("LONG_PUT")) {
+                tryOpenLongPut(symbol, price, K, expiry, T, sigma, signalStr, featureCsv, putKey, sellSignals, opts);
+            }
 
         } else if (moderateBearish && !hasDirectional && !hasMultiLeg) {
-            tryOpenBearCallSpread(symbol, price, K, expiry, T, sigma, signalStr, featureCsv);
+            if (isStrategyEnabled("BEAR_CALL_SPREAD")) {
+                tryOpenBearCallSpread(symbol, price, K, expiry, T, sigma, signalStr, featureCsv);
+            }
 
         } else if (mixedStrong && !hasDirectional && !hasMultiLeg) {
-            if (isZeroDteDay()) {
+            if (isZeroDteDay() && isStrategyEnabled("ZERO_DTE")) {
                 tryOpenZeroDTE(symbol, price, K, sigma, signalStr, featureCsv);
-            } else if (isLowRelativeIV(prices)) {
-                // Low IV: buy premium (straddle) to profit from an eventual breakout
+            } else if (isLowRelativeIV(prices) && isStrategyEnabled("STRADDLE")) {
                 tryOpenStraddleOrStrangle(symbol, price, K, expiry, T, sigma, prices, signalStr, featureCsv);
-            } else {
-                // Elevated IV: sell premium via iron condor — range-bound, theta decay works for us
+            } else if (isStrategyEnabled("IRON_CONDOR")) {
                 tryOpenIronCondor(symbol, price, K, expiry, T, sigma, signalStr, featureCsv,
                         condorShortCallKey, condorLongCallKey, condorShortPutKey, condorLongPutKey);
             }
 
         } else if (buySignals + sellSignals <= 1 && !hasDirectional && !hasMultiLeg
-                && !isZeroDteDay() && !isLowRelativeIV(prices)) {
-            // Flat market: no directional conviction, but IV is elevated relative to actual movement.
-            // The market is pricing in a move that isn't materialising — sell that premium via condor.
+                && !isZeroDteDay() && !isLowRelativeIV(prices)
+                && isStrategyEnabled("IRON_CONDOR")) {
             tryOpenIronCondor(symbol, price, K, expiry, T, sigma, signalStr, featureCsv,
                     condorShortCallKey, condorLongCallKey, condorShortPutKey, condorLongPutKey);
         }
@@ -928,6 +954,82 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         researchCallback.accept(String.format(
                 "%s %s K_call=%.0f K_put=%.0f exp=%s x%d combined=%.2f | call: %s | put: %s",
                 symbol, strategyName, callK, putK, expiry, contracts, combinedPremium, cg, pg));
+    }
+
+    // ── Covered Call entry/close ──────────────────────────────────────────────────
+
+    private static final double COVERED_CALL_OTM_OFFSET = 5.0; // strike dollars above current price
+
+    private void tryOpenCoveredCall(String symbol, double price, double sigma,
+                                    String signalStr, String featureCsv) {
+        String posKey = symbol + "_COVEREDCALL";
+        if (optExec.hasCoveredCallPosition(posKey)) return;
+
+        LocalDate expiry = bsEngine.selectExpiry(symbol); // ~35 DTE
+        double callStrike = bsEngine.roundStrike(price + COVERED_CALL_OTM_OFFSET);
+        double T = bsEngine.timeToExpiry(expiry);
+        if (T <= 0) return;
+
+        double callPremium = resolvePremium(symbol, callStrike, expiry, true, T, sigma, price);
+        if (callPremium < MIN_PREMIUM) {
+            researchCallback.accept(symbol + " COVERED CALL skip: call premium too low "
+                    + String.format("%.4f", callPremium));
+            return;
+        }
+
+        // Max contracts limited only by available capital (no 5% per-trade cap)
+        int maxContracts = (int) (account.getBalance() / (price * 100));
+        if (maxContracts < 1) {
+            researchCallback.accept(symbol + " COVERED CALL skip: insufficient capital (price="
+                    + String.format("%.2f", price) + " balance=" + String.format("%.2f", account.getBalance()) + ")");
+            return;
+        }
+
+        optExec.openCoveredCall(posKey, symbol, price, callStrike, expiry, maxContracts,
+                callPremium, signalStr, featureCsv);
+        if (!optExec.hasCoveredCallPosition(posKey)) return;
+        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
+
+        GreeksResult g = bsEngine.greeks(price, callStrike, RISK_FREE_RATE, T, sigma, true);
+        researchCallback.accept(String.format(
+                "%s COVERED CALL stock=%.2f callK=%.0f exp=%s prem=%.2f | %s",
+                symbol, price, callStrike, expiry, callPremium, g));
+    }
+
+    private void closeCoveredCallIfNeeded(Map<String, OptionsPosition> opts,
+                                          String posKey, String symbol,
+                                          double price, int sellSignals) {
+        OptionsPosition callPos = opts.get(posKey);
+        if (callPos == null) return;
+
+        double sigma = computeVol(symbol);
+        double T = bsEngine.timeToExpiry(callPos.getExpiry());
+        double currentCallPrem = (sigma > 0 && T > 0)
+                ? bsEngine.callPrice(price, callPos.getStrike(), RISK_FREE_RATE, T, sigma)
+                : 0.0;
+
+        // Profit target: call worth ≤25% of what we received (kept 75% of premium)
+        double entryPrem = Math.abs(callPos.getPremiumPaid());
+        boolean profitTarget = currentCallPrem > 0 && currentCallPrem <= entryPrem * 0.25;
+        // Stock stop: stock dropped >15% below our entry
+        double stockEntry = optExec.getStockEntryPrice(posKey);
+        boolean stockStop = stockEntry > 0 && price < stockEntry * 0.85;
+        // Expiry approaching
+        boolean nearExpiry = callPos.daysToExpiry() < 3;
+        // Signal reversal (bearish conviction)
+        boolean reversal = sellSignals >= 2;
+
+        if (!profitTarget && !stockStop && !nearExpiry && !reversal) return;
+
+        String reason;
+        if (stockStop)         reason = String.format("Stock stop-loss: price=%.2f < 85%% of entry=%.2f", price, stockEntry);
+        else if (nearExpiry)   reason = "Expiry <3 days";
+        else if (profitTarget) reason = String.format("Profit target: callPrem=%.2f <= 25%% of entry=%.2f", currentCallPrem, entryPrem);
+        else                   reason = "Signal reversal: bearish";
+
+        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
+        optExec.closeCoveredCall(posKey, currentCallPrem, price, reason);
+        researchCallback.accept(String.format("%s COVERED CALL closed: %s", symbol, reason));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────────

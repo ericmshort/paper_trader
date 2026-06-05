@@ -5,7 +5,11 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.Properties;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 public class AppConfig {
 
@@ -24,6 +28,9 @@ public class AppConfig {
     private boolean avoidOvernightHolds = true;
     private boolean marketRegimeFilterEnabled = true;
     private int earningsBlackoutDays = 3;
+    // Strategies enabled for live trading. Defaults to conservative set.
+    private Set<String> enabledStrategies = new LinkedHashSet<>(
+            Arrays.asList("COVERED_CALL", "BULL_PUT_SPREAD"));
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
@@ -58,6 +65,12 @@ public class AppConfig {
                 config.earningsBlackoutDays = Integer.parseInt(
                         props.getProperty("risk.earnings_blackout_days", "3"));
             } catch (NumberFormatException ignored) {}
+            String strategiesRaw = props.getProperty("strategy.enabled", "");
+            if (!strategiesRaw.isBlank()) {
+                config.enabledStrategies = Arrays.stream(strategiesRaw.split(","))
+                        .map(String::strip).filter(s -> !s.isEmpty())
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
+            }
         } catch (IOException ignored) {}
         return config;
     }
@@ -75,6 +88,7 @@ public class AppConfig {
             props.setProperty("risk.avoid_overnight_holds", String.valueOf(avoidOvernightHolds));
             props.setProperty("risk.market_regime_filter", String.valueOf(marketRegimeFilterEnabled));
             props.setProperty("risk.earnings_blackout_days", String.valueOf(earningsBlackoutDays));
+            props.setProperty("strategy.enabled", String.join(",", enabledStrategies));
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
             }
@@ -109,6 +123,10 @@ public class AppConfig {
 
     public int getEarningsBlackoutDays() { return earningsBlackoutDays; }
     public void setEarningsBlackoutDays(int days) { this.earningsBlackoutDays = days; }
+
+    public Set<String> getEnabledStrategies() { return enabledStrategies; }
+    public void setEnabledStrategies(Set<String> strategies) { this.enabledStrategies = new LinkedHashSet<>(strategies); }
+    public boolean isStrategyEnabled(String name) { return enabledStrategies.contains(name); }
 
     public boolean isAlpacaBroker() {
         return brokerType == BrokerType.ALPACA_PAPER || brokerType == BrokerType.ALPACA_LIVE;

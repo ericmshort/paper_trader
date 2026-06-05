@@ -110,6 +110,31 @@
 
     <Separator/>
 
+    <!-- Strategies -->
+    <Label text="Strategies"
+           style="-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #aaaaaa;"/>
+    <Label text="Select which strategies can open new positions. Disabled strategies still close existing positions."
+           style="-fx-font-size: 11px; -fx-text-fill: #888888;" wrapText="true" maxWidth="520"/>
+
+    <HBox spacing="20" alignment="CENTER_LEFT">
+        <CheckBox fx:id="strategyCoveredCall" text="Covered Call" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyBullPutSpread" text="Bull Put Spread" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyBearCallSpread" text="Bear Call Spread" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyIronCondor" text="Iron Condor" style="-fx-text-fill: #e0e0e0;"/>
+    </HBox>
+    <HBox spacing="20" alignment="CENTER_LEFT">
+        <CheckBox fx:id="strategyLongCall" text="Long Call" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyLongPut" text="Long Put" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyHighDeltaScalp" text="High-Delta Scalp" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyMomentumNearTerm" text="Momentum Near-Term" style="-fx-text-fill: #e0e0e0;"/>
+    </HBox>
+    <HBox spacing="20" alignment="CENTER_LEFT">
+        <CheckBox fx:id="strategyStraddle" text="Straddle / Strangle" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyZeroDte" text="Zero-DTE" style="-fx-text-fill: #e0e0e0;"/>
+    </HBox>
+
+    <Separator/>
+
     <!-- Actions -->
     <HBox spacing="12" alignment="CENTER_LEFT">
         <Button fx:id="testConnectionButton" text="Test Connection"

@@ -151,6 +151,7 @@ public class DashboardController implements Initializable {
                 }
                 if (optionsRouter != null) {
                     optionsRouter.setMaxPortfolioExposure(cfg.getMaxPortfolioExposurePct() / 100.0);
+                    optionsRouter.setEnabledStrategies(cfg.getEnabledStrategies());
                 }
                 Platform.runLater(() -> researchArea.appendText(
                         "\nRisk settings updated (effective next tick). Broker/quote changes take effect on next restart.\n"));
@@ -234,6 +235,7 @@ public class DashboardController implements Initializable {
         tradingLoop.setDailyLossLimitPct(appConfig.getDailyLossLimitPct() / 100.0);
         tradingLoop.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
         optionsRouter.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
+        optionsRouter.setEnabledStrategies(appConfig.getEnabledStrategies());
         tradingLoop.setAvoidOvernightHolds(appConfig.isAvoidOvernightHolds());
         tradingLoop.setMarketRegimeFilterEnabled(appConfig.isMarketRegimeFilterEnabled());
         tradingLoop.setEarningsCalendar(earningsCalendar);

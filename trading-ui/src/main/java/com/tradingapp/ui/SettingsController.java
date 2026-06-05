@@ -9,8 +9,10 @@ import javafx.scene.control.*;
 import javafx.scene.layout.HBox;
 
 import java.net.URL;
+import java.util.LinkedHashSet;
 import java.util.Optional;
 import java.util.ResourceBundle;
+import java.util.Set;
 import java.util.function.Consumer;
 
 public class SettingsController implements Initializable {
@@ -29,6 +31,16 @@ public class SettingsController implements Initializable {
     @FXML private CheckBox avoidOvernightCheck;
     @FXML private CheckBox marketRegimeFilterCheck;
     @FXML private TextField earningsBlackoutField;
+    @FXML private CheckBox strategyCoveredCall;
+    @FXML private CheckBox strategyBullPutSpread;
+    @FXML private CheckBox strategyBearCallSpread;
+    @FXML private CheckBox strategyIronCondor;
+    @FXML private CheckBox strategyLongCall;
+    @FXML private CheckBox strategyLongPut;
+    @FXML private CheckBox strategyHighDeltaScalp;
+    @FXML private CheckBox strategyMomentumNearTerm;
+    @FXML private CheckBox strategyStraddle;
+    @FXML private CheckBox strategyZeroDte;
     @FXML private Button testConnectionButton;
     @FXML private Label statusLabel;
 
@@ -72,6 +84,17 @@ public class SettingsController implements Initializable {
         avoidOvernightCheck.setSelected(cfg.isAvoidOvernightHolds());
         marketRegimeFilterCheck.setSelected(cfg.isMarketRegimeFilterEnabled());
         earningsBlackoutField.setText(String.valueOf(cfg.getEarningsBlackoutDays()));
+        Set<String> enabled = cfg.getEnabledStrategies();
+        strategyCoveredCall.setSelected(enabled.contains("COVERED_CALL"));
+        strategyBullPutSpread.setSelected(enabled.contains("BULL_PUT_SPREAD"));
+        strategyBearCallSpread.setSelected(enabled.contains("BEAR_CALL_SPREAD"));
+        strategyIronCondor.setSelected(enabled.contains("IRON_CONDOR"));
+        strategyLongCall.setSelected(enabled.contains("LONG_CALL"));
+        strategyLongPut.setSelected(enabled.contains("LONG_PUT"));
+        strategyHighDeltaScalp.setSelected(enabled.contains("HIGH_DELTA_SCALP"));
+        strategyMomentumNearTerm.setSelected(enabled.contains("MOMENTUM_NEAR_TERM"));
+        strategyStraddle.setSelected(enabled.contains("STRADDLE"));
+        strategyZeroDte.setSelected(enabled.contains("ZERO_DTE"));
         updateAlpacaFieldVisibility();
         updateQuoteNote();
     }
@@ -212,6 +235,18 @@ public class SettingsController implements Initializable {
             int days = Integer.parseInt(earningsBlackoutField.getText().strip());
             cfg.setEarningsBlackoutDays(Math.max(0, days));
         } catch (NumberFormatException ignored) {}
+        Set<String> strategies = new LinkedHashSet<>();
+        if (strategyCoveredCall.isSelected())    strategies.add("COVERED_CALL");
+        if (strategyBullPutSpread.isSelected())  strategies.add("BULL_PUT_SPREAD");
+        if (strategyBearCallSpread.isSelected()) strategies.add("BEAR_CALL_SPREAD");
+        if (strategyIronCondor.isSelected())     strategies.add("IRON_CONDOR");
+        if (strategyLongCall.isSelected())       strategies.add("LONG_CALL");
+        if (strategyLongPut.isSelected())        strategies.add("LONG_PUT");
+        if (strategyHighDeltaScalp.isSelected()) strategies.add("HIGH_DELTA_SCALP");
+        if (strategyMomentumNearTerm.isSelected()) strategies.add("MOMENTUM_NEAR_TERM");
+        if (strategyStraddle.isSelected())       strategies.add("STRADDLE");
+        if (strategyZeroDte.isSelected())        strategies.add("ZERO_DTE");
+        cfg.setEnabledStrategies(strategies);
         return cfg;
     }
 
