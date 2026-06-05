@@ -232,18 +232,22 @@ public class TransactionLog {
                         openShares.put(r.getSymbol(), remaining);
                     }
                 }
-                case CALL_BUY, PUT_BUY -> {
-                    String type = r.getAction() == TransactionRecord.TransactionAction.CALL_BUY ? "CALL" : "PUT";
-                    String key = r.getSymbol() + "_" + type;
-                    double strike = parseStrikeFromReason(r.getReason());
-                    LocalDate expiry = parseExpiryFromReason(r.getReason());
-                    if (expiry != null && !expiry.isBefore(LocalDate.now())) {
-                        openOptions.put(key, new OptionsPosition(
-                                r.getSymbol(), type, strike, expiry, r.getQuantity(), r.getPricePerUnit()));
+                case CALL_BUY -> restoreOptionOpen(r, "CALL", openOptions);
+                case PUT_BUY  -> restoreOptionOpen(r, "PUT",  openOptions);
+                case CALL_SELL -> {
+                    if (r.getReason() != null && r.getReason().contains("(SHORT)")) {
+                        restoreOptionOpen(r, "CALL", openOptions);
+                    } else {
+                        restoreOptionClose(r, "CALL", openOptions);
                     }
                 }
-                case CALL_SELL -> openOptions.remove(r.getSymbol() + "_CALL");
-                case PUT_SELL  -> openOptions.remove(r.getSymbol() + "_PUT");
+                case PUT_SELL -> {
+                    if (r.getReason() != null && r.getReason().contains("(SHORT)")) {
+                        restoreOptionOpen(r, "PUT", openOptions);
+                    } else {
+                        restoreOptionClose(r, "PUT", openOptions);
+                    }
+                }
             }
         }
 
@@ -259,6 +263,60 @@ public class TransactionLog {
         }
 
         account.addRealizedPnL(realizedPnL);
+    }
+
+    private void restoreOptionOpen(TransactionRecord r, String type,
+                                   Map<String, OptionsPosition> openOptions) {
+        String key = deriveOptionsPositionKey(r.getSymbol(), r.getReason(), type);
+        double strike = parseStrikeFromReason(r.getReason());
+        LocalDate expiry = parseExpiryFromReason(r.getReason());
+        // IC mleg opens omit exp= from reason; use a far-future placeholder — syncAccount()
+        // will reconcile with the broker and replace this with the real expiry.
+        if (expiry == null) expiry = LocalDate.now().plusYears(1);
+        boolean isShortOpen = r.getReason() != null && r.getReason().contains("(SHORT)");
+        int contracts = isShortOpen ? -r.getQuantity() : r.getQuantity();
+        openOptions.put(key, new OptionsPosition(r.getSymbol(), type, strike, expiry, contracts, r.getPricePerUnit()));
+    }
+
+    private void restoreOptionClose(TransactionRecord r, String type,
+                                    Map<String, OptionsPosition> openOptions) {
+        boolean isShortClose = r.getQuantity() < 0;
+        String key = findMatchingCloseKey(openOptions, r.getSymbol(), type, isShortClose);
+        if (key != null) openOptions.remove(key);
+    }
+
+    private String deriveOptionsPositionKey(String symbol, String reason, String type) {
+        if (reason == null) return symbol + "_" + type;
+        String upper = reason.toUpperCase();
+        boolean isShort = upper.contains("(SHORT)");
+        if (upper.contains("IRON CONDOR")) {
+            return symbol + (isShort
+                    ? ("CALL".equals(type) ? "_IRONCONDOR_SHORTCALL" : "_IRONCONDOR_SHORTPUT")
+                    : ("CALL".equals(type) ? "_IRONCONDOR_LONGCALL"  : "_IRONCONDOR_LONGPUT"));
+        } else if (upper.contains("BEAR CALL SPREAD")) {
+            return symbol + (isShort ? "_BEARCALLSPREAD_SHORT" : "_BEARCALLSPREAD_LONG");
+        } else if (upper.contains("BULL PUT SPREAD")) {
+            return symbol + (isShort ? "_BULLPUTSPREAD_SHORT" : "_BULLPUTSPREAD_LONG");
+        }
+        return symbol + "_" + type;
+    }
+
+    private String findMatchingCloseKey(Map<String, OptionsPosition> openOptions,
+                                        String symbol, String type, boolean isShortClose) {
+        java.util.List<String> candidates;
+        if ("CALL".equals(type)) {
+            candidates = isShortClose
+                    ? java.util.Arrays.asList(symbol + "_IRONCONDOR_SHORTCALL", symbol + "_BEARCALLSPREAD_SHORT", symbol + "_CALL")
+                    : java.util.Arrays.asList(symbol + "_IRONCONDOR_LONGCALL",  symbol + "_BEARCALLSPREAD_LONG",  symbol + "_CALL");
+        } else {
+            candidates = isShortClose
+                    ? java.util.Arrays.asList(symbol + "_IRONCONDOR_SHORTPUT", symbol + "_BULLPUTSPREAD_SHORT", symbol + "_PUT")
+                    : java.util.Arrays.asList(symbol + "_IRONCONDOR_LONGPUT",  symbol + "_BULLPUTSPREAD_LONG",  symbol + "_PUT");
+        }
+        for (String candidate : candidates) {
+            if (openOptions.containsKey(candidate)) return candidate;
+        }
+        return null;
     }
 
     private double parseStrikeFromReason(String reason) {

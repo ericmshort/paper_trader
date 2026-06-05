@@ -140,15 +140,87 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
             // confirm the position on its side, treating the sell as a naked write.
             // The DELETE endpoint closes an existing position directly and bypasses that check.
             HttpResponse<String> resp = deletePosition(occSymbol);
-            if (resp.statusCode() != 200 && resp.statusCode() != 201) {
-                System.err.println("Alpaca options direct close rejected (" + resp.statusCode() + "): " + resp.body());
-                return null;
+            if (resp.statusCode() == 200 || resp.statusCode() == 201) {
+                JSONObject order = new JSONObject(resp.body());
+                return order.optString("id");
             }
-            JSONObject order = new JSONObject(resp.body());
-            return order.optString("id");
+
+            // Alpaca requires a limit order when there is no available market quote.
+            // Fall back to a limit order priced at the current bid (sell) or ask (buy).
+            String body403 = resp.body();
+            if (resp.statusCode() == 403 && body403.contains("no available quote")) {
+                double limitPrice = fetchLimitPriceForClose(occSymbol, side);
+                if (limitPrice <= 0) {
+                    System.err.println("Alpaca options direct close rejected (" + resp.statusCode() + "): " + body403
+                            + " — could not determine limit price, giving up");
+                    return null;
+                }
+                LOG.info("Alpaca options close falling back to limit order: " + occSymbol
+                        + " side=" + side + " limit=" + limitPrice);
+                JSONObject limitBody = new JSONObject()
+                        .put("symbol", occSymbol)
+                        .put("qty", contracts)
+                        .put("side", side)
+                        .put("type", "limit")
+                        .put("time_in_force", "day")
+                        .put("limit_price", String.format("%.2f", limitPrice));
+                if (positionIntent != null) {
+                    limitBody.put("position_intent", positionIntent);
+                }
+                HttpResponse<String> limitResp = post("/orders", limitBody.toString());
+                if (limitResp.statusCode() != 200 && limitResp.statusCode() != 201) {
+                    System.err.println("Alpaca options limit close rejected (" + limitResp.statusCode() + "): " + limitResp.body());
+                    return null;
+                }
+                JSONObject order = new JSONObject(limitResp.body());
+                return order.optString("id");
+            }
+
+            System.err.println("Alpaca options direct close rejected (" + resp.statusCode() + "): " + body403);
+            return null;
         } catch (Exception e) {
             System.err.println("Alpaca options direct close failed: " + e.getMessage());
             return null;
+        }
+    }
+
+    /** Fetches the current bid (for sells) or ask (for buys) for an OCC symbol from the snapshot API. */
+    private double fetchLimitPriceForClose(String occSymbol, String side) {
+        try {
+            String url = config.getAlpacaDataUrl()
+                    + "/v1beta1/options/snapshots/" + java.net.URLEncoder.encode(occSymbol, java.nio.charset.StandardCharsets.UTF_8)
+                    + "?feed=indicative";
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("APCA-API-KEY-ID", config.getAlpacaApiKey())
+                    .header("APCA-API-SECRET-KEY", config.getAlpacaApiSecret())
+                    .GET()
+                    .timeout(Duration.ofSeconds(10))
+                    .build();
+            HttpResponse<String> resp = http.send(request, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                LOG.warning("Snapshot fetch failed for " + occSymbol + ": HTTP " + resp.statusCode());
+                return 0;
+            }
+            JSONObject body = new JSONObject(resp.body());
+            JSONObject snapshots = body.optJSONObject("snapshots");
+            if (snapshots == null || !snapshots.has(occSymbol)) return 0;
+            JSONObject quote = snapshots.getJSONObject(occSymbol).optJSONObject("latestQuote");
+            if (quote == null) return 0;
+            double bid = quote.optDouble("bp", 0.0);
+            double ask = quote.optDouble("ap", 0.0);
+            // Sell to close: use bid (aggressive — we want out). Buy to close: use ask.
+            boolean isSell = side.startsWith("sell");
+            double price = isSell ? bid : ask;
+            // If the spread is completely absent, use the other side or last trade as fallback.
+            if (price <= 0) {
+                JSONObject trade = snapshots.getJSONObject(occSymbol).optJSONObject("latestTrade");
+                price = trade != null ? trade.optDouble("p", 0.0) : 0.0;
+            }
+            return price;
+        } catch (Exception e) {
+            LOG.warning("Could not fetch snapshot for " + occSymbol + ": " + e.getMessage());
+            return 0;
         }
     }
 
@@ -541,8 +613,13 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                 if (qty <= 0 || fillPrice <= 0) continue;
 
                 if (log.existsByExternalId(orderId)) {
-                    // Correct any records logged at theoretical (BS) price instead of actual fill
-                    log.updateFillPrice(orderId, fillPrice);
+                    // Skip fill-price correction for multi-leg orders: the composite
+                    // filled_avg_price cannot be split correctly across individual leg records
+                    // (all legs share the same external_id), and overwriting all to the same
+                    // price corrupts per-leg P&L. Each leg's B-S price at submission is kept.
+                    if (!"mleg".equals(o.optString("order_class", ""))) {
+                        log.updateFillPrice(orderId, fillPrice);
+                    }
                     continue;
                 }
 

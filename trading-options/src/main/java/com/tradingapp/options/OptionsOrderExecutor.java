@@ -449,13 +449,13 @@ public class OptionsOrderExecutor {
                 account.addOptionsPosition(shortPutKey,  new OptionsPosition(symbol, "PUT",  shortPutK,  expiry, -contracts, shortPutPrem));
                 account.addOptionsPosition(longPutKey,   new OptionsPosition(symbol, "PUT",  longPutK,   expiry,  contracts, longPutPrem));
                 logRecord(symbol, TransactionAction.CALL_SELL, contracts, shortCallPrem, 0.0,
-                        "IRON CONDOR CALL K=" + shortCallK + " (SHORT)", signalStr, featureCsv, orderId, groupId);
+                        "IRON CONDOR CALL K=" + shortCallK + " exp=" + expiry + " (SHORT)", signalStr, featureCsv, orderId, groupId);
                 logRecord(symbol, TransactionAction.CALL_BUY,  contracts, longCallPrem,  0.0,
-                        "IRON CONDOR CALL K=" + longCallK  + " (LONG)",  signalStr, featureCsv, orderId, groupId);
+                        "IRON CONDOR CALL K=" + longCallK  + " exp=" + expiry + " (LONG)",  signalStr, featureCsv, orderId, groupId);
                 logRecord(symbol, TransactionAction.PUT_SELL,  contracts, shortPutPrem,  0.0,
-                        "IRON CONDOR PUT K="  + shortPutK  + " (SHORT)", signalStr, featureCsv, orderId, groupId);
+                        "IRON CONDOR PUT K="  + shortPutK  + " exp=" + expiry + " (SHORT)", signalStr, featureCsv, orderId, groupId);
                 logRecord(symbol, TransactionAction.PUT_BUY,   contracts, longPutPrem,   0.0,
-                        "IRON CONDOR PUT K="  + longPutK   + " (LONG)",  signalStr, featureCsv, orderId, groupId);
+                        "IRON CONDOR PUT K="  + longPutK   + " exp=" + expiry + " (LONG)",  signalStr, featureCsv, orderId, groupId);
                 return true;
             }
             LOG.warning(symbol + " iron condor rejected by broker; not attempting individual legs");

@@ -47,9 +47,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.ResourceBundle;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -657,6 +659,7 @@ public class DashboardController implements Initializable {
         Map<String, double[]> openLongPremiums  = new HashMap<>(); // long opens: key -> {premium, contracts}
         Map<String, double[]> openShortPremiums = new HashMap<>(); // short opens: key -> {premium, contracts}
         List<ClosedTradeRecord> closed = new ArrayList<>();
+        Set<String> processedGroupIds = new HashSet<>(); // tracks which mleg close groups have had P&L assigned
 
         for (TransactionRecord r : records) {
             switch (r.getAction()) {
@@ -687,9 +690,9 @@ public class DashboardController implements Initializable {
                 case CALL_BUY -> accumulateOption(openLongPremiums, r, "_CALL");
                 case PUT_BUY  -> accumulateOption(openLongPremiums, r, "_PUT");
                 case CALL_SELL -> processOptionSell(r, "_CALL", "Call Option",
-                        openLongPremiums, openShortPremiums, closed);
+                        openLongPremiums, openShortPremiums, closed, processedGroupIds);
                 case PUT_SELL  -> processOptionSell(r, "_PUT",  "Put Option",
-                        openLongPremiums, openShortPremiums, closed);
+                        openLongPremiums, openShortPremiums, closed, processedGroupIds);
             }
         }
 
@@ -715,11 +718,17 @@ public class DashboardController implements Initializable {
      * 1. Opening a short leg: reason contains "(SHORT)" → store as a short credit entry, no closed record yet.
      * 2. Closing a short leg: quantity < 0 → buying back a short; P&L = (openPrice - closePrice) × qty × 100.
      * 3. Closing a long leg: quantity > 0, no "(SHORT)" in reason → selling a long; P&L = (closePrice - openPrice) × qty × 100.
+     *
+     * For broker-submitted mleg closes (fee=0, groupId non-null), the per-leg prices may be corrupted by
+     * fill-price sync writing the composite debit/credit across all legs. When the close reason contains
+     * the original credit and close-cost, we use credit−cost as the net P&L for the first leg of each
+     * group and 0 for the remaining legs, so mergeMultiLegClosedTrades() produces the correct total.
      */
     private static void processOptionSell(TransactionRecord r, String suffix, String type,
                                           Map<String, double[]> openLongPremiums,
                                           Map<String, double[]> openShortPremiums,
-                                          List<ClosedTradeRecord> closed) {
+                                          List<ClosedTradeRecord> closed,
+                                          Set<String> processedGroupIds) {
         String key = r.getSymbol() + suffix;
         boolean isShortOpen = r.getReason() != null && r.getReason().contains("(SHORT)");
 
@@ -729,22 +738,72 @@ public class DashboardController implements Initializable {
             return;
         }
 
+        // For broker mleg closes, extract total P&L from reason to bypass corrupted per-leg prices.
+        // Only apply when fee=0 (broker-submitted) to avoid affecting paper-trading records.
+        String groupId = r.getGroupId();
+        double reasonPnl = parseReasonPnl(r.getReason());
+        boolean useReasonPnl = !Double.isNaN(reasonPnl) && groupId != null && r.getFeeCharged() == 0;
+
         if (r.getQuantity() < 0) {
             // Buying back a short (quantity is negative in the log for buy-to-close)
             int qty = Math.abs(r.getQuantity());
             double[] entry = openShortPremiums.getOrDefault(key, new double[]{r.getPricePerUnit(), qty});
-            double pnl = (entry[0] - r.getPricePerUnit()) * 100.0 * qty - r.getFeeCharged();
+            double pnl;
+            if (useReasonPnl && !processedGroupIds.contains(groupId)) {
+                pnl = reasonPnl; // total net P&L for this multi-leg group
+                processedGroupIds.add(groupId);
+            } else if (useReasonPnl) {
+                pnl = 0; // P&L already recorded for this group's first close record
+            } else {
+                pnl = (entry[0] - r.getPricePerUnit()) * 100.0 * qty - r.getFeeCharged();
+            }
             closed.add(new ClosedTradeRecord(r.getSymbol(), type + " (Short)", qty,
                     entry[0], r.getPricePerUnit(), pnl, r.getTimestamp(), r.getGroupId()));
             reduceOptionPosition(openShortPremiums, key, entry, qty);
         } else {
             // Selling a long leg
             double[] entry = openLongPremiums.getOrDefault(key, new double[]{r.getPricePerUnit(), r.getQuantity()});
-            double pnl = (r.getPricePerUnit() - entry[0]) * 100.0 * r.getQuantity() - r.getFeeCharged();
+            double pnl;
+            if (useReasonPnl) {
+                // P&L is captured on the first short-leg close for this multi-leg group
+                pnl = 0;
+            } else {
+                pnl = (r.getPricePerUnit() - entry[0]) * 100.0 * r.getQuantity() - r.getFeeCharged();
+            }
             closed.add(new ClosedTradeRecord(r.getSymbol(), type, r.getQuantity(),
                     entry[0], r.getPricePerUnit(), pnl, r.getTimestamp(), r.getGroupId()));
             reduceOptionPosition(openLongPremiums, key, entry, r.getQuantity());
         }
+    }
+
+    /**
+     * Parses the net P&L (credit − close cost) from a multi-leg strategy close reason.
+     * Handles both IC format ("close=X ... credit=Y") and spread format ("close cost=X ... credit=Y").
+     * Returns NaN if the reason is not a recognizable credit strategy close.
+     */
+    private static double parseReasonPnl(String reason) {
+        if (reason == null) return Double.NaN;
+        int creditIdx = reason.indexOf("credit=");
+        if (creditIdx < 0) return Double.NaN;
+        double credit = parseReasonDouble(reason, creditIdx + 7);
+        if (Double.isNaN(credit)) return Double.NaN;
+
+        double closeCost;
+        int costIdx = reason.indexOf("close cost=");
+        if (costIdx >= 0) {
+            closeCost = parseReasonDouble(reason, costIdx + 11);
+        } else {
+            int closeIdx = reason.indexOf("close=");
+            if (closeIdx < 0) return Double.NaN;
+            closeCost = parseReasonDouble(reason, closeIdx + 6);
+        }
+        return Double.isNaN(closeCost) ? Double.NaN : credit - closeCost;
+    }
+
+    private static double parseReasonDouble(String s, int start) {
+        int end = start;
+        while (end < s.length() && (Character.isDigit(s.charAt(end)) || s.charAt(end) == '.')) end++;
+        try { return Double.parseDouble(s.substring(start, end)); } catch (NumberFormatException e) { return Double.NaN; }
     }
 
     /**
