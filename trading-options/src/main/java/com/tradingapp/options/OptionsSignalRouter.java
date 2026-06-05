@@ -236,7 +236,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             }
 
         } else if (moderateBullish && !hasDirectional && !hasMultiLeg) {
-            if (isStrategyEnabled("BULL_PUT_SPREAD")) {
+            if (isStrategyEnabled("COVERED_CALL")) {
+                tryOpenCoveredCall(symbol, price, sigma, signalStr, featureCsv);
+            }
+            if (!opts.containsKey(coveredCallKey) && isStrategyEnabled("BULL_PUT_SPREAD")) {
                 tryOpenBullPutSpread(symbol, price, K, expiry, T, sigma, signalStr, featureCsv);
             }
 
