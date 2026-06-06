@@ -1,7 +1,9 @@
 package com.tradingapp.ui;
 
 import com.tradingapp.broker.AlpacaBroker;
+import com.tradingapp.broker.AlpacaWebSocketFreeProvider;
 import com.tradingapp.broker.AppConfig;
+import com.tradingapp.data.CandleHistory;
 import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
@@ -26,6 +28,8 @@ public class SettingsController implements Initializable {
     @FXML private TextField baseUrlField;
     @FXML private ComboBox<String> quoteProviderCombo;
     @FXML private Label quoteProviderNote;
+    @FXML private HBox testWsRow;
+    @FXML private Button testWsButton;
     @FXML private TextField dailyLossLimitField;
     @FXML private TextField maxPortfolioExposureField;
     @FXML private CheckBox marketRegimeFilterCheck;
@@ -119,6 +123,58 @@ public class SettingsController implements Initializable {
             default -> quoteProviderNote.setText(
                     "Yahoo Finance provides near real-time quotes for large-cap US equities.");
         }
+        boolean isWs = "Alpaca WebSocket Free".equals(quoteProviderCombo.getValue());
+        testWsRow.setVisible(isWs);
+        testWsRow.setManaged(isWs);
+    }
+
+    @FXML
+    private void onTestWebSocket() {
+        AppConfig test = buildConfigFromFields();
+        if (test.getAlpacaApiKey().isBlank() || test.getAlpacaApiSecret().isBlank()) {
+            setStatus("Enter API key and secret first.", false);
+            return;
+        }
+        setStatus("Connecting to Alpaca IEX WebSocket...", true);
+        testWsButton.setDisable(true);
+
+        Thread t = new Thread(() -> {
+            AlpacaWebSocketFreeProvider provider =
+                    new AlpacaWebSocketFreeProvider(test, new CandleHistory());
+            provider.start();
+
+            // Poll for authentication up to 10 seconds
+            long deadline = System.currentTimeMillis() + 10_000;
+            while (System.currentTimeMillis() < deadline && !provider.isConnected()) {
+                try { Thread.sleep(200); } catch (InterruptedException e) { break; }
+            }
+            boolean connected = provider.isConnected();
+
+            // If authenticated, wait up to 5 more seconds for a tick to confirm data flow
+            String tickInfo = "";
+            if (connected) {
+                long tickDeadline = System.currentTimeMillis() + 5_000;
+                while (System.currentTimeMillis() < tickDeadline
+                        && provider.getQuotes(java.util.List.of("SPY")).isEmpty()) {
+                    try { Thread.sleep(200); } catch (InterruptedException e) { break; }
+                }
+                boolean gotTick = !provider.getQuotes(java.util.List.of("SPY")).isEmpty();
+                tickInfo = gotTick ? " — receiving live ticks" : " — no ticks yet (market may be closed)";
+            }
+
+            provider.stop();
+            final String info = tickInfo;
+            Platform.runLater(() -> {
+                testWsButton.setDisable(false);
+                if (connected) {
+                    setStatus("WebSocket authenticated" + info + ".", true);
+                } else {
+                    setStatus("WebSocket connection failed. Check API key and secret.", false);
+                }
+            });
+        }, "alpaca-ws-test");
+        t.setDaemon(true);
+        t.start();
     }
 
     @FXML

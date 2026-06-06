@@ -61,6 +61,12 @@
            style="-fx-font-size: 11px; -fx-text-fill: #888888;"
            maxWidth="520"/>
 
+    <HBox fx:id="testWsRow" spacing="12" alignment="CENTER_LEFT">
+        <Button fx:id="testWsButton" text="Test WebSocket"
+                onAction="#onTestWebSocket"
+                style="-fx-background-color: #16213e; -fx-text-fill: #00ff88; -fx-border-color: #00ff88; -fx-border-radius: 4; -fx-cursor: hand;"/>
+    </HBox>
+
     <Separator/>
 
     <!-- Risk settings section -->
