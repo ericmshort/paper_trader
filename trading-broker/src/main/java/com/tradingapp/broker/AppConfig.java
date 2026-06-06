@@ -35,7 +35,7 @@ public class AppConfig {
     private int earningsBlackoutDays = 3;
     // Strategies enabled for live trading. Defaults to day-trading set.
     private Set<String> enabledStrategies = new LinkedHashSet<>(
-            Arrays.asList("HIGH_DELTA_SCALP", "ZERO_DTE", "LONG_CALL", "LONG_PUT"));
+            Arrays.asList("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM", "LONG_CALL", "LONG_PUT", "ZERO_DTE"));
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
