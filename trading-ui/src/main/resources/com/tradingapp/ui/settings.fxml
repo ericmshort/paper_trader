@@ -4,10 +4,15 @@
 <?import javafx.scene.control.*?>
 <?import javafx.geometry.Insets?>
 
-<VBox xmlns="http://javafx.com/javafx"
-      xmlns:fx="http://javafx.com/fxml"
-      fx:controller="com.tradingapp.ui.SettingsController"
-      style="-fx-background-color: #1a1a2e; -fx-padding: 20;"
+<ScrollPane xmlns="http://javafx.com/javafx"
+            xmlns:fx="http://javafx.com/fxml"
+            fx:controller="com.tradingapp.ui.SettingsController"
+            fitToWidth="true"
+            hbarPolicy="NEVER"
+            vbarPolicy="AS_NEEDED"
+            style="-fx-background: #1a1a2e; -fx-background-color: #1a1a2e;">
+
+<VBox style="-fx-background-color: #1a1a2e; -fx-padding: 20;"
       spacing="16">
 
     <Label text="Day Trader — Settings"
@@ -141,3 +146,4 @@
            wrapText="true" maxWidth="520"/>
 
 </VBox>
+</ScrollPane>
