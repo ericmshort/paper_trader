@@ -10,7 +10,7 @@
       style="-fx-background-color: #1a1a2e; -fx-padding: 20;"
       spacing="16">
 
-    <Label text="Broker &amp; Data Source Settings"
+    <Label text="Day Trader — Settings"
            style="-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #e0e0e0;"/>
     <Separator/>
 
@@ -86,17 +86,10 @@
     </HBox>
 
     <HBox spacing="12" alignment="CENTER_LEFT">
-        <Label text="Avoid Overnight:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
-        <CheckBox fx:id="avoidOvernightCheck"
-                  style="-fx-text-fill: #e0e0e0;"
-                  text="Close all equity positions at 15:45 ET"/>
-    </HBox>
-
-    <HBox spacing="12" alignment="CENTER_LEFT">
         <Label text="Market Regime:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
         <CheckBox fx:id="marketRegimeFilterCheck"
                   style="-fx-text-fill: #e0e0e0;"
-                  text="Block new stock buys when SPY is below its 50-day MA"/>
+                  text="Block new stock buys when SPY is below its 5-day MA (short-term trend)"/>
     </HBox>
 
     <HBox spacing="12" alignment="CENTER_LEFT">
@@ -117,20 +110,11 @@
            style="-fx-font-size: 11px; -fx-text-fill: #888888;" wrapText="true" maxWidth="520"/>
 
     <HBox spacing="20" alignment="CENTER_LEFT">
-        <CheckBox fx:id="strategyCoveredCall" text="Covered Call" style="-fx-text-fill: #e0e0e0;"/>
-        <CheckBox fx:id="strategyBullPutSpread" text="Bull Put Spread" style="-fx-text-fill: #e0e0e0;"/>
-        <CheckBox fx:id="strategyBearCallSpread" text="Bear Call Spread" style="-fx-text-fill: #e0e0e0;"/>
-        <CheckBox fx:id="strategyIronCondor" text="Iron Condor" style="-fx-text-fill: #e0e0e0;"/>
-    </HBox>
-    <HBox spacing="20" alignment="CENTER_LEFT">
-        <CheckBox fx:id="strategyLongCall" text="Long Call" style="-fx-text-fill: #e0e0e0;"/>
-        <CheckBox fx:id="strategyLongPut" text="Long Put" style="-fx-text-fill: #e0e0e0;"/>
         <CheckBox fx:id="strategyHighDeltaScalp" text="High-Delta Scalp" style="-fx-text-fill: #e0e0e0;"/>
         <CheckBox fx:id="strategyMomentumNearTerm" text="Momentum Near-Term" style="-fx-text-fill: #e0e0e0;"/>
-    </HBox>
-    <HBox spacing="20" alignment="CENTER_LEFT">
-        <CheckBox fx:id="strategyStraddle" text="Straddle / Strangle" style="-fx-text-fill: #e0e0e0;"/>
-        <CheckBox fx:id="strategyZeroDte" text="Zero-DTE" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyLongCall" text="Long Call" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyLongPut" text="Long Put" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyZeroDte" text="Zero-DTE (Fridays)" style="-fx-text-fill: #e0e0e0;"/>
     </HBox>
 
     <Separator/>

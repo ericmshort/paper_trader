@@ -371,6 +371,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             researchCallback.accept(symbol + (isCall ? " HIGH-DELTA CALL" : " HIGH-DELTA PUT") + " skip: re-entry cooldown");
             return;
         }
+        if (isCall && account.getPositions().containsKey(symbol)) {
+            researchCallback.accept(symbol + " HIGH-DELTA CALL skip: equity position already open");
+            return;
+        }
         if (!isCall && uptrendSupplier != null && uptrendSupplier.getAsBoolean()) {
             researchCallback.accept(symbol + " HIGH-DELTA PUT skip: bull market");
             return;
@@ -411,6 +415,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         Long ntLastClose = lastDirectionalCloseMs.get(posKey);
         if (ntLastClose != null && System.currentTimeMillis() - ntLastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
             researchCallback.accept(symbol + (isCall ? " NEARTERM CALL" : " NEARTERM PUT") + " skip: re-entry cooldown");
+            return;
+        }
+        if (isCall && account.getPositions().containsKey(symbol)) {
+            researchCallback.accept(symbol + " NEARTERM CALL skip: equity position already open");
             return;
         }
         if (!isCall && uptrendSupplier != null && uptrendSupplier.getAsBoolean()) {

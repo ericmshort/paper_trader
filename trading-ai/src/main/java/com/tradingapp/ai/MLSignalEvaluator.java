@@ -1,6 +1,7 @@
 package com.tradingapp.ai;
 
 import com.tradingapp.account.TransactionLog;
+import com.tradingapp.broker.AppConfig;
 import com.tradingapp.engine.SignalResult;
 import com.tradingapp.engine.SignalWeightEvaluator;
 
@@ -16,10 +17,11 @@ public class MLSignalEvaluator implements SignalWeightEvaluator {
 
     private static final Map<String, Integer> INDICATOR_INDEX = Map.of(
         "RSI", 0,
-        "MACD", 1,
-        "BollingerBands", 2,
-        "MACrossover", 3,
-        "VolumeSurge", 4
+        "BollingerBands", 1,
+        "VolumeSurge", 2,
+        "VWAP", 3,
+        "ORB", 4,
+        "Candlestick", 5
     );
 
     private final SignalWeights weights;
@@ -27,7 +29,7 @@ public class MLSignalEvaluator implements SignalWeightEvaluator {
 
     public MLSignalEvaluator(SignalWeights weights) {
         this.weights = weights;
-        this.weightsPath = Path.of(System.getProperty("user.home"), ".tradingapp", "signal-weights.json");
+        this.weightsPath = AppConfig.getDataDir().resolve("signal-weights.json");
     }
 
     public MLSignalEvaluator(SignalWeights weights, Path weightsPath) {

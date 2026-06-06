@@ -27,11 +27,17 @@ public class TradingLoop implements Runnable {
 
     static final double SIGNAL_THRESHOLD = 2.5;
     private double maxPortfolioExposure = 0.60;
-    private static final LocalTime MARKET_OPEN    = LocalTime.of(9, 30);
-    private static final LocalTime MARKET_CLOSE   = LocalTime.of(16, 0);
+    private static final LocalTime MARKET_OPEN      = LocalTime.of(9, 30);
+    private static final LocalTime MARKET_CLOSE     = LocalTime.of(16, 0);
     private static final LocalTime PRE_CLOSE_CUTOFF = LocalTime.of(15, 45);
     // No new entries during the first 5 minutes — the opening range is still forming
     private static final LocalTime ORB_FORMATION_END = LocalTime.of(9, 35);
+    // No new stock entries after 3:30 PM — forced liquidation at 3:45 makes late entries pointless churn
+    private static final LocalTime LAST_ENTRY_TIME = LocalTime.of(15, 30);
+    // Cap on simultaneous stock positions — day traders manage 3–5 names, not 30
+    private static final int MAX_CONCURRENT_STOCK_POSITIONS = 5;
+    // VIX above this level means panic/spreads blow out — skip new directional entries
+    private static final double VIX_BLOCK_THRESHOLD = 35.0;
     private static final ZoneId ET = ZoneId.of("America/New_York");
 
     private final QuoteProvider dataClient;
@@ -256,11 +262,12 @@ public class TradingLoop implements Runnable {
                     account.removePosition(symbol);
                     trailingStop.reset(symbol);
                     uiRefreshCallback.run();
-                } else if (weightedBuys >= SIGNAL_THRESHOLD && !hasPosition && !orbFormationPeriod) {
+                } else if (weightedBuys >= SIGNAL_THRESHOLD && !hasPosition
+                        && !orbFormationPeriod && !time.isAfter(LAST_ENTRY_TIME)) {
                     int daysToEarnings = earningsCalendar != null
                             ? earningsCalendar.daysUntilEarnings(symbol) : Integer.MAX_VALUE;
                     if (!isMarketInUptrend()) {
-                        researchCallback.accept(symbol + " BUY skipped: SPY below 50-day MA (bear regime)");
+                        researchCallback.accept(symbol + " BUY skipped: SPY below 5-day MA (short-term downtrend)");
                     } else if (daysToEarnings <= earningsBlackoutDays) {
                         researchCallback.accept(symbol + " BUY skipped: earnings in "
                                 + daysToEarnings + " day" + (daysToEarnings == 1 ? "" : "s"));
@@ -270,6 +277,12 @@ public class TradingLoop implements Runnable {
                                 + " deployed, limit " + String.format("%.0f%%", maxPortfolioExposure * 100) + ")");
                     } else if (account.isDailyLossHalted()) {
                         researchCallback.accept(symbol + " BUY skipped: daily loss limit active");
+                    } else if (account.getPositions().size() >= MAX_CONCURRENT_STOCK_POSITIONS) {
+                        researchCallback.accept(symbol + " BUY skipped: max concurrent positions ("
+                                + MAX_CONCURRENT_STOCK_POSITIONS + ") already open");
+                    } else if (isVixSpiking()) {
+                        researchCallback.accept(symbol + " BUY skipped: VIX spike above "
+                                + (int) VIX_BLOCK_THRESHOLD + " — widened spreads, panic conditions");
                     } else {
                         int shares = fees.maxShares(account.getBalance(), price);
                         if (shares > 0) {
@@ -309,10 +322,15 @@ public class TradingLoop implements Runnable {
     private boolean isMarketInUptrend() {
         if (!marketRegimeFilterEnabled) return true;
         List<Double> spyPrices = priceHistory.getDailyPrices("SPY");
-        if (spyPrices.size() < 50) return true; // insufficient data — don't block trades
-        double ma50 = spyPrices.subList(spyPrices.size() - 50, spyPrices.size())
+        if (spyPrices.size() < 5) return true; // insufficient data — don't block trades
+        double ma5 = spyPrices.subList(spyPrices.size() - 5, spyPrices.size())
                 .stream().mapToDouble(Double::doubleValue).average().orElse(0);
-        return spyPrices.get(spyPrices.size() - 1) >= ma50;
+        return spyPrices.get(spyPrices.size() - 1) >= ma5;
+    }
+
+    private boolean isVixSpiking() {
+        double vix = lastKnownPrices.getOrDefault("^VIX", lastKnownPrices.getOrDefault("VIX", 0.0));
+        return vix > 0 && vix > VIX_BLOCK_THRESHOLD;
     }
 
     private static final String[] FEATURE_NAMES = {"RSI", "BollingerBands", "VolumeSurge", "VWAP", "ORB", "Candlestick"};

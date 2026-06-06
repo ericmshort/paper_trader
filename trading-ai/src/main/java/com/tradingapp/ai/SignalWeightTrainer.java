@@ -22,7 +22,7 @@ public class SignalWeightTrainer {
 
         try {
             ArrayList<Attribute> attrs = new ArrayList<>();
-            String[] featureNames = {"RSI", "MACD", "Bollinger", "MACrossover", "VolumeSurge"};
+            String[] featureNames = {"RSI", "BollingerBands", "VolumeSurge", "VWAP", "ORB", "Candlestick"};
             for (String name : featureNames) {
                 attrs.add(new Attribute(name));
             }

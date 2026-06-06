@@ -28,18 +28,12 @@ public class SettingsController implements Initializable {
     @FXML private Label quoteProviderNote;
     @FXML private TextField dailyLossLimitField;
     @FXML private TextField maxPortfolioExposureField;
-    @FXML private CheckBox avoidOvernightCheck;
     @FXML private CheckBox marketRegimeFilterCheck;
     @FXML private TextField earningsBlackoutField;
-    @FXML private CheckBox strategyCoveredCall;
-    @FXML private CheckBox strategyBullPutSpread;
-    @FXML private CheckBox strategyBearCallSpread;
-    @FXML private CheckBox strategyIronCondor;
-    @FXML private CheckBox strategyLongCall;
-    @FXML private CheckBox strategyLongPut;
     @FXML private CheckBox strategyHighDeltaScalp;
     @FXML private CheckBox strategyMomentumNearTerm;
-    @FXML private CheckBox strategyStraddle;
+    @FXML private CheckBox strategyLongCall;
+    @FXML private CheckBox strategyLongPut;
     @FXML private CheckBox strategyZeroDte;
     @FXML private Button testConnectionButton;
     @FXML private Label statusLabel;
@@ -52,7 +46,7 @@ public class SettingsController implements Initializable {
     @Override
     public void initialize(URL location, ResourceBundle resources) {
         brokerTypeCombo.getItems().addAll("Simulated", "Alpaca Paper", "Alpaca Live");
-        quoteProviderCombo.getItems().addAll("Yahoo Finance", "Alpaca");
+        quoteProviderCombo.getItems().addAll("Yahoo Finance", "Alpaca", "Alpaca WebSocket Free");
 
         config = AppConfig.load();
         populateFromConfig(config);
@@ -77,23 +71,20 @@ public class SettingsController implements Initializable {
         brokerTypeCombo.setValue(brokerTypeLabel(cfg.getBrokerType()));
         apiKeyField.setText(cfg.getAlpacaApiKey());
         apiSecretField.setText(cfg.getAlpacaApiSecret());
-        quoteProviderCombo.setValue(cfg.getQuoteProviderType() == AppConfig.QuoteProviderType.ALPACA
-                ? "Alpaca" : "Yahoo Finance");
+        quoteProviderCombo.setValue(switch (cfg.getQuoteProviderType()) {
+            case ALPACA                -> "Alpaca";
+            case ALPACA_WEBSOCKET_FREE -> "Alpaca WebSocket Free";
+            default                    -> "Yahoo Finance";
+        });
         dailyLossLimitField.setText(String.valueOf(cfg.getDailyLossLimitPct()));
         maxPortfolioExposureField.setText(String.valueOf(cfg.getMaxPortfolioExposurePct()));
-        avoidOvernightCheck.setSelected(cfg.isAvoidOvernightHolds());
         marketRegimeFilterCheck.setSelected(cfg.isMarketRegimeFilterEnabled());
         earningsBlackoutField.setText(String.valueOf(cfg.getEarningsBlackoutDays()));
         Set<String> enabled = cfg.getEnabledStrategies();
-        strategyCoveredCall.setSelected(enabled.contains("COVERED_CALL"));
-        strategyBullPutSpread.setSelected(enabled.contains("BULL_PUT_SPREAD"));
-        strategyBearCallSpread.setSelected(enabled.contains("BEAR_CALL_SPREAD"));
-        strategyIronCondor.setSelected(enabled.contains("IRON_CONDOR"));
-        strategyLongCall.setSelected(enabled.contains("LONG_CALL"));
-        strategyLongPut.setSelected(enabled.contains("LONG_PUT"));
         strategyHighDeltaScalp.setSelected(enabled.contains("HIGH_DELTA_SCALP"));
         strategyMomentumNearTerm.setSelected(enabled.contains("MOMENTUM_NEAR_TERM"));
-        strategyStraddle.setSelected(enabled.contains("STRADDLE"));
+        strategyLongCall.setSelected(enabled.contains("LONG_CALL"));
+        strategyLongPut.setSelected(enabled.contains("LONG_PUT"));
         strategyZeroDte.setSelected(enabled.contains("ZERO_DTE"));
         updateAlpacaFieldVisibility();
         updateQuoteNote();
@@ -118,11 +109,15 @@ public class SettingsController implements Initializable {
     }
 
     private void updateQuoteNote() {
-        if ("Alpaca".equals(quoteProviderCombo.getValue())) {
-            quoteProviderNote.setText("Alpaca free tier uses IEX data (limited market coverage). "
-                    + "A paid Alpaca subscription is required for full SIP real-time quotes.");
-        } else {
-            quoteProviderNote.setText("Yahoo Finance provides near real-time quotes for large-cap US equities.");
+        switch (quoteProviderCombo.getValue()) {
+            case "Alpaca" -> quoteProviderNote.setText(
+                    "Alpaca REST — polls latest trade per symbol every 30s. "
+                    + "Requires Alpaca broker credentials.");
+            case "Alpaca WebSocket Free" -> quoteProviderNote.setText(
+                    "Alpaca WebSocket (IEX free tier) — real-time tick stream for 30 most-liquid symbols. "
+                    + "Builds 1-min/5-min candles for pattern detection. Requires Alpaca credentials.");
+            default -> quoteProviderNote.setText(
+                    "Yahoo Finance provides near real-time quotes for large-cap US equities.");
         }
     }
 
@@ -218,9 +213,11 @@ public class SettingsController implements Initializable {
         });
         cfg.setAlpacaApiKey(apiKeyField.getText().strip());
         cfg.setAlpacaApiSecret(apiSecretField.getText().strip());
-        cfg.setQuoteProviderType("Alpaca".equals(quoteProviderCombo.getValue())
-                ? AppConfig.QuoteProviderType.ALPACA
-                : AppConfig.QuoteProviderType.YAHOO);
+        cfg.setQuoteProviderType(switch (quoteProviderCombo.getValue()) {
+            case "Alpaca"                -> AppConfig.QuoteProviderType.ALPACA;
+            case "Alpaca WebSocket Free" -> AppConfig.QuoteProviderType.ALPACA_WEBSOCKET_FREE;
+            default                      -> AppConfig.QuoteProviderType.YAHOO;
+        });
         try {
             double limit = Double.parseDouble(dailyLossLimitField.getText().strip());
             cfg.setDailyLossLimitPct(Math.max(0, limit));
@@ -229,23 +226,18 @@ public class SettingsController implements Initializable {
             double exposure = Double.parseDouble(maxPortfolioExposureField.getText().strip());
             cfg.setMaxPortfolioExposurePct(Math.min(100, Math.max(1, exposure)));
         } catch (NumberFormatException ignored) {}
-        cfg.setAvoidOvernightHolds(avoidOvernightCheck.isSelected());
+        cfg.setAvoidOvernightHolds(true);
         cfg.setMarketRegimeFilterEnabled(marketRegimeFilterCheck.isSelected());
         try {
             int days = Integer.parseInt(earningsBlackoutField.getText().strip());
             cfg.setEarningsBlackoutDays(Math.max(0, days));
         } catch (NumberFormatException ignored) {}
         Set<String> strategies = new LinkedHashSet<>();
-        if (strategyCoveredCall.isSelected())    strategies.add("COVERED_CALL");
-        if (strategyBullPutSpread.isSelected())  strategies.add("BULL_PUT_SPREAD");
-        if (strategyBearCallSpread.isSelected()) strategies.add("BEAR_CALL_SPREAD");
-        if (strategyIronCondor.isSelected())     strategies.add("IRON_CONDOR");
-        if (strategyLongCall.isSelected())       strategies.add("LONG_CALL");
-        if (strategyLongPut.isSelected())        strategies.add("LONG_PUT");
-        if (strategyHighDeltaScalp.isSelected()) strategies.add("HIGH_DELTA_SCALP");
-        if (strategyMomentumNearTerm.isSelected()) strategies.add("MOMENTUM_NEAR_TERM");
-        if (strategyStraddle.isSelected())       strategies.add("STRADDLE");
-        if (strategyZeroDte.isSelected())        strategies.add("ZERO_DTE");
+        if (strategyHighDeltaScalp.isSelected())   strategies.add("HIGH_DELTA_SCALP");
+        if (strategyMomentumNearTerm.isSelected())  strategies.add("MOMENTUM_NEAR_TERM");
+        if (strategyLongCall.isSelected())          strategies.add("LONG_CALL");
+        if (strategyLongPut.isSelected())           strategies.add("LONG_PUT");
+        if (strategyZeroDte.isSelected())           strategies.add("ZERO_DTE");
         cfg.setEnabledStrategies(strategies);
         return cfg;
     }

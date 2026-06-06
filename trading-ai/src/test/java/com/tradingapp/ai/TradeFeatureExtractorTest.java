@@ -21,7 +21,7 @@ class TradeFeatureExtractorTest {
 
         TransactionRecord buy1 = new TransactionRecord("AAPL", TransactionRecord.TransactionAction.BUY,
                 10, 100.0, 0.0, 9000.0, "signals", "BUY");
-        buy1.setFeatures("45.0,0.5,102.0,2.0,1.5");
+        buy1.setFeatures("45.0,0.5,1.5,0.0,0.0,0.0");
         log.insert(buy1);
 
         TransactionRecord sell1 = new TransactionRecord("AAPL", TransactionRecord.TransactionAction.SELL,
@@ -30,7 +30,7 @@ class TradeFeatureExtractorTest {
 
         TransactionRecord buy2 = new TransactionRecord("MSFT", TransactionRecord.TransactionAction.BUY,
                 5, 200.0, 0.0, 8000.0, "signals", "BUY");
-        buy2.setFeatures("35.0,0.2,198.0,1.0,2.0");
+        buy2.setFeatures("35.0,0.2,2.0,0.0,0.0,0.0");
         log.insert(buy2);
 
         TransactionRecord sell2 = new TransactionRecord("MSFT", TransactionRecord.TransactionAction.SELL,

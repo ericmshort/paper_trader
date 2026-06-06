@@ -17,7 +17,7 @@ public class TradingApp extends Application {
                 getClass().getResource("/com/tradingapp/ui/dashboard.fxml"));
         Scene scene = new Scene(loader.load(), 1200, 800);
         controller = loader.getController();
-        primaryStage.setTitle("TradingApp — Paper Trading Simulator");
+        primaryStage.setTitle("Day Trader");
         primaryStage.setScene(scene);
         primaryStage.show();
     }

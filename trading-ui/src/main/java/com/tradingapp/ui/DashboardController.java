@@ -127,7 +127,8 @@ public class DashboardController implements Initializable {
     @Override
     public void initialize(URL location, ResourceBundle resources) {
         account = new Account();
-        transactionLog = new TransactionLog();
+        transactionLog = new TransactionLog(
+                AppConfig.getDataDir().resolve("transactions.db").toString());
         transactionLog.restoreAccount(account);
         priceHistory = new PriceHistory();
         candleHistory = new CandleHistory();
