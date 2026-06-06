@@ -116,12 +116,13 @@ public class SettingsController implements Initializable {
         switch (quoteProviderCombo.getValue()) {
             case "Alpaca" -> quoteProviderNote.setText(
                     "Alpaca REST — polls latest trade per symbol every 30s. "
-                    + "Requires Alpaca broker credentials.");
+                    + "Signals evaluated on each poll. Requires Alpaca broker credentials.");
             case "Alpaca WebSocket Free" -> quoteProviderNote.setText(
                     "Alpaca WebSocket (IEX free tier) — real-time tick stream for 30 most-liquid symbols. "
-                    + "Builds 1-min/5-min candles for pattern detection. Requires Alpaca credentials.");
+                    + "Prices update continuously; signals evaluated every 5s. "
+                    + "Builds 1-min/5-min candles for ORB, VWAP, and candlestick patterns. Requires Alpaca credentials.");
             default -> quoteProviderNote.setText(
-                    "Yahoo Finance provides near real-time quotes for large-cap US equities.");
+                    "Yahoo Finance — near real-time quotes for large-cap US equities. Signals evaluated every 5s.");
         }
         boolean isWs = "Alpaca WebSocket Free".equals(quoteProviderCombo.getValue());
         testWsRow.setVisible(isWs);
