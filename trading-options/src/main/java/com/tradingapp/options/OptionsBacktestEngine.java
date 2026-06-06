@@ -23,7 +23,6 @@ public class OptionsBacktestEngine {
     static final double PROFIT_TARGET_MULTIPLIER = 2.0;
     static final double SPREAD_PROFIT_TARGET_FRACTION = 0.75;
     static final double CONTRACT_FEE = 0.65;
-    static final double EQUITY_STOP_FRACTION = 0.85; // 15% stop for covered-call stock leg
 
     private final IndicatorEngine indicatorEngine;
     private final BlackScholesEngine bsEngine;
@@ -228,14 +227,10 @@ public class OptionsBacktestEngine {
 
     boolean entryCondition(OptionsStrategy strategy, int buys, int sells) {
         return switch (strategy) {
-            case LONG_CALL, BULL_CALL_SPREAD, COVERED_CALL, BUTTERFLY -> buys >= 2;
-            case LONG_PUT, BEAR_PUT_SPREAD -> sells >= 2;
-            case STRADDLE, STRANGLE, ZERO_DTE -> buys >= 2 || sells >= 2;
-            case BULL_PUT_SPREAD -> buys >= 2 && sells == 0;
-            case BEAR_CALL_SPREAD -> sells >= 2 && buys == 0;
+            case LONG_CALL -> buys >= 2;
+            case LONG_PUT -> sells >= 2;
+            case ZERO_DTE -> buys >= 2 || sells >= 2;
             case HIGH_DELTA_SCALP, MOMENTUM_NEAR_TERM -> buys >= 3 || sells >= 3;
-            // Iron condor profits from range-bound action: need genuine mixed signals
-            case IRON_CONDOR -> (buys >= 2 && sells >= 1) || (sells >= 2 && buys >= 1);
         };
     }
 
@@ -251,24 +246,7 @@ public class OptionsBacktestEngine {
         long daysLeft = ChronoUnit.DAYS.between(currentDate, pos.expiry);
         if (daysLeft < 3) return true;
 
-        // Credit strategies use inverted exit logic (totalCostBasis < 0 = credit received)
-        if (pos.totalCostBasis < 0) {
-            double creditReceived = -pos.totalCostBasis;
-            double costToClose    = -currentValue;
-            if (costToClose <= creditReceived * 0.50) return true; // kept 50% of max profit
-            if (costToClose >= creditReceived * 2.0)  return true; // stop: paying 2x what we received
-            return switch (strategy) {
-                case BULL_PUT_SPREAD  -> sells >= 2;
-                case BEAR_CALL_SPREAD -> buys  >= 2;
-                // Exit iron condor when a strong directional move threatens the short strikes
-                case IRON_CONDOR      -> buys >= 3 || sells >= 3;
-                default -> false;
-            };
-        }
-
-        if (strategy == OptionsStrategy.COVERED_CALL) {
-            if (currentPrice < pos.stockEntryPrice * EQUITY_STOP_FRACTION) return true;
-        } else if (pos.totalCostBasis > 0 && currentValue <= pos.totalCostBasis * STOP_LOSS_FRACTION) {
+        if (pos.totalCostBasis > 0 && currentValue <= pos.totalCostBasis * STOP_LOSS_FRACTION) {
             return true;
         }
 
@@ -277,11 +255,9 @@ public class OptionsBacktestEngine {
                 && (currentValue - pos.totalCostBasis) >= pos.maxProfit * SPREAD_PROFIT_TARGET_FRACTION) return true;
 
         return switch (strategy) {
-            case LONG_CALL, BULL_CALL_SPREAD, COVERED_CALL, BUTTERFLY,
-                 HIGH_DELTA_SCALP, MOMENTUM_NEAR_TERM -> sells >= 2;
-            case LONG_PUT, BEAR_PUT_SPREAD -> buys >= 2;
-            case STRADDLE, STRANGLE, ZERO_DTE -> false;
-            case BULL_PUT_SPREAD, BEAR_CALL_SPREAD, IRON_CONDOR -> false; // handled above in credit path
+            case LONG_CALL, HIGH_DELTA_SCALP, MOMENTUM_NEAR_TERM -> sells >= 2;
+            case LONG_PUT -> buys >= 2;
+            case ZERO_DTE -> false;
         };
     }
 
@@ -304,91 +280,6 @@ public class OptionsBacktestEngine {
                 if (c < 1) yield null;
                 yield new OpenPosition(symbol, expiry, c, sigma, prem * 100 * c, 0,
                         List.of(new Leg(K, false, true, 1)), 0, 0);
-            }
-            case BULL_CALL_SPREAD -> {
-                double netDebit = bsEngine.callPrice(price, K, RISK_FREE_RATE, T, sigma)
-                                - bsEngine.callPrice(price, K + SPREAD_WIDTH, RISK_FREE_RATE, T, sigma);
-                if (netDebit <= 0) yield null;
-                int c = contracts(cash, netDebit);
-                if (c < 1) yield null;
-                double costBasis = netDebit * 100 * c;
-                yield new OpenPosition(symbol, expiry, c, sigma, costBasis,
-                        SPREAD_WIDTH * 100 * c - costBasis,
-                        List.of(new Leg(K, true, true, 1),
-                                new Leg(K + SPREAD_WIDTH, true, false, 1)), 0, 0);
-            }
-            case BEAR_PUT_SPREAD -> {
-                double netDebit = bsEngine.putPrice(price, K, RISK_FREE_RATE, T, sigma)
-                               - bsEngine.putPrice(price, K - SPREAD_WIDTH, RISK_FREE_RATE, T, sigma);
-                if (netDebit <= 0) yield null;
-                int c = contracts(cash, netDebit);
-                if (c < 1) yield null;
-                double costBasis = netDebit * 100 * c;
-                yield new OpenPosition(symbol, expiry, c, sigma, costBasis,
-                        SPREAD_WIDTH * 100 * c - costBasis,
-                        List.of(new Leg(K, false, true, 1),
-                                new Leg(K - SPREAD_WIDTH, false, false, 1)), 0, 0);
-            }
-            case STRADDLE -> {
-                double netDebit = bsEngine.callPrice(price, K, RISK_FREE_RATE, T, sigma)
-                                + bsEngine.putPrice(price, K, RISK_FREE_RATE, T, sigma);
-                if (netDebit <= 0) yield null;
-                int c = contracts(cash, netDebit);
-                if (c < 1) yield null;
-                yield new OpenPosition(symbol, expiry, c, sigma, netDebit * 100 * c, 0,
-                        List.of(new Leg(K, true, true, 1), new Leg(K, false, true, 1)), 0, 0);
-            }
-            case STRANGLE -> {
-                double callK = K + SPREAD_WIDTH;
-                double putK = Math.max(SPREAD_WIDTH, K - SPREAD_WIDTH); // prevent non-positive strike
-                double netDebit = bsEngine.callPrice(price, callK, RISK_FREE_RATE, T, sigma)
-                                + bsEngine.putPrice(price, putK, RISK_FREE_RATE, T, sigma);
-                if (netDebit <= 0) yield null;
-                int c = contracts(cash, netDebit);
-                if (c < 1) yield null;
-                yield new OpenPosition(symbol, expiry, c, sigma, netDebit * 100 * c, 0,
-                        List.of(new Leg(callK, true, true, 1), new Leg(putK, false, true, 1)), 0, 0);
-            }
-            case BUTTERFLY -> {
-                // Long 1 ITM call, short 2 ATM calls, long 1 OTM call
-                double itmPrem = bsEngine.callPrice(price, K - SPREAD_WIDTH, RISK_FREE_RATE, T, sigma);
-                double atmPrem = bsEngine.callPrice(price, K, RISK_FREE_RATE, T, sigma);
-                double otmPrem = bsEngine.callPrice(price, K + SPREAD_WIDTH, RISK_FREE_RATE, T, sigma);
-                double netDebit = itmPrem - 2 * atmPrem + otmPrem;
-                if (netDebit <= 0) yield null;
-                int c = contracts(cash, netDebit);
-                if (c < 1) yield null;
-                double costBasis = netDebit * 100 * c;
-                yield new OpenPosition(symbol, expiry, c, sigma, costBasis,
-                        SPREAD_WIDTH * 100 * c - costBasis,
-                        List.of(new Leg(K - SPREAD_WIDTH, true, true, 1),
-                                new Leg(K, true, false, 2),
-                                new Leg(K + SPREAD_WIDTH, true, true, 1)), 0, 0);
-            }
-            case BULL_PUT_SPREAD -> {
-                // Short ATM put, long OTM put — net credit received
-                double netCredit = bsEngine.putPrice(price, K, RISK_FREE_RATE, T, sigma)
-                                 - bsEngine.putPrice(price, K - SPREAD_WIDTH, RISK_FREE_RATE, T, sigma);
-                if (netCredit <= 0) yield null;
-                int c = Math.min(MAX_CONTRACTS, (int) (cash * POSITION_SIZE_PCT / (SPREAD_WIDTH * 100)));
-                if (c < 1) yield null;
-                // totalCostBasis < 0 signals credit received; computeCurrentValue and shouldExit handle this
-                yield new OpenPosition(symbol, expiry, c, sigma, -netCredit * 100 * c,
-                        netCredit * 100 * c,
-                        List.of(new Leg(K, false, false, 1),
-                                new Leg(K - SPREAD_WIDTH, false, true, 1)), 0, 0);
-            }
-            case BEAR_CALL_SPREAD -> {
-                // Short ATM call, long OTM call — net credit received
-                double netCredit = bsEngine.callPrice(price, K, RISK_FREE_RATE, T, sigma)
-                                 - bsEngine.callPrice(price, K + SPREAD_WIDTH, RISK_FREE_RATE, T, sigma);
-                if (netCredit <= 0) yield null;
-                int c = Math.min(MAX_CONTRACTS, (int) (cash * POSITION_SIZE_PCT / (SPREAD_WIDTH * 100)));
-                if (c < 1) yield null;
-                yield new OpenPosition(symbol, expiry, c, sigma, -netCredit * 100 * c,
-                        netCredit * 100 * c,
-                        List.of(new Leg(K, true, false, 1),
-                                new Leg(K + SPREAD_WIDTH, true, true, 1)), 0, 0);
             }
             case HIGH_DELTA_SCALP -> {
                 // Deep ITM call (buys ≥ 3) or put (sells ≥ 3); default to call in backtest
@@ -420,55 +311,8 @@ public class OptionsBacktestEngine {
                 yield new OpenPosition(symbol, expiry, c, sigma, netDebit * 100 * c, 0,
                         List.of(new Leg(K, true, true, 1), new Leg(K, false, true, 1)), 0, 0);
             }
-            case IRON_CONDOR -> {
-                // Short OTM call + long further OTM call (bear call spread)
-                // Short OTM put  + long further OTM put  (bull put spread)
-                // Entered when mixed signals suggest range-bound action and IV is elevated.
-                // Optimal window: 30-45 DTE, short strikes ~1 spread-width OTM (moderate delta).
-                double shortCallK = K + SPREAD_WIDTH;
-                double longCallK  = K + SPREAD_WIDTH * 2;
-                double shortPutK  = K - SPREAD_WIDTH;
-                double longPutK   = Math.max(SPREAD_WIDTH, K - SPREAD_WIDTH * 2);
-
-                double shortCallPrem = bsEngine.callPrice(price, shortCallK, RISK_FREE_RATE, T, sigma);
-                double longCallPrem  = bsEngine.callPrice(price, longCallK,  RISK_FREE_RATE, T, sigma);
-                double shortPutPrem  = bsEngine.putPrice(price,  shortPutK,  RISK_FREE_RATE, T, sigma);
-                double longPutPrem   = bsEngine.putPrice(price,  longPutK,   RISK_FREE_RATE, T, sigma);
-
-                double netCredit = (shortCallPrem - longCallPrem) + (shortPutPrem - longPutPrem);
-                if (netCredit <= 0) yield null;
-
-                // Size by max loss of one wing (spread width × 100); can only lose one side
-                int c = Math.min(MAX_CONTRACTS, (int) (cash * POSITION_SIZE_PCT / (SPREAD_WIDTH * 100)));
-                if (c < 1) yield null;
-
-                yield new OpenPosition(symbol, expiry, c, sigma,
-                        -netCredit * 100 * c,   // totalCostBasis < 0 = credit received
-                        netCredit * 100 * c,     // maxProfit = net credit
-                        List.of(
-                                new Leg(shortCallK, true,  false, 1),
-                                new Leg(longCallK,  true,  true,  1),
-                                new Leg(shortPutK,  false, false, 1),
-                                new Leg(longPutK,   false, true,  1)),
-                        0, 0);
-            }
-            case COVERED_CALL -> {
-                // Buy stock; sell 1 OTM call per 100 shares to collect premium
-                int shares = feeCalc.maxShares(cash, price);
-                int c = Math.min(MAX_CONTRACTS, Math.max(1, shares / 100));
-                int stockShares = c * 100;
-                if (cash < stockShares * price) yield null;
-                double shortCallK = K + SPREAD_WIDTH;
-                double shortCallPrem = bsEngine.callPrice(price, shortCallK, RISK_FREE_RATE, T, sigma);
-                double premReceived = shortCallPrem * 100 * c;
-                double costBasis = stockShares * price - premReceived;
-                if (costBasis <= 0) yield null;
-                // Max profit capped at short call strike
-                double maxProfit = (shortCallK - price) * stockShares + premReceived;
-                yield new OpenPosition(symbol, expiry, c, sigma, costBasis, Math.max(0, maxProfit),
-                        List.of(new Leg(shortCallK, true, false, 1)), stockShares, price);
-            }
         };
+
     }
 
     private double effectiveSigma(OpenPosition pos, List<Double> prices) {

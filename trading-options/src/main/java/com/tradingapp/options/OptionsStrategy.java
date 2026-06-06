@@ -1,20 +1,11 @@
 package com.tradingapp.options;
 
 public enum OptionsStrategy {
+    HIGH_DELTA_SCALP("High-Delta Scalp"),
+    MOMENTUM_NEAR_TERM("Near-Term Momentum"),
     LONG_CALL("Long Call"),
     LONG_PUT("Long Put"),
-    BULL_CALL_SPREAD("Bull Call Spread"),
-    BEAR_PUT_SPREAD("Bear Put Spread"),
-    BULL_PUT_SPREAD("Bull Put Spread"),
-    BEAR_CALL_SPREAD("Bear Call Spread"),
-    HIGH_DELTA_SCALP("High-Delta Scalp"),
-    ZERO_DTE("Zero-DTE Straddle"),
-    MOMENTUM_NEAR_TERM("Near-Term Momentum"),
-    STRADDLE("Straddle"),
-    STRANGLE("Strangle"),
-    BUTTERFLY("Butterfly"),
-    IRON_CONDOR("Iron Condor"),
-    COVERED_CALL("Covered Call");
+    ZERO_DTE("Zero-DTE Straddle");
 
     private final String displayName;
 
