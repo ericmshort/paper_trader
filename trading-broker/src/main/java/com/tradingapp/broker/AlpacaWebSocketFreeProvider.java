@@ -279,6 +279,9 @@ public class AlpacaWebSocketFreeProvider implements QuoteProvider {
 
         @Override
         public void onOpen(WebSocket webSocket) {
+            // Save reference before request(1) so ws is non-null when the server's
+            // "connected" message arrives and sendAuth() is called from onText().
+            ws = webSocket;
             webSocket.request(1);
         }
 

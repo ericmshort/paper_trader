@@ -139,8 +139,9 @@ public class SettingsController implements Initializable {
         testWsButton.setDisable(true);
 
         Thread t = new Thread(() -> {
-            AlpacaWebSocketFreeProvider provider =
-                    new AlpacaWebSocketFreeProvider(test, new CandleHistory());
+            AlpacaWebSocketFreeProvider provider = new AlpacaWebSocketFreeProvider(
+                    test, new CandleHistory(),
+                    msg -> Platform.runLater(() -> setStatus(msg, true)));
             provider.start();
 
             // Poll for authentication up to 10 seconds
