@@ -154,7 +154,9 @@ public class AlpacaWebSocketFreeProvider implements QuoteProvider {
         JSONObject sub = new JSONObject();
         sub.put("action", "subscribe");
         sub.put("trades", new JSONArray(DayTraderWatchList.SYMBOLS));
-        sub.put("quotes", new JSONArray(DayTraderWatchList.SYMBOLS));
+        // Quotes not subscribed — free IEX tier counts trades + quotes against the
+        // same 30-symbol cap. Trade ticks provide the price we need; bid/ask spread
+        // is estimated from the trade price in handleTrade().
         WebSocket w = ws;
         if (w != null) w.sendText(sub.toString(), true);
     }
