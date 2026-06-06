@@ -14,7 +14,7 @@ import java.util.stream.Collectors;
 public class AppConfig {
 
     public enum BrokerType { SIMULATED, ALPACA_PAPER, ALPACA_LIVE }
-    public enum QuoteProviderType { YAHOO, ALPACA }
+    public enum QuoteProviderType { YAHOO, ALPACA, ALPACA_WEBSOCKET_FREE }
 
     private static final Path CONFIG_PATH =
             Path.of(System.getProperty("user.home"), ".tradingapp", "app.properties");
@@ -28,9 +28,9 @@ public class AppConfig {
     private boolean avoidOvernightHolds = true;
     private boolean marketRegimeFilterEnabled = true;
     private int earningsBlackoutDays = 3;
-    // Strategies enabled for live trading. Defaults to conservative set.
+    // Strategies enabled for live trading. Defaults to day-trading set.
     private Set<String> enabledStrategies = new LinkedHashSet<>(
-            Arrays.asList("COVERED_CALL", "BULL_PUT_SPREAD"));
+            Arrays.asList("HIGH_DELTA_SCALP", "ZERO_DTE", "LONG_CALL", "LONG_PUT"));
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();

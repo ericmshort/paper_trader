@@ -109,25 +109,30 @@ public class TradingLoopTest {
     }
 
     @Test
-    void extractFeatureCsvReturnsFiveValues() throws Exception {
+    void extractFeatureCsvReturnsSixValues() throws Exception {
         List<String> research = new ArrayList<>();
         ZonedDateTime afterClose = ZonedDateTime.of(2026, 5, 15, 17, 0, 0, 0, ET);
         TradingLoop loop = buildLoopWithEvaluator(afterClose, null, null, research);
 
         List<SignalResult> signals = List.of(
             SignalResult.buy("RSI", 25.0),
-            SignalResult.sell("MACD", 0.5),
-            SignalResult.neutral("BollingerBands", 102.0)
+            SignalResult.neutral("BollingerBands", 102.0),
+            SignalResult.buy("VolumeSurge", 2.5),
+            SignalResult.buy("VWAP", 150.0),
+            SignalResult.neutral("ORB", 148.0),
+            SignalResult.buy("Candlestick", 1.0)
         );
-        // Access via a subclass to expose the private helper for testing
         java.lang.reflect.Method m = TradingLoop.class.getDeclaredMethod("extractFeatureCsv", List.class);
         m.setAccessible(true);
         String csv = (String) m.invoke(loop, signals);
         String[] parts = csv.split(",");
-        assertEquals(5, parts.length);
-        assertEquals(25.0, Double.parseDouble(parts[0]), 0.001); // RSI
-        assertEquals(0.5, Double.parseDouble(parts[1]), 0.001);  // MACD
-        assertEquals(102.0, Double.parseDouble(parts[2]), 0.001); // BollingerBands
+        assertEquals(6, parts.length);
+        assertEquals(25.0,  Double.parseDouble(parts[0]), 0.001); // RSI
+        assertEquals(102.0, Double.parseDouble(parts[1]), 0.001); // BollingerBands
+        assertEquals(2.5,   Double.parseDouble(parts[2]), 0.001); // VolumeSurge
+        assertEquals(150.0, Double.parseDouble(parts[3]), 0.001); // VWAP
+        assertEquals(148.0, Double.parseDouble(parts[4]), 0.001); // ORB
+        assertEquals(1.0,   Double.parseDouble(parts[5]), 0.001); // Candlestick
     }
 
     @Test

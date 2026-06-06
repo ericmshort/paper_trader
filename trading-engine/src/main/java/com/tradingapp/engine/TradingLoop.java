@@ -4,6 +4,8 @@ import com.tradingapp.account.Account;
 import com.tradingapp.account.OptionsPosition;
 import com.tradingapp.account.Position;
 import com.tradingapp.account.TransactionLog;
+import com.tradingapp.data.CandleBar;
+import com.tradingapp.data.CandleHistory;
 import com.tradingapp.data.EarningsCalendar;
 import com.tradingapp.data.PriceHistory;
 import com.tradingapp.data.QuoteModel;
@@ -25,9 +27,11 @@ public class TradingLoop implements Runnable {
 
     static final double SIGNAL_THRESHOLD = 2.5;
     private double maxPortfolioExposure = 0.60;
-    private static final LocalTime MARKET_OPEN = LocalTime.of(9, 30);
-    private static final LocalTime MARKET_CLOSE = LocalTime.of(16, 0);
+    private static final LocalTime MARKET_OPEN    = LocalTime.of(9, 30);
+    private static final LocalTime MARKET_CLOSE   = LocalTime.of(16, 0);
     private static final LocalTime PRE_CLOSE_CUTOFF = LocalTime.of(15, 45);
+    // No new entries during the first 5 minutes — the opening range is still forming
+    private static final LocalTime ORB_FORMATION_END = LocalTime.of(9, 35);
     private static final ZoneId ET = ZoneId.of("America/New_York");
 
     private final QuoteProvider dataClient;
@@ -55,6 +59,7 @@ public class TradingLoop implements Runnable {
     private int earningsBlackoutDays = 3;
     private final Map<String, Double> lastKnownPrices = new HashMap<>();
     private final Map<String, LocalDate> dailyBarLastRecorded = new HashMap<>();
+    private CandleHistory candleHistory;
 
     public TradingLoop(QuoteProvider dataClient, PriceHistory priceHistory,
                        IndicatorEngine indicators, TrailingStopMonitor trailingStop,
@@ -141,6 +146,7 @@ public class TradingLoop implements Runnable {
     public boolean isUptrend() { return isMarketInUptrend(); }
     public void setEarningsCalendar(EarningsCalendar cal) { this.earningsCalendar = cal; }
     public void setEarningsBlackoutDays(int days) { this.earningsBlackoutDays = days; }
+    public void setCandleHistory(CandleHistory history) { this.candleHistory = history; }
 
     @Override
     public void run() {
@@ -157,6 +163,7 @@ public class TradingLoop implements Runnable {
                 }
                 return;
             }
+            boolean orbFormationPeriod = time.isBefore(ORB_FORMATION_END);
             if (account.isTradingHalted()) {
                 researchCallback.accept("TRADING HALTED — balance below $100.");
                 return;
@@ -218,7 +225,14 @@ public class TradingLoop implements Runnable {
                 List<Double> dailyVs = priceHistory.getDailyVolumes(symbol);
                 List<Double> prices  = dailyPs.isEmpty() ? priceHistory.getPrices(symbol)  : dailyPs;
                 List<Double> volumes = dailyVs.isEmpty() ? priceHistory.getVolumes(symbol) : dailyVs;
-                List<SignalResult> signals = indicators.evaluateAll(prices, volumes, price);
+                List<SignalResult> signals;
+                if (candleHistory != null) {
+                    List<CandleBar> oneMin  = candleHistory.getOneMinBarsWithCurrent(symbol);
+                    List<CandleBar> fiveMin = candleHistory.getFiveMinBarsWithCurrent(symbol);
+                    signals = indicators.evaluateAllWithCandles(prices, volumes, price, oneMin, fiveMin);
+                } else {
+                    signals = indicators.evaluateAll(prices, volumes, price);
+                }
                 int buys = indicators.countBuySignals(signals);
                 int sells = indicators.countSellSignals(signals);
                 double weightedBuys = weightEvaluator != null
@@ -242,7 +256,7 @@ public class TradingLoop implements Runnable {
                     account.removePosition(symbol);
                     trailingStop.reset(symbol);
                     uiRefreshCallback.run();
-                } else if (weightedBuys >= SIGNAL_THRESHOLD && !hasPosition) {
+                } else if (weightedBuys >= SIGNAL_THRESHOLD && !hasPosition && !orbFormationPeriod) {
                     int daysToEarnings = earningsCalendar != null
                             ? earningsCalendar.daysUntilEarnings(symbol) : Integer.MAX_VALUE;
                     if (!isMarketInUptrend()) {
@@ -301,7 +315,7 @@ public class TradingLoop implements Runnable {
         return spyPrices.get(spyPrices.size() - 1) >= ma50;
     }
 
-    private static final String[] FEATURE_NAMES = {"RSI", "MACD", "BollingerBands", "MACrossover", "VolumeSurge"};
+    private static final String[] FEATURE_NAMES = {"RSI", "BollingerBands", "VolumeSurge", "VWAP", "ORB", "Candlestick"};
 
     private String extractFeatureCsv(List<SignalResult> signals) {
         double[] vals = new double[FEATURE_NAMES.length];

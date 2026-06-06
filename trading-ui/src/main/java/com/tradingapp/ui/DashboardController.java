@@ -8,7 +8,10 @@ import com.tradingapp.account.TransactionLog;
 import com.tradingapp.account.TransactionRecord;
 import com.tradingapp.broker.AlpacaBroker;
 import com.tradingapp.broker.AlpacaQuoteProvider;
+import com.tradingapp.broker.AlpacaWebSocketFreeProvider;
 import com.tradingapp.broker.AppConfig;
+import com.tradingapp.data.CandleHistory;
+import com.tradingapp.data.DayTraderWatchList;
 import com.tradingapp.data.EarningsCalendar;
 import com.tradingapp.data.LargeCapWatchList;
 import com.tradingapp.data.SmallCapWatchList;
@@ -106,10 +109,12 @@ public class DashboardController implements Initializable {
     private Account account;
     private TransactionLog transactionLog;
     private PriceHistory priceHistory;
+    private CandleHistory candleHistory;
     private BlackScholesEngine bsEngine;
     private ScheduledExecutorService scheduler;
     private TradingLoop tradingLoop;
     private OptionsSignalRouter optionsRouter;
+    private AlpacaWebSocketFreeProvider wsProvider;
     private XYChart.Series<Number, Number> equitySeries;
     private int tickCount = 0;
     private boolean alpacaMode = false;
@@ -125,6 +130,7 @@ public class DashboardController implements Initializable {
         transactionLog = new TransactionLog();
         transactionLog.restoreAccount(account);
         priceHistory = new PriceHistory();
+        candleHistory = new CandleHistory();
         bsEngine = new BlackScholesEngine();
 
         equitySeries = new XYChart.Series<>();
@@ -161,15 +167,25 @@ public class DashboardController implements Initializable {
     }
 
     private void startTradingComponents(AppConfig appConfig) {
+        boolean useWsProvider = appConfig.getQuoteProviderType() == AppConfig.QuoteProviderType.ALPACA_WEBSOCKET_FREE
+                && appConfig.isAlpacaBroker();
+
         researchArea.setText("Waiting for market data...\n\nMarket hours: 9:30 AM – 4:00 PM ET"
-                + "\nWatching 100 large-cap and small-cap US stocks."
+                + "\nWatching " + (useWsProvider ? "30 most-liquid day-trading symbols" : "100 large-cap and small-cap US stocks") + "."
                 + "\nBroker: " + SettingsController.brokerTypeLabel(appConfig.getBrokerType())
                 + " | Quotes: " + appConfig.getQuoteProviderType().name());
 
         QuoteProvider quoteProvider;
-        if (appConfig.getQuoteProviderType() == AppConfig.QuoteProviderType.ALPACA && appConfig.isAlpacaBroker()) {
+        if (useWsProvider) {
+            wsProvider = new AlpacaWebSocketFreeProvider(appConfig, candleHistory,
+                    msg -> Platform.runLater(() -> researchArea.appendText(msg + "\n")));
+            wsProvider.start();
+            quoteProvider = wsProvider;
+        } else if (appConfig.getQuoteProviderType() == AppConfig.QuoteProviderType.ALPACA && appConfig.isAlpacaBroker()) {
+            wsProvider = null;
             quoteProvider = new AlpacaQuoteProvider(appConfig);
         } else {
+            wsProvider = null;
             quoteProvider = new YahooFinanceQuoteProvider();
         }
 
@@ -223,15 +239,23 @@ public class DashboardController implements Initializable {
 
         EarningsCalendar earningsCalendar = new EarningsCalendar();
 
-        List<String> allSymbols = new ArrayList<>();
-        allSymbols.addAll(LargeCapWatchList.SYMBOLS);
-        allSymbols.addAll(SmallCapWatchList.SYMBOLS);
+        List<String> allSymbols;
+        if (useWsProvider) {
+            allSymbols = new ArrayList<>(DayTraderWatchList.SYMBOLS);
+        } else {
+            allSymbols = new ArrayList<>();
+            allSymbols.addAll(LargeCapWatchList.SYMBOLS);
+            allSymbols.addAll(SmallCapWatchList.SYMBOLS);
+        }
 
         tradingLoop = new TradingLoop(quoteProvider, priceHistory,
                 new IndicatorEngine(), new TrailingStopMonitor(), brokerClient, feeCalc,
                 allSymbols, researchCb, uiRefresh, account,
                 optionsRouter, mlEval, trainingCallback);
         tradingLoop.setTransactionLog(transactionLog);
+        if (useWsProvider) {
+            tradingLoop.setCandleHistory(candleHistory);
+        }
         tradingLoop.setDailyLossLimitPct(appConfig.getDailyLossLimitPct() / 100.0);
         tradingLoop.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
         optionsRouter.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
@@ -247,19 +271,19 @@ public class DashboardController implements Initializable {
             t.setDaemon(true);
             return t;
         });
-        scheduler.scheduleAtFixedRate(tradingLoop, 0, 30, TimeUnit.SECONDS);
+        // Day trading: 5s interval so candle data and signals are evaluated frequently
+        scheduler.scheduleAtFixedRate(tradingLoop, 0, 5, TimeUnit.SECONDS);
 
-        // Seed price history from 200 days of daily bars so MACrossover is immediately usable.
-        // Always use Yahoo for seeding — Alpaca's data API lacks historical depth at startup.
-        // Runs in background — does not block the trading loop or the UI.
-        QuoteProvider seedProvider = new YahooFinanceQuoteProvider();
+        // Seed daily price history for RSI / Bollinger baseline.
+        // WebSocket provider seeds from Alpaca REST; others use Yahoo.
+        QuoteProvider seedProvider = useWsProvider ? wsProvider : new YahooFinanceQuoteProvider();
+        long seedDelayMs = useWsProvider ? 300 : 120; // Alpaca REST is faster, fewer symbols too
         Thread seedThread = new Thread(() -> {
             LocalDate end = LocalDate.now();
-            LocalDate start = end.minusDays(280); // extra buffer for weekends/holidays
+            LocalDate start = end.minusDays(280);
             int seeded = 0;
-            // Include SPY for the market-regime filter (not traded, just tracked)
             List<String> symbolsToSeed = new ArrayList<>(allSymbols);
-            symbolsToSeed.add("SPY");
+            if (!symbolsToSeed.contains("SPY")) symbolsToSeed.add("SPY");
             for (String sym : symbolsToSeed) {
                 try {
                     var bars = seedProvider.getHistoricalBars(sym, start, end);
@@ -267,7 +291,7 @@ public class DashboardController implements Initializable {
                         priceHistory.seed(sym, bars);
                         seeded++;
                     }
-                    Thread.sleep(120); // avoid bursting Yahoo's rate limit alongside the live-quote loop
+                    Thread.sleep(seedDelayMs);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     break;
@@ -302,8 +326,15 @@ public class DashboardController implements Initializable {
                 account.reset(100_000.0);
             }
 
+            // Stop WebSocket if running
+            if (wsProvider != null) {
+                wsProvider.stop();
+                wsProvider = null;
+            }
+
             // Reset chart and price history
             priceHistory = new PriceHistory();
+            candleHistory = new CandleHistory();
             equitySeries.getData().clear();
             tickCount = 0;
 
@@ -1000,6 +1031,9 @@ public class DashboardController implements Initializable {
     }
 
     public void stop() {
+        if (wsProvider != null) {
+            wsProvider.stop();
+        }
         if (scheduler != null) {
             scheduler.shutdownNow();
             try {
