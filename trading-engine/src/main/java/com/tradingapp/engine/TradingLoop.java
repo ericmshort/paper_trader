@@ -36,8 +36,9 @@ public class TradingLoop implements Runnable {
     private static final LocalTime PRE_CLOSE_CUTOFF = LocalTime.of(15, 45);
     // No new entries during the first 5 minutes — the opening range is still forming
     private static final LocalTime ORB_FORMATION_END = LocalTime.of(9, 35);
-    // No new stock entries after 3:30 PM — forced liquidation at 3:45 makes late entries pointless churn
-    private static final LocalTime LAST_ENTRY_TIME = LocalTime.of(15, 30);
+    // No new stock entries after 2:30 PM — gives every position at least 75 min of runway
+    // before the 3:45 forced sweep. Entries after 2:30 have too little time to recover from a bad tick.
+    private static final LocalTime LAST_ENTRY_TIME = LocalTime.of(14, 30);
     // Cap on simultaneous stock positions — day traders manage 3–5 names, not 30
     private static final int MAX_CONCURRENT_STOCK_POSITIONS = 5;
     // VIX above this level means panic/spreads blow out — skip new directional entries
@@ -59,6 +60,7 @@ public class TradingLoop implements Runnable {
     private final SignalWeightEvaluator weightEvaluator;
     private final Runnable afterMarketCallback;
     private LocalDate lastTrainingDate;
+    private LocalDate lastMarketClosedLoggedDate;
     private double dailyLossLimitPct = 0.05;
     private double dayStartValue = -1;
     private LocalDate lastDayTrackingDate;
@@ -174,12 +176,17 @@ public class TradingLoop implements Runnable {
             LocalTime time = now.toLocalTime();
             LocalDate today = now.toLocalDate();
             if (time.isBefore(MARKET_OPEN) || time.isAfter(MARKET_CLOSE)) {
-                researchCallback.accept("Market closed. Next open: " + MARKET_OPEN + " ET.");
+                // Log once per day — avoid flooding the research area every 5 seconds.
+                if (!today.equals(lastMarketClosedLoggedDate)) {
+                    lastMarketClosedLoggedDate = today;
+                    researchCallback.accept("Market closed. Next open: " + MARKET_OPEN + " ET.");
+                }
                 if (!time.isBefore(MARKET_CLOSE) && afterMarketCallback != null
                         && !today.equals(lastTrainingDate)) {
                     lastTrainingDate = today;
                     afterMarketCallback.run();
                 }
+                uiRefreshCallback.run();
                 return;
             }
             boolean orbFormationPeriod = time.isBefore(ORB_FORMATION_END);
