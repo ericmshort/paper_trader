@@ -1,5 +1,6 @@
 package com.tradingapp.ui;
 
+import com.tradingapp.broker.AppConfig;
 import java.io.IOException;
 import java.nio.file.*;
 import java.time.LocalDate;
@@ -10,7 +11,7 @@ class TradingLogger {
 
     private static final DateTimeFormatter FILE_DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final Path LOG_DIR = Path.of(System.getProperty("user.home"), ".tradingapp");
+    private static final Path LOG_DIR = AppConfig.getDataDir();
 
     private LocalDate currentDate;
     private Path currentFile;

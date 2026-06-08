@@ -225,7 +225,7 @@ public class DashboardController implements Initializable {
         optionsRouter = new OptionsSignalRouter(
                 bsEngine, optExec, account, priceHistory, researchCb, quoteProvider);
 
-        Path weightsPath = Path.of(System.getProperty("user.home"), ".tradingapp", "signal-weights.json");
+        Path weightsPath = AppConfig.getDataDir().resolve("signal-weights.json");
         SignalWeights initialWeights;
         try {
             initialWeights = Files.exists(weightsPath) ? SignalWeights.load(weightsPath) : new SignalWeights();
