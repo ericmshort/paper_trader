@@ -142,6 +142,7 @@ public class DashboardController implements Initializable {
 
         if (settingsPanelController != null) {
             settingsPanelController.setActiveBrokerType(appConfig.getBrokerType());
+            settingsPanelController.setActiveApiKey(appConfig.getAlpacaApiKey());
             settingsPanelController.setOnSettingsSaved(cfg -> {
                 if (tradingLoop != null) {
                     tradingLoop.setMaxPortfolioExposure(cfg.getMaxPortfolioExposurePct() / 100.0);
@@ -318,9 +319,10 @@ public class DashboardController implements Initializable {
             // Restart the trading loop with new config
             startTradingComponents(newConfig);
 
-            // Update settings controller so it knows the new active broker
+            // Update settings controller so it knows the new active broker/credentials
             if (settingsPanelController != null) {
                 settingsPanelController.setActiveBrokerType(newConfig.getBrokerType());
+                settingsPanelController.setActiveApiKey(newConfig.getAlpacaApiKey());
             }
         });
     }

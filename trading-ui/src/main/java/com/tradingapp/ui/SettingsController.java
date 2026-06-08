@@ -46,6 +46,7 @@ public class SettingsController implements Initializable {
 
     private AppConfig config;
     private AppConfig.BrokerType activeBrokerType = AppConfig.BrokerType.SIMULATED;
+    private String activeApiKey = "";
     private Consumer<AppConfig> onSettingsSaved;
     private Consumer<AppConfig> onBrokerReset;
 
@@ -63,6 +64,10 @@ public class SettingsController implements Initializable {
 
     public void setActiveBrokerType(AppConfig.BrokerType type) {
         this.activeBrokerType = type;
+    }
+
+    public void setActiveApiKey(String key) {
+        this.activeApiKey = key == null ? "" : key;
     }
 
     public void setOnSettingsSaved(Consumer<AppConfig> handler) {
@@ -157,33 +162,41 @@ public class SettingsController implements Initializable {
         AppConfig newConfig = buildConfigFromFields();
         AppConfig.BrokerType newBrokerType = newConfig.getBrokerType();
 
-        if (newBrokerType != activeBrokerType) {
-            if (!confirmBrokerChange(activeBrokerType, newBrokerType)) return;
+        boolean brokerTypeChanged = newBrokerType != activeBrokerType;
+        boolean apiKeyChanged = newBrokerType != AppConfig.BrokerType.SIMULATED
+                && !newConfig.getAlpacaApiKey().equals(activeApiKey);
+
+        if (brokerTypeChanged || apiKeyChanged) {
+            if (!confirmAccountReset(brokerTypeChanged, activeBrokerType, newBrokerType)) return;
             saveAndFireReset(newConfig);
         } else {
             saveNormally(newConfig);
         }
     }
 
-    private boolean confirmBrokerChange(AppConfig.BrokerType from, AppConfig.BrokerType to) {
-        String fromLabel = brokerTypeLabel(from);
-        String toLabel   = brokerTypeLabel(to);
+    private boolean confirmAccountReset(boolean brokerTypeChanged,
+                                        AppConfig.BrokerType from, AppConfig.BrokerType to) {
+        String toLabel = brokerTypeLabel(to);
+
+        String header = brokerTypeChanged
+                ? "Switch from " + brokerTypeLabel(from) + " to " + toLabel + "?"
+                : "Change API credentials for " + toLabel + "?";
 
         String detail = to == AppConfig.BrokerType.SIMULATED
                 ? "Your account will be reset to $100,000 and all trade history will be cleared."
                 : "All local trade history will be cleared. Your account balance and positions will be loaded from " + toLabel + ".";
 
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("Switch Broker — Data Will Be Lost");
-        alert.setHeaderText("Switch from " + fromLabel + " to " + toLabel + "?");
+        alert.setTitle("Account Reset — Data Will Be Lost");
+        alert.setHeaderText(header);
         alert.setContentText(detail + "\n\nThis cannot be undone.");
 
-        ButtonType switchBtn = new ButtonType("Switch Broker", ButtonBar.ButtonData.OK_DONE);
-        ButtonType cancelBtn = new ButtonType("Cancel",         ButtonBar.ButtonData.CANCEL_CLOSE);
-        alert.getButtonTypes().setAll(switchBtn, cancelBtn);
+        ButtonType confirmBtn = new ButtonType("Reset & Switch", ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancelBtn  = new ButtonType("Cancel",         ButtonBar.ButtonData.CANCEL_CLOSE);
+        alert.getButtonTypes().setAll(confirmBtn, cancelBtn);
 
         Optional<ButtonType> result = alert.showAndWait();
-        return result.isPresent() && result.get() == switchBtn;
+        return result.isPresent() && result.get() == confirmBtn;
     }
 
     private void saveAndFireReset(AppConfig newConfig) {
@@ -191,7 +204,8 @@ public class SettingsController implements Initializable {
             newConfig.save();
             config = newConfig;
             activeBrokerType = newConfig.getBrokerType();
-            setStatus("Broker changed. Resetting account...", true);
+            activeApiKey = newConfig.getAlpacaApiKey();
+            setStatus("Account changed. Resetting...", true);
             if (onBrokerReset != null) onBrokerReset.accept(newConfig);
         } catch (Exception e) {
             setStatus("Save failed: " + e.getMessage(), false);
