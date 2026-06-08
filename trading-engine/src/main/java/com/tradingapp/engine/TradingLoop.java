@@ -244,8 +244,9 @@ public class TradingLoop implements Runnable {
                 } else {
                     signals = indicators.evaluateAll(prices, volumes, price);
                 }
-                // Append today's news sentiment as an additional weighted signal
-                if (sentimentCache != null) {
+                // Append today's news sentiment as an additional weighted signal.
+                // Only use scores from today — stale scores from a prior session are ignored.
+                if (sentimentCache != null && sentimentCache.isRefreshedToday()) {
                     SentimentScore sentiment = sentimentCache.getScore(symbol);
                     if (sentiment != null && sentiment.direction() != SentimentDirection.NEUTRAL
                             && sentiment.weight() > 0) {
