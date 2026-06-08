@@ -68,9 +68,13 @@ public class TradingLoop implements Runnable {
     private EarningsCalendar earningsCalendar;
     private int earningsBlackoutDays = 3;
     private int minHoldMinutes = 15;
+    private final int lossCooldownMinutes = 60;
     private final Map<String, Double> lastKnownPrices = new HashMap<>();
     private final Map<String, LocalDate> dailyBarLastRecorded = new HashMap<>();
     private final Map<String, ZonedDateTime> entryTimes = new HashMap<>();
+    private final Map<String, Double> entryPrices = new HashMap<>();
+    private final Map<String, ZonedDateTime> lossCooldowns = new HashMap<>();
+    private final Map<String, Boolean> prevOrbBuy = new HashMap<>();
     private CandleHistory candleHistory;
     private NewsSentimentCache sentimentCache;
 
@@ -203,6 +207,8 @@ public class TradingLoop implements Runnable {
                     dayStartValue = account.getBalance() + stockMV;
                 }
                 account.setDailyLossHalted(false);
+                lossCooldowns.clear();
+                prevOrbBuy.clear();
             }
             List<QuoteModel> quotes = dataClient.getQuotes(watchList);
             for (QuoteModel quote : quotes) {
@@ -279,10 +285,11 @@ public class TradingLoop implements Runnable {
                 if (trailingStop.check(symbol, price) && hasPosition) {
                     // Trailing stop always fires regardless of hold time — it's a loss-protection rule.
                     Position pos = account.getPositions().get(symbol);
-                    brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Trailing stop: 5% drawdown from peak");
+                    brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Trailing stop: 2% drawdown from peak");
                     account.removePosition(symbol);
                     trailingStop.reset(symbol);
                     entryTimes.remove(symbol);
+                    entryPrices.remove(symbol);
                     uiRefreshCallback.run();
                 } else if (weightedSells >= SIGNAL_THRESHOLD && hasPosition) {
                     ZonedDateTime entryTime = entryTimes.get(symbol);
@@ -298,17 +305,38 @@ public class TradingLoop implements Runnable {
                         account.removePosition(symbol);
                         trailingStop.reset(symbol);
                         entryTimes.remove(symbol);
+                        // Trigger re-entry cooldown if this was a losing trade opened this session.
+                        Double ep = entryPrices.remove(symbol);
+                        if (ep != null && price < ep) {
+                            lossCooldowns.put(symbol, now);
+                            researchCallback.accept(symbol + " on 60-min re-entry cooldown (sold $"
+                                    + String.format("%.2f", price) + " < entry $" + String.format("%.2f", ep) + ")");
+                        }
                         uiRefreshCallback.run();
                     }
                 } else if (weightedBuys >= SIGNAL_THRESHOLD && !hasPosition
                         && !orbFormationPeriod && !time.isAfter(LAST_ENTRY_TIME)) {
                     int daysToEarnings = earningsCalendar != null
                             ? earningsCalendar.daysUntilEarnings(symbol) : Integer.MAX_VALUE;
+                    boolean inCooldown = lossCooldowns.containsKey(symbol)
+                            && Duration.between(lossCooldowns.get(symbol), now).toMinutes() < lossCooldownMinutes;
+                    // Require ORB to have been BUY on the previous tick as well — filters single-tick
+                    // false breakouts that cross the ORB level and immediately reverse.
+                    // Only enforced when ORB is actively signaling BUY; neutral ORB (e.g. no candle
+                    // data) does not block entry so other indicators can still trade.
+                    boolean orbBuyNow = signals.stream().anyMatch(
+                            s -> "ORB".equals(s.getIndicatorName())
+                                    && s.getDirection() == SignalResult.Direction.BUY);
+                    boolean orbConfirmedTwice = !orbBuyNow || prevOrbBuy.getOrDefault(symbol, false);
                     // Skip entry if RSI is active and overbought — avoids buying into exhausted moves.
                     boolean rsiOverbought = signals.stream()
                             .anyMatch(s -> "RSI".equals(s.getIndicatorName())
                                     && s.getDirection() == SignalResult.Direction.SELL);
-                    if (rsiOverbought) {
+                    if (inCooldown) {
+                        researchCallback.accept(symbol + " BUY skipped: 60-min re-entry cooldown after loss");
+                    } else if (!orbConfirmedTwice) {
+                        // Silent — fires on nearly every ORB-false-breakout tick; logging would flood the feed.
+                    } else if (rsiOverbought) {
                         researchCallback.accept(symbol + " BUY skipped: RSI overbought");
                     } else if (!isMarketInUptrend()) {
                         researchCallback.accept(symbol + " BUY skipped: SPY below 5-day MA (short-term downtrend)");
@@ -333,11 +361,16 @@ public class TradingLoop implements Runnable {
                             brokerClient.submitBuy(symbol, shares, price, signalStr,
                                     "Signals: " + buys + "/" + signals.size() + " BUY", featureCsv);
                             entryTimes.put(symbol, now);
+                            entryPrices.put(symbol, price);
                             uiRefreshCallback.run();
                         }
                     }
                 }
                 trailingStop.updatePeak(symbol, price);
+                // Track ORB state for 2-tick confirmation on the next evaluation cycle.
+                prevOrbBuy.put(symbol, signals.stream().anyMatch(
+                        s -> "ORB".equals(s.getIndicatorName())
+                                && s.getDirection() == SignalResult.Direction.BUY));
                 if (optionsEvaluator != null) {
                     optionsEvaluator.evaluate(symbol, price, buys, sells, signalStr, featureCsv);
                 }
@@ -355,6 +388,7 @@ public class TradingLoop implements Runnable {
                             "Pre-close: avoid overnight hold");
                     trailingStop.reset(sym);
                     entryTimes.remove(sym);
+                    entryPrices.remove(sym);
                     researchCallback.accept(sym + " closed at $" + String.format("%.2f", closePrice)
                             + ": pre-close overnight avoidance");
                 }
