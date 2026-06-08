@@ -16,8 +16,13 @@ public class AppConfig {
     public enum BrokerType { SIMULATED, ALPACA_PAPER, ALPACA_LIVE }
     public enum QuoteProviderType { YAHOO, ALPACA }
 
-    private static final Path CONFIG_PATH =
-            Path.of(System.getProperty("user.home"), ".tradingapp", "app.properties");
+    public static final String APP_PROFILE = "paper-trader";
+
+    public static Path getDataDir() {
+        return Path.of(System.getProperty("user.home"), ".tradingapp", APP_PROFILE);
+    }
+
+    private static final Path CONFIG_PATH = getDataDir().resolve("app.properties");
 
     private BrokerType brokerType = BrokerType.SIMULATED;
     private String alpacaApiKey = "";

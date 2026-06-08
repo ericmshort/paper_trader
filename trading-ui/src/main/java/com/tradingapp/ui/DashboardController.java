@@ -122,7 +122,8 @@ public class DashboardController implements Initializable {
     @Override
     public void initialize(URL location, ResourceBundle resources) {
         account = new Account();
-        transactionLog = new TransactionLog();
+        transactionLog = new TransactionLog(
+                AppConfig.getDataDir().resolve("transactions.db").toString());
         transactionLog.restoreAccount(account);
         priceHistory = new PriceHistory();
         bsEngine = new BlackScholesEngine();
@@ -208,7 +209,7 @@ public class DashboardController implements Initializable {
         optionsRouter = new OptionsSignalRouter(
                 bsEngine, optExec, account, priceHistory, researchCb, quoteProvider);
 
-        Path weightsPath = Path.of(System.getProperty("user.home"), ".tradingapp", "signal-weights.json");
+        Path weightsPath = AppConfig.getDataDir().resolve("signal-weights.json");
         SignalWeights initialWeights;
         try {
             initialWeights = Files.exists(weightsPath) ? SignalWeights.load(weightsPath) : new SignalWeights();
