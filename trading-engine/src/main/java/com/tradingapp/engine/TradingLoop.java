@@ -7,9 +7,12 @@ import com.tradingapp.account.TransactionLog;
 import com.tradingapp.data.CandleBar;
 import com.tradingapp.data.CandleHistory;
 import com.tradingapp.data.EarningsCalendar;
+import com.tradingapp.data.NewsSentimentCache;
 import com.tradingapp.data.PriceHistory;
 import com.tradingapp.data.QuoteModel;
 import com.tradingapp.data.QuoteProvider;
+import com.tradingapp.data.SentimentDirection;
+import com.tradingapp.data.SentimentScore;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -66,6 +69,7 @@ public class TradingLoop implements Runnable {
     private final Map<String, Double> lastKnownPrices = new HashMap<>();
     private final Map<String, LocalDate> dailyBarLastRecorded = new HashMap<>();
     private CandleHistory candleHistory;
+    private NewsSentimentCache sentimentCache;
 
     public TradingLoop(QuoteProvider dataClient, PriceHistory priceHistory,
                        IndicatorEngine indicators, TrailingStopMonitor trailingStop,
@@ -153,6 +157,7 @@ public class TradingLoop implements Runnable {
     public void setEarningsCalendar(EarningsCalendar cal) { this.earningsCalendar = cal; }
     public void setEarningsBlackoutDays(int days) { this.earningsBlackoutDays = days; }
     public void setCandleHistory(CandleHistory history) { this.candleHistory = history; }
+    public void setNewsSentimentCache(NewsSentimentCache cache) { this.sentimentCache = cache; }
 
     @Override
     public void run() {
@@ -238,6 +243,16 @@ public class TradingLoop implements Runnable {
                     signals = indicators.evaluateAllWithCandles(prices, volumes, price, oneMin, fiveMin);
                 } else {
                     signals = indicators.evaluateAll(prices, volumes, price);
+                }
+                // Append today's news sentiment as an additional weighted signal
+                if (sentimentCache != null) {
+                    SentimentScore sentiment = sentimentCache.getScore(symbol);
+                    if (sentiment != null && sentiment.direction() != SentimentDirection.NEUTRAL
+                            && sentiment.weight() > 0) {
+                        SignalResult.Direction dir = sentiment.direction() == SentimentDirection.BULLISH
+                                ? SignalResult.Direction.BUY : SignalResult.Direction.SELL;
+                        signals.add(new SignalResult("NEWS_SENTIMENT", dir, sentiment.weight()));
+                    }
                 }
                 int buys = indicators.countBuySignals(signals);
                 int sells = indicators.countSellSignals(signals);

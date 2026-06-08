@@ -20,7 +20,9 @@ import com.tradingapp.data.QuoteProvider;
 import com.tradingapp.data.YahooFinanceQuoteProvider;
 import com.tradingapp.ai.MLSignalEvaluator;
 import com.tradingapp.ai.SignalWeights;
+import com.tradingapp.data.NewsSentimentCache;
 import com.tradingapp.engine.*;
+import com.tradingapp.sentiment.SentimentRefreshScheduler;
 import com.tradingapp.options.BlackScholesEngine;
 import com.tradingapp.options.OptionsOrderExecutor;
 import com.tradingapp.options.OptionsSignalRouter;
@@ -116,6 +118,8 @@ public class DashboardController implements Initializable {
     private TradingLoop tradingLoop;
     private OptionsSignalRouter optionsRouter;
     private AlpacaWebSocketFreeProvider wsProvider;
+    private SentimentRefreshScheduler sentimentScheduler;
+    private final NewsSentimentCache sentimentCache = new NewsSentimentCache();
     private XYChart.Series<Number, Number> equitySeries;
     private int tickCount = 0;
     private boolean alpacaMode = false;
@@ -263,6 +267,14 @@ public class DashboardController implements Initializable {
         tradingLoop.setTransactionLog(transactionLog);
         if (useWsProvider) {
             tradingLoop.setCandleHistory(candleHistory);
+        }
+        tradingLoop.setNewsSentimentCache(sentimentCache);
+
+        if (sentimentScheduler != null) sentimentScheduler.stop();
+        if (!appConfig.getClaudeApiKey().isBlank()) {
+            sentimentScheduler = new SentimentRefreshScheduler(
+                    sentimentCache, appConfig.getClaudeApiKey(), allSymbols, researchCb);
+            sentimentScheduler.start();
         }
         tradingLoop.setDailyLossLimitPct(appConfig.getDailyLossLimitPct() / 100.0);
         tradingLoop.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
@@ -1058,6 +1070,7 @@ public class DashboardController implements Initializable {
     }
 
     public void stop() {
+        if (sentimentScheduler != null) sentimentScheduler.stop();
         if (wsProvider != null) {
             wsProvider.stop();
         }

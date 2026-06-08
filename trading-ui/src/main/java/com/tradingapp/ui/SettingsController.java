@@ -39,6 +39,7 @@ public class SettingsController implements Initializable {
     @FXML private CheckBox strategyLongCall;
     @FXML private CheckBox strategyLongPut;
     @FXML private CheckBox strategyZeroDte;
+    @FXML private PasswordField claudeApiKeyField;
     @FXML private Button testConnectionButton;
     @FXML private Label statusLabel;
 
@@ -89,6 +90,7 @@ public class SettingsController implements Initializable {
         maxPortfolioExposureField.setText(String.valueOf(cfg.getMaxPortfolioExposurePct()));
         marketRegimeFilterCheck.setSelected(cfg.isMarketRegimeFilterEnabled());
         earningsBlackoutField.setText(String.valueOf(cfg.getEarningsBlackoutDays()));
+        claudeApiKeyField.setText(cfg.getClaudeApiKey());
         Set<String> enabled = cfg.getEnabledStrategies();
         strategyHighDeltaScalp.setSelected(enabled.contains("HIGH_DELTA_SCALP"));
         strategyMomentumNearTerm.setSelected(enabled.contains("MOMENTUM_NEAR_TERM"));
@@ -298,6 +300,7 @@ public class SettingsController implements Initializable {
             double exposure = Double.parseDouble(maxPortfolioExposureField.getText().strip());
             cfg.setMaxPortfolioExposurePct(Math.min(100, Math.max(1, exposure)));
         } catch (NumberFormatException ignored) {}
+        cfg.setClaudeApiKey(claudeApiKeyField.getText().strip());
         cfg.setAvoidOvernightHolds(true);
         cfg.setMarketRegimeFilterEnabled(marketRegimeFilterCheck.isSelected());
         try {

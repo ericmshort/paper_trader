@@ -27,6 +27,7 @@ public class AppConfig {
     private BrokerType brokerType = BrokerType.SIMULATED;
     private String alpacaApiKey = "";
     private String alpacaApiSecret = "";
+    private String claudeApiKey = "";
     private QuoteProviderType quoteProviderType = QuoteProviderType.YAHOO;
     private double dailyLossLimitPct = 5.0;
     private double maxPortfolioExposurePct = 60.0;
@@ -51,6 +52,7 @@ public class AppConfig {
             } catch (IllegalArgumentException ignored) {}
             config.alpacaApiKey = props.getProperty("broker.alpaca.api_key", "");
             config.alpacaApiSecret = props.getProperty("broker.alpaca.api_secret", "");
+            config.claudeApiKey = props.getProperty("ai.claude.api_key", "");
             try {
                 config.quoteProviderType = QuoteProviderType.valueOf(props.getProperty("quote.provider", "YAHOO"));
             } catch (IllegalArgumentException ignored) {}
@@ -87,6 +89,7 @@ public class AppConfig {
             props.setProperty("broker.type", brokerType.name());
             props.setProperty("broker.alpaca.api_key", alpacaApiKey);
             props.setProperty("broker.alpaca.api_secret", alpacaApiSecret);
+            props.setProperty("ai.claude.api_key", claudeApiKey);
             props.setProperty("quote.provider", quoteProviderType.name());
             props.setProperty("risk.daily_loss_limit_pct", String.valueOf(dailyLossLimitPct));
             props.setProperty("risk.max_portfolio_exposure_pct", String.valueOf(maxPortfolioExposurePct));
@@ -132,6 +135,9 @@ public class AppConfig {
     public Set<String> getEnabledStrategies() { return enabledStrategies; }
     public void setEnabledStrategies(Set<String> strategies) { this.enabledStrategies = new LinkedHashSet<>(strategies); }
     public boolean isStrategyEnabled(String name) { return enabledStrategies.contains(name); }
+
+    public String getClaudeApiKey() { return claudeApiKey; }
+    public void setClaudeApiKey(String key) { this.claudeApiKey = key; }
 
     public boolean isAlpacaBroker() {
         return brokerType == BrokerType.ALPACA_PAPER || brokerType == BrokerType.ALPACA_LIVE;

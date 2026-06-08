@@ -74,6 +74,21 @@
 
     <Separator/>
 
+    <!-- AI / News Sentiment section -->
+    <Label text="AI News Sentiment"
+           style="-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #aaaaaa;"/>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Claude API Key:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <PasswordField fx:id="claudeApiKeyField" prefWidth="340"
+                       style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                       promptText="sk-ant-…"/>
+    </HBox>
+    <Label text="Used for pre-market news sentiment analysis. Leave blank to disable. Get a key at console.anthropic.com."
+           style="-fx-font-size: 11px; -fx-text-fill: #888888;" wrapText="true" maxWidth="520"/>
+
+    <Separator/>
+
     <!-- Risk settings section -->
     <Label text="Risk Controls"
            style="-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #aaaaaa;"/>
