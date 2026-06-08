@@ -14,6 +14,7 @@ import com.tradingapp.data.QuoteProvider;
 import com.tradingapp.data.SentimentDirection;
 import com.tradingapp.data.SentimentScore;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
@@ -66,8 +67,10 @@ public class TradingLoop implements Runnable {
     private boolean marketRegimeFilterEnabled = true;
     private EarningsCalendar earningsCalendar;
     private int earningsBlackoutDays = 3;
+    private int minHoldMinutes = 15;
     private final Map<String, Double> lastKnownPrices = new HashMap<>();
     private final Map<String, LocalDate> dailyBarLastRecorded = new HashMap<>();
+    private final Map<String, ZonedDateTime> entryTimes = new HashMap<>();
     private CandleHistory candleHistory;
     private NewsSentimentCache sentimentCache;
 
@@ -156,6 +159,7 @@ public class TradingLoop implements Runnable {
     public boolean isUptrend() { return isMarketInUptrend(); }
     public void setEarningsCalendar(EarningsCalendar cal) { this.earningsCalendar = cal; }
     public void setEarningsBlackoutDays(int days) { this.earningsBlackoutDays = days; }
+    public void setMinHoldMinutes(int minutes) { this.minHoldMinutes = minutes; }
     public void setCandleHistory(CandleHistory history) { this.candleHistory = history; }
     public void setNewsSentimentCache(NewsSentimentCache cache) { this.sentimentCache = cache; }
 
@@ -255,34 +259,58 @@ public class TradingLoop implements Runnable {
                         signals.add(new SignalResult("NEWS_SENTIMENT", dir, sentiment.weight()));
                     }
                 }
+                // Candlestick is useful for confirming entries but too noisy as an exit trigger —
+                // a single red candle should not close a position. Exclude it from sell scoring.
+                List<SignalResult> sellSignals = signals.stream()
+                        .filter(s -> !"Candlestick".equals(s.getIndicatorName()))
+                        .collect(Collectors.toList());
+
                 int buys = indicators.countBuySignals(signals);
-                int sells = indicators.countSellSignals(signals);
+                int sells = indicators.countSellSignals(sellSignals);
                 double weightedBuys = weightEvaluator != null
                         ? weightEvaluator.weightedBuyScore(signals) : (double) buys;
                 double weightedSells = weightEvaluator != null
-                        ? weightEvaluator.weightedSellScore(signals) : (double) sells;
+                        ? weightEvaluator.weightedSellScore(sellSignals) : (double) sells;
                 String signalStr = signals.stream().map(SignalResult::toString).collect(Collectors.joining(", "));
                 String featureCsv = extractFeatureCsv(signals);
                 boolean hasPosition = account.isStockVerified(symbol);
 
                 // ── Multi-indicator ───────────────────────────────────────────────────
                 if (trailingStop.check(symbol, price) && hasPosition) {
+                    // Trailing stop always fires regardless of hold time — it's a loss-protection rule.
                     Position pos = account.getPositions().get(symbol);
                     brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Trailing stop: 5% drawdown from peak");
                     account.removePosition(symbol);
                     trailingStop.reset(symbol);
+                    entryTimes.remove(symbol);
                     uiRefreshCallback.run();
                 } else if (weightedSells >= SIGNAL_THRESHOLD && hasPosition) {
-                    Position pos = account.getPositions().get(symbol);
-                    brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Signals: " + sells + "/" + signals.size() + " SELL");
-                    account.removePosition(symbol);
-                    trailingStop.reset(symbol);
-                    uiRefreshCallback.run();
+                    ZonedDateTime entryTime = entryTimes.get(symbol);
+                    long heldMinutes = entryTime != null
+                            ? Duration.between(entryTime, now).toMinutes() : Long.MAX_VALUE;
+                    if (heldMinutes < minHoldMinutes) {
+                        researchCallback.accept(symbol + " SELL skipped: min hold ("
+                                + heldMinutes + "/" + minHoldMinutes + "min)");
+                    } else {
+                        Position pos = account.getPositions().get(symbol);
+                        brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr,
+                                "Signals: " + sells + "/" + sellSignals.size() + " SELL");
+                        account.removePosition(symbol);
+                        trailingStop.reset(symbol);
+                        entryTimes.remove(symbol);
+                        uiRefreshCallback.run();
+                    }
                 } else if (weightedBuys >= SIGNAL_THRESHOLD && !hasPosition
                         && !orbFormationPeriod && !time.isAfter(LAST_ENTRY_TIME)) {
                     int daysToEarnings = earningsCalendar != null
                             ? earningsCalendar.daysUntilEarnings(symbol) : Integer.MAX_VALUE;
-                    if (!isMarketInUptrend()) {
+                    // Skip entry if RSI is active and overbought — avoids buying into exhausted moves.
+                    boolean rsiOverbought = signals.stream()
+                            .anyMatch(s -> "RSI".equals(s.getIndicatorName())
+                                    && s.getDirection() == SignalResult.Direction.SELL);
+                    if (rsiOverbought) {
+                        researchCallback.accept(symbol + " BUY skipped: RSI overbought");
+                    } else if (!isMarketInUptrend()) {
                         researchCallback.accept(symbol + " BUY skipped: SPY below 5-day MA (short-term downtrend)");
                     } else if (daysToEarnings <= earningsBlackoutDays) {
                         researchCallback.accept(symbol + " BUY skipped: earnings in "
@@ -304,6 +332,7 @@ public class TradingLoop implements Runnable {
                         if (shares > 0) {
                             brokerClient.submitBuy(symbol, shares, price, signalStr,
                                     "Signals: " + buys + "/" + signals.size() + " BUY", featureCsv);
+                            entryTimes.put(symbol, now);
                             uiRefreshCallback.run();
                         }
                     }
@@ -325,6 +354,7 @@ public class TradingLoop implements Runnable {
                     brokerClient.submitSell(sym, pos.getQuantity(), closePrice, "",
                             "Pre-close: avoid overnight hold");
                     trailingStop.reset(sym);
+                    entryTimes.remove(sym);
                     researchCallback.accept(sym + " closed at $" + String.format("%.2f", closePrice)
                             + ": pre-close overnight avoidance");
                 }

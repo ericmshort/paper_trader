@@ -13,6 +13,7 @@ import com.tradingapp.broker.AppConfig;
 import com.tradingapp.data.CandleHistory;
 import com.tradingapp.data.DayTraderWatchList;
 import com.tradingapp.data.EarningsCalendar;
+import com.tradingapp.data.HistoricalBarFetcher;
 import com.tradingapp.data.LargeCapWatchList;
 import com.tradingapp.data.SmallCapWatchList;
 import com.tradingapp.data.PriceHistory;
@@ -294,34 +295,35 @@ public class DashboardController implements Initializable {
         // Day trading: 5s interval so candle data and signals are evaluated frequently
         scheduler.scheduleAtFixedRate(tradingLoop, 0, 5, TimeUnit.SECONDS);
 
-        // Seed daily price history for RSI / Bollinger baseline.
-        // WebSocket provider seeds from Alpaca REST; others use Yahoo.
-        QuoteProvider seedProvider = useWsProvider ? wsProvider : new YahooFinanceQuoteProvider();
-        long seedDelayMs = useWsProvider ? 300 : 120; // Alpaca REST is faster, fewer symbols too
+        // Seed daily price history so RSI and Bollinger Bands are active from the first tick.
+        // Always use Yahoo Finance (free, no credentials) — Alpaca's data API requires
+        // a paid subscription and fails silently, leaving RSI/BB permanently neutral.
+        // 60 calendar days gives ~43 trading days, enough for RSI(9) and BB(20) with buffer.
+        HistoricalBarFetcher seedFetcher = new HistoricalBarFetcher();
         Thread seedThread = new Thread(() -> {
             LocalDate end = LocalDate.now();
-            LocalDate start = end.minusDays(280);
+            LocalDate start = end.minusDays(60);
             int seeded = 0;
             List<String> symbolsToSeed = new ArrayList<>(allSymbols);
             if (!symbolsToSeed.contains("SPY")) symbolsToSeed.add("SPY");
             for (String sym : symbolsToSeed) {
                 try {
-                    var bars = seedProvider.getHistoricalBars(sym, start, end);
+                    var bars = seedFetcher.fetchDailyBars(sym, start, end);
                     if (bars != null && !bars.isEmpty()) {
                         priceHistory.seed(sym, bars);
                         seeded++;
                     }
-                    Thread.sleep(seedDelayMs);
+                    Thread.sleep(120);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
-                    // Non-fatal: symbol will build history organically from live ticks
+                    researchCb.accept("Seed failed for " + sym + ": " + e.getMessage());
                 }
             }
             int finalSeeded = seeded;
-            Platform.runLater(() -> researchCb.accept(
-                    "Price history seeded for " + finalSeeded + "/" + symbolsToSeed.size() + " symbols (incl. SPY regime data)."));
+            researchCb.accept("Price history seeded for " + finalSeeded + "/"
+                    + symbolsToSeed.size() + " symbols — RSI and Bollinger Bands now active.");
         }, "price-history-seed");
         seedThread.setDaemon(true);
         seedThread.start();
