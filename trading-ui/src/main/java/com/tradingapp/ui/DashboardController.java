@@ -52,6 +52,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.ResourceBundle;
 import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -113,6 +114,7 @@ public class DashboardController implements Initializable {
     private XYChart.Series<Number, Number> equitySeries;
     private int tickCount = 0;
     private boolean alpacaMode = false;
+    private final ConcurrentLinkedQueue<String> pendingMessages = new ConcurrentLinkedQueue<>();
 
     private static final Logger LOG = Logger.getLogger(DashboardController.class.getName());
     private final TradingLogger tradingLogger = new TradingLogger();
@@ -195,13 +197,17 @@ public class DashboardController implements Initializable {
         }
 
         Consumer<String> researchCb = msg -> {
-            Platform.runLater(() -> researchArea.appendText(msg + "\n"));
+            pendingMessages.add(msg);
             // Quote lines: "HH:mm | SYMBOL $price | ... | BUY=n SELL=n" — skip those
             if (!msg.contains("| BUY=")) {
                 tradingLogger.log(msg);
             }
         };
-        Runnable uiRefresh = () -> Platform.runLater(this::refreshUi);
+        // Compute snapshot on the trading-loop thread; only dispatch FX mutations to the FX thread.
+        Runnable uiRefresh = () -> {
+            UiSnapshot snapshot = computeUiSnapshot();
+            Platform.runLater(() -> applyUiSnapshot(snapshot));
+        };
 
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, transactionLog,
                 appConfig.isAlpacaBroker()
@@ -286,45 +292,42 @@ public class DashboardController implements Initializable {
     }
 
     private void handleBrokerReset(AppConfig newConfig) {
-        Platform.runLater(() -> {
-            // Stop the current trading loop
-            if (scheduler != null) {
-                scheduler.shutdownNow();
-                try { scheduler.awaitTermination(5, TimeUnit.SECONDS); }
+        // Capture and clear fields on the FX thread before handing off to background.
+        ScheduledExecutorService schedulerToStop = scheduler;
+        AlpacaWebSocketFreeProvider wsToStop = wsProvider;
+        scheduler = null;
+        wsProvider = null;
+
+        Thread resetThread = new Thread(() -> {
+            // Blocking shutdown off the FX thread — previously froze the UI for up to 5 seconds.
+            if (schedulerToStop != null) {
+                schedulerToStop.shutdownNow();
+                try { schedulerToStop.awaitTermination(5, TimeUnit.SECONDS); }
                 catch (InterruptedException e) { Thread.currentThread().interrupt(); }
             }
+            if (wsToStop != null) wsToStop.stop();
 
-            // Wipe all historical data
-            transactionLog.clearAll();
-
-            // Reset account state
-            if (newConfig.isAlpacaBroker()) {
-                account.reset(0.0);
-            } else {
-                account.reset(100_000.0);
-            }
-
-            // Reset chart and price history
-            priceHistory = new PriceHistory();
-            equitySeries.getData().clear();
-            tickCount = 0;
-
-            // Refresh UI to show cleared state
-            refreshUi();
-            researchArea.setText("Broker switched to "
-                    + SettingsController.brokerTypeLabel(newConfig.getBrokerType())
-                    + ". Historical data cleared.\n"
-                    + "Waiting for market data...\n");
-
-            // Restart the trading loop with new config
-            startTradingComponents(newConfig);
-
-            // Update settings controller so it knows the new active broker/credentials
-            if (settingsPanelController != null) {
-                settingsPanelController.setActiveBrokerType(newConfig.getBrokerType());
-                settingsPanelController.setActiveApiKey(newConfig.getAlpacaApiKey());
-            }
-        });
+            Platform.runLater(() -> {
+                pendingMessages.clear();
+                transactionLog.clearAll();
+                account.reset(newConfig.isAlpacaBroker() ? 0.0 : 100_000.0);
+                priceHistory = new PriceHistory();
+                candleHistory = new CandleHistory();
+                equitySeries.getData().clear();
+                tickCount = 0;
+                applyUiSnapshot(computeUiSnapshot());
+                researchArea.setText("Broker switched to "
+                        + SettingsController.brokerTypeLabel(newConfig.getBrokerType())
+                        + ". Historical data cleared.\nWaiting for market data...\n");
+                startTradingComponents(newConfig);
+                if (settingsPanelController != null) {
+                    settingsPanelController.setActiveBrokerType(newConfig.getBrokerType());
+                    settingsPanelController.setActiveApiKey(newConfig.getAlpacaApiKey());
+                }
+            });
+        }, "broker-reset");
+        resetThread.setDaemon(true);
+        resetThread.start();
     }
 
     private void setupTableColumns() {
@@ -404,11 +407,10 @@ public class DashboardController implements Initializable {
         stkColUnrealizedPnl.setCellValueFactory(new PropertyValueFactory<>("unrealizedPnl"));
     }
 
-    private double populateOptionsTable() {
-        List<OptionsPositionRow> rows = new ArrayList<>();
+    // Compute-phase: builds rows from account state. Safe to call on any thread.
+    private double buildOptionsRows(List<OptionsPositionRow> rows) {
         double totalUnrealized = 0.0;
 
-        // Group legs that belong to the same multi-leg strategy into one display row
         Map<String, List<Map.Entry<String, OptionsPosition>>> groups = new java.util.LinkedHashMap<>();
         for (Map.Entry<String, OptionsPosition> entry : account.getOptionsPositions().entrySet()) {
             String gk = strategyGroupKey(entry.getKey(), entry.getValue().getSymbol());
@@ -453,8 +455,6 @@ public class DashboardController implements Initializable {
                         contracts, costRaw, currentValueRaw));
             }
         }
-
-        optionsTable.setItems(FXCollections.observableArrayList(rows));
         return totalUnrealized;
     }
 
@@ -488,8 +488,8 @@ public class DashboardController implements Initializable {
         };
     }
 
-    private double populateStockTable() {
-        List<StockPositionRow> rows = new ArrayList<>();
+    // Compute-phase: builds rows from account state. Safe to call on any thread.
+    private double buildStockRows(List<StockPositionRow> rows) {
         double totalUnrealized = 0.0;
         for (Position pos : account.getPositions().values()) {
             List<Double> prices = priceHistory.getPrices(pos.getSymbol());
@@ -497,7 +497,6 @@ public class DashboardController implements Initializable {
             totalUnrealized += (currentPrice - pos.getAverageCost()) * pos.getQuantity();
             rows.add(new StockPositionRow(pos.getSymbol(), pos.getQuantity(), pos.getAverageCost(), currentPrice));
         }
-        stockPositionsTable.setItems(FXCollections.observableArrayList(rows));
         return totalUnrealized;
     }
 
@@ -582,48 +581,80 @@ public class DashboardController implements Initializable {
                 .sum();
     }
 
-    private void refreshUi() {
-        List<TransactionRecord> history = collapseMultiLegHistory(transactionLog.findAll());
-        tradeHistoryTable.setItems(FXCollections.observableArrayList(history));
+    private record UiSnapshot(
+            List<TransactionRecord> history,
+            double availableCash,
+            double stockHoldings,
+            double optionHoldings,
+            double totalPortfolio,
+            double optionsCashDeployed,
+            List<OptionsPositionRow> optionRows,
+            double optTotalUnrealized,
+            List<StockPositionRow> stockRows,
+            double stkTotalUnrealized,
+            int wins,
+            int losses,
+            double winRate,
+            double realizedPnl,
+            boolean tradingHalted
+    ) {}
 
+    // Safe to call on any thread — no FX node access.
+    private UiSnapshot computeUiSnapshot() {
+        List<TransactionRecord> history = collapseMultiLegHistory(transactionLog.findAll());
         double availableCash = account.getBalance();
         double stockHoldings = computeStockHoldings();
         double optionHoldings = computeOptionHoldings();
         double totalPortfolio = availableCash + stockHoldings + optionHoldings;
+        double optionsCashDeployed = computeOptionsCashDeployed();
 
-        totalPortfolioLabel.setText(String.format("Total Portfolio: $%,.2f", totalPortfolio));
-        stockHoldingsLabel.setText(String.format("Stocks: $%,.2f", stockHoldings));
-        optionHoldingsLabel.setText(String.format("Options: $%,.2f", optionHoldings));
-        availableCashLabel.setText(String.format("Cash: $%,.2f", availableCash));
-        optionsCashDeployedLabel.setText(String.format("Options Reserved: $%,.2f", computeOptionsCashDeployed()));
+        List<OptionsPositionRow> optionRows = new ArrayList<>();
+        double optTotalUnrealized = buildOptionsRows(optionRows);
 
-        double optTotalUnrealized = populateOptionsTable();
-        double stkTotalUnrealized = populateStockTable();
-        unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", optTotalUnrealized + stkTotalUnrealized));
-        optionsTotalUnrealizedLabel.setText(String.format("Market Value: $%,.2f", optionHoldings));
-        stockTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", stkTotalUnrealized));
+        List<StockPositionRow> stockRows = new ArrayList<>();
+        double stkTotalUnrealized = buildStockRows(stockRows);
 
         List<ClosedTradeRecord> closedTrades = computeClosedTrades();
-        int wins = (int) closedTrades.stream().filter(t -> t.getPnlRaw() >= 0).count();
-        int losses = (int) closedTrades.stream().filter(t -> t.getPnlRaw() < 0).count();
-        int total = wins + losses;
-        double winRate = total > 0 ? (wins * 100.0 / total) : 0.0;
-        winsLabel.setText("Wins: " + wins);
-        lossesLabel.setText("Losses: " + losses);
-        winRateLabel.setText(String.format("Win Rate: %.1f%%", winRate));
+        int wins   = (int) closedTrades.stream().filter(t -> t.getPnlRaw() >= 0).count();
+        int losses = (int) closedTrades.stream().filter(t -> t.getPnlRaw() <  0).count();
+        int total  = wins + losses;
+        double winRate    = total > 0 ? (wins * 100.0 / total) : 0.0;
         double realizedPnl = closedTrades.stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
-        pnlButton.setText(String.format("P&L: $%,.2f", realizedPnl));
 
-        equitySeries.getData().add(new XYChart.Data<>(tickCount++, totalPortfolio));
-        if (equitySeries.getData().size() > 200) {
-            equitySeries.getData().remove(0);
-        }
+        return new UiSnapshot(history, availableCash, stockHoldings, optionHoldings, totalPortfolio,
+                optionsCashDeployed, optionRows, optTotalUnrealized, stockRows, stkTotalUnrealized,
+                wins, losses, winRate, realizedPnl, account.isTradingHalted());
+    }
 
-        if (account.isTradingHalted()) {
-            haltedLabel.setText("⛔ TRADING HALTED — portfolio exhausted");
-        } else {
-            haltedLabel.setText("");
-        }
+    // Must be called on the FX thread. Only touches FX nodes.
+    private void applyUiSnapshot(UiSnapshot s) {
+        String msg;
+        StringBuilder logBuf = new StringBuilder();
+        while ((msg = pendingMessages.poll()) != null) logBuf.append(msg).append('\n');
+        if (logBuf.length() > 0) researchArea.appendText(logBuf.toString());
+
+        tradeHistoryTable.setItems(FXCollections.observableArrayList(s.history()));
+        totalPortfolioLabel.setText(String.format("Total Portfolio: $%,.2f", s.totalPortfolio()));
+        stockHoldingsLabel.setText(String.format("Stocks: $%,.2f", s.stockHoldings()));
+        optionHoldingsLabel.setText(String.format("Options: $%,.2f", s.optionHoldings()));
+        availableCashLabel.setText(String.format("Cash: $%,.2f", s.availableCash()));
+        optionsCashDeployedLabel.setText(String.format("Options Reserved: $%,.2f", s.optionsCashDeployed()));
+        optionsTable.setItems(FXCollections.observableArrayList(s.optionRows()));
+        stockPositionsTable.setItems(FXCollections.observableArrayList(s.stockRows()));
+        unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", s.optTotalUnrealized() + s.stkTotalUnrealized()));
+        optionsTotalUnrealizedLabel.setText(String.format("Market Value: $%,.2f", s.optionHoldings()));
+        stockTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", s.stkTotalUnrealized()));
+        winsLabel.setText("Wins: " + s.wins());
+        lossesLabel.setText("Losses: " + s.losses());
+        winRateLabel.setText(String.format("Win Rate: %.1f%%", s.winRate()));
+        pnlButton.setText(String.format("P&L: $%,.2f", s.realizedPnl()));
+        equitySeries.getData().add(new XYChart.Data<>(tickCount++, s.totalPortfolio()));
+        if (equitySeries.getData().size() > 200) equitySeries.getData().remove(0);
+        haltedLabel.setText(s.tradingHalted() ? "⛔ TRADING HALTED — portfolio exhausted" : "");
+    }
+
+    private void refreshUi() {
+        applyUiSnapshot(computeUiSnapshot());
     }
 
     public void refreshBalance() {
