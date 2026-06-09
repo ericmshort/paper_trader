@@ -87,8 +87,9 @@ public class DashboardController implements Initializable {
     @FXML private TableColumn<OptionsPositionRow, String> optColStrike;
     @FXML private TableColumn<OptionsPositionRow, String> optColExpiry;
     @FXML private TableColumn<OptionsPositionRow, Integer> optColContracts;
-    @FXML private TableColumn<OptionsPositionRow, String> optColPnl;
+    @FXML private TableColumn<OptionsPositionRow, String> optColCost;
     @FXML private TableColumn<OptionsPositionRow, String> optColCurrentValue;
+    @FXML private TableColumn<OptionsPositionRow, String> optColPnl;
     @FXML private TableView<StockPositionRow> stockPositionsTable;
     @FXML private TableColumn<StockPositionRow, String> stkColSymbol;
     @FXML private TableColumn<StockPositionRow, Integer> stkColQuantity;
@@ -438,8 +439,9 @@ public class DashboardController implements Initializable {
         optColStrike.setCellValueFactory(new PropertyValueFactory<>("strike"));
         optColExpiry.setCellValueFactory(new PropertyValueFactory<>("expiry"));
         optColContracts.setCellValueFactory(new PropertyValueFactory<>("contracts"));
-        optColPnl.setCellValueFactory(new PropertyValueFactory<>("pnl"));
+        optColCost.setCellValueFactory(new PropertyValueFactory<>("cost"));
         optColCurrentValue.setCellValueFactory(new PropertyValueFactory<>("currentValue"));
+        optColPnl.setCellValueFactory(new PropertyValueFactory<>("pnl"));
     }
 
     private void setupStockTableColumns() {

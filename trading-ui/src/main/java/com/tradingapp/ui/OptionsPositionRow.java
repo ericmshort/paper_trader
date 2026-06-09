@@ -7,6 +7,7 @@ public class OptionsPositionRow {
     private final String strike;
     private final String expiry;
     private final int contracts;
+    private final String cost;
     private final String currentValue;
     private final String pnl;
 
@@ -21,6 +22,10 @@ public class OptionsPositionRow {
         this.strike = strike;
         this.expiry = expiry;
         this.contracts = contracts;
+
+        this.cost = costRaw >= 0
+                ? String.format("+$%.2f", costRaw)
+                : String.format("-$%.2f", Math.abs(costRaw));
 
         this.currentValue = currentValueRaw >= 0
                 ? String.format("+$%.2f", currentValueRaw)
@@ -37,6 +42,7 @@ public class OptionsPositionRow {
     public String getStrike() { return strike; }
     public String getExpiry() { return expiry; }
     public int getContracts() { return contracts; }
+    public String getCost() { return cost; }
     public String getCurrentValue() { return currentValue; }
     public String getPnl() { return pnl; }
 }
