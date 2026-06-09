@@ -234,8 +234,14 @@ public class DashboardController implements Initializable {
                 appConfig.isAlpacaBroker()
                         ? (AlpacaBroker) brokerClient
                         : null);
+        // AlpacaWebSocketFreeProvider.getOptionsChain() is a stub — options chains
+        // require REST. Use a dedicated AlpacaQuoteProvider for chain lookups when
+        // the WebSocket provider is active for real-time prices.
+        QuoteProvider optionsDataClient = useWsProvider
+                ? new AlpacaQuoteProvider(appConfig)
+                : quoteProvider;
         optionsRouter = new OptionsSignalRouter(
-                bsEngine, optExec, account, priceHistory, researchCb, quoteProvider);
+                bsEngine, optExec, account, priceHistory, researchCb, optionsDataClient);
 
         Path weightsPath = AppConfig.getDataDir().resolve("signal-weights.json");
         SignalWeights initialWeights;
