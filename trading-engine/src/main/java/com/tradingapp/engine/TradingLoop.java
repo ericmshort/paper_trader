@@ -214,6 +214,25 @@ public class TradingLoop implements Runnable {
                     dayStartValue = account.getBalance() + stockMV;
                 }
                 account.setDailyLossHalted(false);
+                // Re-evaluate immediately: if the app was restarted after hitting the loss limit
+                // intraday, dayStartValue is set from yesterday's close but the portfolio is already
+                // depleted. Without this check, the halt is cleared and trading resumes from the
+                // already-degraded baseline until the new limit is hit again.
+                if (dailyLossLimitPct > 0 && dayStartValue > 0) {
+                    double stockMV = account.getPositions().values().stream()
+                            .mapToDouble(Position::getMarketValue).sum();
+                    double optsBasis = account.getOptionsPositions().values().stream()
+                            .filter(p -> p.getContracts() > 0)
+                            .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
+                            .sum();
+                    double currentVal = account.getBalance() + stockMV + optsBasis;
+                    if (currentVal < dayStartValue * (1 - dailyLossLimitPct)) {
+                        account.setDailyLossHalted(true);
+                        researchCallback.accept(String.format(
+                                "Daily loss limit (%.0f%%) already exceeded on startup (current=%.0f, start=%.0f) — trading halted",
+                                dailyLossLimitPct * 100, currentVal, dayStartValue));
+                    }
+                }
                 lossCooldowns.clear();
                 prevOrbBuy.clear();
             }

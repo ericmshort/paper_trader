@@ -158,6 +158,9 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         boolean mixedStrong     = (buySignals >= 2 && sellSignals >= 1)
                                || (sellSignals >= 2 && buySignals >= 1);
 
+        // Block calls in downtrend — symmetric to the per-method put block in uptrend
+        boolean inDowntrend = uptrendSupplier != null && !uptrendSupplier.getAsBoolean();
+
         boolean hasDirectional = opts.containsKey(callKey)          || opts.containsKey(putKey)
                               || opts.containsKey(highDeltaCallKey)  || opts.containsKey(highDeltaPutKey)
                               || opts.containsKey(nearTermCallKey)   || opts.containsKey(nearTermPutKey);
@@ -173,15 +176,21 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         // ── 6. Entry ──────────────────────────────────────────────────────────
         if (extremeBullish && !hasDirectional && !hasMultiLeg) {
-            if (isStrategyEnabled("HIGH_DELTA_SCALP"))
+            if (inDowntrend)
+                researchCallback.accept(symbol + " CALL skip: SPY downtrend");
+            else if (isStrategyEnabled("HIGH_DELTA_SCALP"))
                 tryOpenHighDeltaScalp(symbol, price, K, expiry, T, sigma, true, signalStr, featureCsv);
 
         } else if (veryStrongBull && !hasDirectional && !hasMultiLeg) {
-            if (isStrategyEnabled("MOMENTUM_NEAR_TERM"))
+            if (inDowntrend)
+                researchCallback.accept(symbol + " CALL skip: SPY downtrend");
+            else if (isStrategyEnabled("MOMENTUM_NEAR_TERM"))
                 tryOpenMomentumNearTerm(symbol, price, true, sigma, signalStr, featureCsv);
 
         } else if (purelyBullish && !hasDirectional && !hasMultiLeg) {
-            if (isStrategyEnabled("LONG_CALL"))
+            if (inDowntrend)
+                researchCallback.accept(symbol + " CALL skip: SPY downtrend");
+            else if (isStrategyEnabled("LONG_CALL"))
                 tryOpenLongCall(symbol, price, K, expiry, T, sigma, signalStr, featureCsv, callKey, opts);
 
         } else if (extremeBearish && !hasDirectional && !hasMultiLeg) {
