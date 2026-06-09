@@ -14,28 +14,28 @@ public class IndicatorEngineTest {
 
     private final IndicatorEngine engine = new IndicatorEngine();
 
-    // ── RSI (period=9) ──────────────────────────────────────────────────────────
+    // ── RSI (period=14) ─────────────────────────────────────────────────────────
 
     @Test
     void testRSI_BuySignal() {
-        // 10 declining prices → RSI well below 35
-        List<Double> prices = List.of(100.0,99.0,98.0,97.0,96.0,95.0,94.0,93.0,92.0,91.0,90.0);
+        // 15 declining prices → RSI = 0 (all losses), well below 30
+        List<Double> prices = List.of(100.0,99.0,98.0,97.0,96.0,95.0,94.0,93.0,92.0,91.0,90.0,89.0,88.0,87.0,86.0);
         SignalResult result = engine.computeRSI(prices);
-        assertEquals(SignalResult.Direction.BUY, result.getDirection(), "Steady decline should give BUY (RSI < 35)");
+        assertEquals(SignalResult.Direction.BUY, result.getDirection(), "Steady decline should give BUY (RSI < 30)");
     }
 
     @Test
     void testRSI_SellSignal() {
-        List<Double> prices = List.of(90.0,91.0,92.0,93.0,94.0,95.0,96.0,97.0,98.0,99.0,100.0);
+        List<Double> prices = List.of(86.0,87.0,88.0,89.0,90.0,91.0,92.0,93.0,94.0,95.0,96.0,97.0,98.0,99.0,100.0);
         SignalResult result = engine.computeRSI(prices);
-        assertEquals(SignalResult.Direction.SELL, result.getDirection(), "Steady rise should give SELL (RSI > 65)");
+        assertEquals(SignalResult.Direction.SELL, result.getDirection(), "Steady rise should give SELL (RSI > 70)");
     }
 
     @Test
     void testRSI_InsufficientData() {
-        List<Double> prices = List.of(100.0,99.0,98.0,97.0,96.0,95.0,94.0,93.0,92.0);
+        List<Double> prices = List.of(100.0,99.0,98.0,97.0,96.0,95.0,94.0,93.0,92.0,91.0,90.0,89.0,88.0,87.0);
         SignalResult result = engine.computeRSI(prices);
-        assertEquals(SignalResult.Direction.NEUTRAL, result.getDirection(), "9 prices is insufficient for RSI-9");
+        assertEquals(SignalResult.Direction.NEUTRAL, result.getDirection(), "14 prices is insufficient for RSI-14");
     }
 
     // ── Bollinger Bands ─────────────────────────────────────────────────────────

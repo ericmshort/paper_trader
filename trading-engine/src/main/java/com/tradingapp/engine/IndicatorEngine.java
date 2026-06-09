@@ -12,10 +12,10 @@ public class IndicatorEngine {
 
     private static final ZoneId ET = ZoneId.of("America/New_York");
 
-    // ── RSI (period=9 for faster intraday response) ────────────────────────────
+    // ── RSI (period=14 standard; thresholds 30/70 to reduce whipsaws) ─────────
 
     public SignalResult computeRSI(List<Double> prices) {
-        int period = 9;
+        int period = 14;
         if (prices.size() < period + 1) {
             return SignalResult.neutral("RSI", 0);
         }
@@ -29,8 +29,8 @@ public class IndicatorEngine {
         avgLoss /= period;
         if (avgLoss == 0) return SignalResult.sell("RSI", 100);
         double rsi = 100 - (100 / (1 + avgGain / avgLoss));
-        if (rsi < 35) return SignalResult.buy("RSI", rsi);
-        if (rsi > 65) return SignalResult.sell("RSI", rsi);
+        if (rsi < 30) return SignalResult.buy("RSI", rsi);
+        if (rsi > 70) return SignalResult.sell("RSI", rsi);
         return SignalResult.neutral("RSI", rsi);
     }
 

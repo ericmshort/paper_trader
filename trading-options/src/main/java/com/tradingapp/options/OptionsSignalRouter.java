@@ -42,17 +42,19 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private final QuoteProvider dataClient;
 
     private static final double RISK_FREE_RATE  = 0.04;
-    private static final double MIN_PREMIUM     = 0.10;
+    private static final double MIN_PREMIUM     = 1.50;  // $150/contract minimum to cover fees
     private double maxPortfolioExposure         = 0.60;
-    private static final double IV_SURGE_THRESHOLD = 1.5;
+    private static final double IV_SURGE_THRESHOLD = 1.2;  // skip if recent vol > 1.2x long-term (IV crush guard)
     private static final int    IV_WINDOW          = 20;
     private static final double PROFIT_TARGET      = 2.0;
+    private static final double STOP_LOSS_FRAC     = 0.35;  // close if premium drops to 35% of entry
     private static final double DEEP_ITM_OFFSET    = 10.0;
 
     private final Set<String> sessionStopLossed = new HashSet<>();
     private final Map<String, Long> lastMultiLegCloseMs    = new HashMap<>();
     private final Map<String, Long> lastDirectionalCloseMs = new HashMap<>();
     private final Map<String, Long> lastAnyCloseMs         = new HashMap<>();
+    private final Map<String, Integer> reversalConsecutive = new HashMap<>();
     private static final long MULTILEG_REENTRY_COOLDOWN_MS = 15 * 60 * 1000L;
     private LocalDate stopLossResetDate;
     private BooleanSupplier uptrendSupplier;
@@ -216,20 +218,30 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                           : bsEngine.putPrice(price, pos.getStrike(), RISK_FREE_RATE, T, sigma))
                 : 0.0;
 
-        boolean premiumStop  = canPrice && currentPremium <= pos.getPremiumPaid() * 0.50;
+        boolean premiumStop  = canPrice && currentPremium <= pos.getPremiumPaid() * STOP_LOSS_FRAC;
         boolean profitTarget = currentPremium >= pos.getPremiumPaid() * PROFIT_TARGET;
-        boolean reversal     = reversalSignals >= 2;
         boolean nearExpiry   = pos.daysToExpiry() < 3;
+
+        // Require 2 consecutive ticks of opposing signals before exiting on reversal
+        int consecutive;
+        if (reversalSignals >= 2) {
+            consecutive = reversalConsecutive.merge(posKey, 1, Integer::sum);
+        } else {
+            reversalConsecutive.remove(posKey);
+            consecutive = 0;
+        }
+        boolean reversal = consecutive >= 2;
 
         if (!premiumStop && !profitTarget && !reversal && !nearExpiry) return;
 
+        reversalConsecutive.remove(posKey);
         String reason;
         if (nearExpiry)        reason = "Expiry <3 days";
         else if (profitTarget) reason = String.format("Profit target: %.2f >= 2x of %.2f",
                                         currentPremium, pos.getPremiumPaid());
-        else if (premiumStop)  reason = String.format("Premium stop-loss: %.2f <= 50%% of %.2f",
-                                        currentPremium, pos.getPremiumPaid());
-        else                   reason = "Signal reversal: " + (isCall ? "SELL" : "BUY");
+        else if (premiumStop)  reason = String.format("Premium stop-loss: %.2f <= %.0f%% of %.2f",
+                                        currentPremium, STOP_LOSS_FRAC * 100, pos.getPremiumPaid());
+        else                   reason = "Signal reversal (2 bars): " + (isCall ? "SELL" : "BUY");
 
         if (premiumStop) sessionStopLossed.add(posKey);
         lastDirectionalCloseMs.put(posKey, System.currentTimeMillis());
@@ -264,7 +276,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         double totalCurrent = callPrem * 100 * callPos.getContracts()
                             + putPrem  * 100 * putPos.getContracts();
 
-        boolean premiumStop  = totalPaid > 0 && totalCurrent <= totalPaid * 0.50;
+        boolean premiumStop  = totalPaid > 0 && totalCurrent <= totalPaid * STOP_LOSS_FRAC;
         boolean profitTarget = totalPaid > 0 && totalCurrent >= totalPaid * PROFIT_TARGET;
         boolean nearExpiry   = strategyName.equals("ZEROTE")
                 ? callPos.daysToExpiry() < 1
@@ -276,8 +288,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (nearExpiry)        reason = "Expiry <" + (strategyName.equals("ZEROTE") ? "1 day" : "3 days");
         else if (profitTarget) reason = String.format("Profit target: combined %.2f >= 2x of %.2f",
                                         totalCurrent, totalPaid);
-        else                   reason = String.format("Premium stop-loss: combined %.2f <= 50%% of %.2f",
-                                        totalCurrent, totalPaid);
+        else                   reason = String.format("Premium stop-loss: combined %.2f <= %.0f%% of %.2f",
+                                        totalCurrent, STOP_LOSS_FRAC * 100, totalPaid);
 
         if (premiumStop) sessionStopLossed.add(symbol + "_MULTILEG");
         lastMultiLegCloseMs.put(symbol, System.currentTimeMillis());
@@ -535,6 +547,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             sessionStopLossed.clear();
             lastMultiLegCloseMs.clear();
             lastDirectionalCloseMs.clear();
+            reversalConsecutive.clear();
             stopLossResetDate = today;
         }
     }

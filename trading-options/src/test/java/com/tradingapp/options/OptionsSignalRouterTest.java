@@ -78,9 +78,14 @@ public class OptionsSignalRouterTest {
         router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
         assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"));
 
+        // Reversal now requires 2 consecutive bars of opposing signals before closing
+        router.evaluate(SYMBOL, PRICE, 0, 3, "sell", "");
+        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
+                "CALL should still be open after only 1 bar of sell signals");
+
         router.evaluate(SYMBOL, PRICE, 0, 3, "sell", "");
         assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
-                "CALL position should be closed on sell reversal");
+                "CALL position should be closed after 2 consecutive bars of sell signals");
     }
 
     @Test
