@@ -87,7 +87,7 @@ public class DashboardController implements Initializable {
     @FXML private TableColumn<OptionsPositionRow, String> optColStrike;
     @FXML private TableColumn<OptionsPositionRow, String> optColExpiry;
     @FXML private TableColumn<OptionsPositionRow, Integer> optColContracts;
-    @FXML private TableColumn<OptionsPositionRow, String> optColCost;
+    @FXML private TableColumn<OptionsPositionRow, String> optColPnl;
     @FXML private TableColumn<OptionsPositionRow, String> optColCurrentValue;
     @FXML private TableView<StockPositionRow> stockPositionsTable;
     @FXML private TableColumn<StockPositionRow, String> stkColSymbol;
@@ -438,7 +438,7 @@ public class DashboardController implements Initializable {
         optColStrike.setCellValueFactory(new PropertyValueFactory<>("strike"));
         optColExpiry.setCellValueFactory(new PropertyValueFactory<>("expiry"));
         optColContracts.setCellValueFactory(new PropertyValueFactory<>("contracts"));
-        optColCost.setCellValueFactory(new PropertyValueFactory<>("cost"));
+        optColPnl.setCellValueFactory(new PropertyValueFactory<>("pnl"));
         optColCurrentValue.setCellValueFactory(new PropertyValueFactory<>("currentValue"));
     }
 
@@ -649,7 +649,6 @@ public class DashboardController implements Initializable {
         double availableCash = account.getBalance();
         double stockHoldings = computeStockHoldings();
         double optionHoldings = computeOptionHoldings();
-        double totalPortfolio = availableCash + stockHoldings + optionHoldings;
         double optionsCashDeployed = computeOptionsCashDeployed();
 
         List<OptionsPositionRow> optionRows = new ArrayList<>();
@@ -664,6 +663,8 @@ public class DashboardController implements Initializable {
         int total  = wins + losses;
         double winRate    = total > 0 ? (wins * 100.0 / total) : 0.0;
         double realizedPnl = closedTrades.stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
+
+        double totalPortfolio = Account.STARTING_BALANCE + realizedPnl + optTotalUnrealized + stkTotalUnrealized;
 
         return new UiSnapshot(history, availableCash, stockHoldings, optionHoldings, totalPortfolio,
                 optionsCashDeployed, optionRows, optTotalUnrealized, stockRows, stkTotalUnrealized,
@@ -686,7 +687,7 @@ public class DashboardController implements Initializable {
         optionsTable.setItems(FXCollections.observableArrayList(s.optionRows()));
         stockPositionsTable.setItems(FXCollections.observableArrayList(s.stockRows()));
         unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", s.optTotalUnrealized() + s.stkTotalUnrealized()));
-        optionsTotalUnrealizedLabel.setText(String.format("Market Value: $%,.2f", s.optionHoldings()));
+        optionsTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total P&L", s.optTotalUnrealized()));
         stockTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", s.stkTotalUnrealized()));
         winsLabel.setText("Wins: " + s.wins());
         lossesLabel.setText("Losses: " + s.losses());
@@ -705,15 +706,15 @@ public class DashboardController implements Initializable {
         double availableCash = account.getBalance();
         double stockHoldings = computeStockHoldings();
         double optionHoldings = computeOptionHoldings();
-        double totalPortfolio = availableCash + stockHoldings + optionHoldings;
+        double unrealizedPnl = computeStockUnrealizedPnL() + computeOptionsUnrealizedPnL();
+        double realizedPnl = computeClosedTrades().stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
+        double totalPortfolio = Account.STARTING_BALANCE + realizedPnl + unrealizedPnl;
 
         totalPortfolioLabel.setText(String.format("Total Portfolio: $%,.2f", totalPortfolio));
         stockHoldingsLabel.setText(String.format("Stocks: $%,.2f", stockHoldings));
         optionHoldingsLabel.setText(String.format("Options: $%,.2f", optionHoldings));
         availableCashLabel.setText(String.format("Cash: $%,.2f", availableCash));
         optionsCashDeployedLabel.setText(String.format("Options Reserved: $%,.2f", computeOptionsCashDeployed()));
-        double unrealizedPnl = computeStockUnrealizedPnL() + computeOptionsUnrealizedPnL();
-        double realizedPnl = computeClosedTrades().stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
         pnlButton.setText(String.format("P&L: $%,.2f", realizedPnl));
         unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", unrealizedPnl));
 
