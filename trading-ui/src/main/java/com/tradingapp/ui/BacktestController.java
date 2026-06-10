@@ -1,13 +1,20 @@
 package com.tradingapp.ui;
 
+import com.tradingapp.account.Account;
+import com.tradingapp.account.TransactionLog;
+import com.tradingapp.broker.AlpacaHistoricalClient;
 import com.tradingapp.broker.AlpacaQuoteProvider;
 import com.tradingapp.broker.AppConfig;
+import com.tradingapp.data.DayTraderWatchList;
 import com.tradingapp.data.HistoricalBar;
+import com.tradingapp.data.PriceHistory;
 import com.tradingapp.data.QuoteProvider;
 import com.tradingapp.data.YahooFinanceQuoteProvider;
 import com.tradingapp.engine.*;
 import com.tradingapp.options.BlackScholesEngine;
 import com.tradingapp.options.OptionsBacktestEngine;
+import com.tradingapp.options.OptionsOrderExecutor;
+import com.tradingapp.options.OptionsSignalRouter;
 import com.tradingapp.options.OptionsStrategy;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
@@ -21,9 +28,12 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.util.Callback;
 
+import java.io.File;
 import java.net.URL;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.function.BiFunction;
 
 public class BacktestController implements Initializable {
 
@@ -32,6 +42,7 @@ public class BacktestController implements Initializable {
     @FXML private TextField backtestSymbols;
     @FXML private Button runBacktestButton;
     @FXML private Button openChartButton;
+    @FXML private Button runIntradaySimButton;
     @FXML private ProgressIndicator backtestProgress;
     @FXML private Label btReturnLabel;
     @FXML private Label btMaxDrawdownLabel;
@@ -255,6 +266,94 @@ public class BacktestController implements Initializable {
                 });
             }
         }, "backtest");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    @FXML
+    public void runIntradaySim() {
+        if (appConfig == null) {
+            btReturnLabel.setText("Alpaca config required for intraday sim");
+            return;
+        }
+        if (appConfig.getAlpacaApiKey().isBlank() || appConfig.getAlpacaApiSecret().isBlank()) {
+            btReturnLabel.setText("Set Alpaca API keys in Settings first");
+            return;
+        }
+
+        runIntradaySimButton.setDisable(true);
+        runBacktestButton.setDisable(true);
+        backtestProgress.setVisible(true);
+        btReturnLabel.setText("Fetching minute bars...");
+
+        List<String> watchlist = new ArrayList<>(DayTraderWatchList.SYMBOLS);
+        AppConfig cfg = appConfig;
+
+        Thread t = new Thread(() -> {
+            try {
+                AlpacaHistoricalClient client = new AlpacaHistoricalClient(cfg);
+
+                LocalDate endDate = LocalDate.now().minusDays(1);
+                while (endDate.getDayOfWeek() == DayOfWeek.SATURDAY
+                        || endDate.getDayOfWeek() == DayOfWeek.SUNDAY) {
+                    endDate = endDate.minusDays(1);
+                }
+                LocalDate startDate = endDate.minusDays(140);
+
+                Map<String, List<IntradayBar>> barsBySymbol = new LinkedHashMap<>();
+                int idx = 0;
+                for (String sym : watchlist) {
+                    idx++;
+                    final int cur = idx;
+                    final int tot = watchlist.size();
+                    try {
+                        List<IntradayBar> bars = client.fetchMinuteBars(sym, startDate, endDate,
+                                msg -> Platform.runLater(() -> btReturnLabel.setText("[" + cur + "/" + tot + "] " + msg)));
+                        if (!bars.isEmpty()) barsBySymbol.put(sym, bars);
+                    } catch (Exception e) {
+                        Platform.runLater(() -> btReturnLabel.setText("Skip " + sym + ": " + e.getMessage()));
+                    }
+                }
+
+                if (barsBySymbol.isEmpty()) {
+                    Platform.runLater(() -> btReturnLabel.setText("No data fetched"));
+                    return;
+                }
+
+                Platform.runLater(() -> btReturnLabel.setText("Running intraday sim..."));
+
+                BiFunction<Account, PriceHistory, OptionsEvaluator> optFactory = (acct, ph) -> {
+                    try {
+                        File tmpDb = File.createTempFile("opts-backtest", ".db");
+                        tmpDb.deleteOnExit();
+                        TransactionLog tl = new TransactionLog(tmpDb.getAbsolutePath());
+                        OptionsOrderExecutor exec = new OptionsOrderExecutor(acct, tl);
+                        return new OptionsSignalRouter(new BlackScholesEngine(), exec, acct, ph,
+                                msg -> {}, null);
+                    } catch (Exception e) {
+                        return null;
+                    }
+                };
+
+                IntradayBacktestEngine engine = new IntradayBacktestEngine(new IndicatorEngine(), new FeeCalculator());
+                IntradayBacktestResult result = engine.run(watchlist, barsBySymbol, 100_000.0, optFactory,
+                        msg -> Platform.runLater(() -> btReturnLabel.setText(msg)));
+
+                Platform.runLater(() -> applySingleResult(result, "Intraday 100d"));
+
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                    btReturnLabel.setText("Error: " + msg);
+                });
+            } finally {
+                Platform.runLater(() -> {
+                    runIntradaySimButton.setDisable(false);
+                    runBacktestButton.setDisable(false);
+                    backtestProgress.setVisible(false);
+                });
+            }
+        }, "intraday-sim");
         t.setDaemon(true);
         t.start();
     }

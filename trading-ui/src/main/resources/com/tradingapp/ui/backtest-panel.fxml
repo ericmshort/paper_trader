@@ -25,6 +25,8 @@
                 style="-fx-background-color: #00aa55; -fx-text-fill: white; -fx-font-weight: bold;"/>
         <Button fx:id="openChartButton" text="Chart" onAction="#openChart"
                 style="-fx-background-color: #0077cc; -fx-text-fill: white; -fx-font-weight: bold;"/>
+        <Button fx:id="runIntradaySimButton" text="Run Intraday Sim (100d)" onAction="#runIntradaySim"
+                style="-fx-background-color: #7722cc; -fx-text-fill: white; -fx-font-weight: bold;"/>
         <ProgressIndicator fx:id="backtestProgress" visible="false" prefWidth="20" prefHeight="20"/>
     </HBox>
 
