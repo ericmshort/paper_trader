@@ -37,6 +37,10 @@ public class OptionsPosition {
         return ChronoUnit.DAYS.between(LocalDate.now(), expiry);
     }
 
+    public long daysToExpiry(LocalDate referenceDate) {
+        return ChronoUnit.DAYS.between(referenceDate, expiry);
+    }
+
     public double getCurrentValue(double currentPremium) {
         return currentPremium * 100 * contracts;
     }

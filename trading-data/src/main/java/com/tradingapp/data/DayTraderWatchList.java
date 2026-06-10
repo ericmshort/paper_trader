@@ -9,19 +9,15 @@ import java.util.List;
 public class DayTraderWatchList {
 
     public static final List<String> SYMBOLS = List.of(
-        // High-volume ETFs and leveraged ETFs
-        "SPY", "QQQ", "IWM", "TQQQ", "SQQQ",
-        // Mega-cap tech (highest individual stock volume)
-        "AAPL", "MSFT", "NVDA", "TSLA", "AMD",
-        // More large-cap tech
-        "META", "AMZN", "GOOGL", "INTC",
-        // High-volume speculative / growth
-        "PLTR", "SOFI", "MARA", "RIOT", "NIO", "RIVN",
-        // Retail favorites / meme stocks (consistently high volume)
-        "GME", "AMC",
-        // High-volume financials and blue chips
-        "BAC", "C", "JPM", "F", "GE", "T",
-        // High-volume micro/penny-adjacent with tight spreads
-        "SNDL", "NOK"
+        // Broad market — used for regime filter and as low-volatility trade targets
+        "SPY",
+        // Mega-cap tech with consistent positive P&L in backtests
+        "AAPL", "MSFT", "NVDA", "AMD",
+        // Large-cap internet
+        "META", "AMZN", "GOOGL",
+        // Mid-cap tech outperformers
+        "INTC", "PLTR",
+        // High-volume low-beta with tight spreads — F and NOK trade well with indicator signals
+        "F", "NOK"
     );
 }

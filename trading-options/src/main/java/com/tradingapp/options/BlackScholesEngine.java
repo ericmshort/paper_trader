@@ -8,6 +8,14 @@ import java.util.List;
 
 public class BlackScholesEngine {
 
+    private LocalDate referenceDate = null;
+
+    /** Override the "today" used for expiry selection and time-to-expiry calculations.
+     *  Set to the simulated date during backtesting; leave null for live trading. */
+    public void setReferenceDate(LocalDate date) { this.referenceDate = date; }
+
+    private LocalDate today() { return referenceDate != null ? referenceDate : LocalDate.now(); }
+
     // Abramowitz & Stegun 26.2.17 — max error 7.5e-8
     private double normalCDF(double x) {
         if (x < -8.0) return 0.0;
@@ -49,7 +57,7 @@ public class BlackScholesEngine {
     }
 
     public LocalDate nextMonthlyExpiry() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = today();
         LocalDate earliest = today.plusDays(14);
         // Check current month's third Friday, then advance month by month
         LocalDate candidate = thirdFriday(today.withDayOfMonth(1));
@@ -68,7 +76,7 @@ public class BlackScholesEngine {
     public LocalDate selectExpiry(String symbol) {
         LocalDate next = nextMonthlyExpiry();
         LocalDate following = thirdFriday(next.plusMonths(1).withDayOfMonth(1));
-        long daysToNext = ChronoUnit.DAYS.between(LocalDate.now(), next);
+        long daysToNext = ChronoUnit.DAYS.between(today(), next);
         if (daysToNext < 21) {
             return following; // too close — everyone shifts to the following month
         }
@@ -86,7 +94,7 @@ public class BlackScholesEngine {
      * Picks the next Friday at least 7 days away for near-term/day-trading strategies.
      */
     public LocalDate selectNearTermExpiry() {
-        LocalDate candidate = LocalDate.now().plusDays(7);
+        LocalDate candidate = today().plusDays(7);
         while (candidate.getDayOfWeek() != DayOfWeek.FRIDAY) {
             candidate = candidate.plusDays(1);
         }
@@ -98,7 +106,7 @@ public class BlackScholesEngine {
     }
 
     public double timeToExpiry(LocalDate expiry) {
-        long days = ChronoUnit.DAYS.between(LocalDate.now(), expiry);
+        long days = ChronoUnit.DAYS.between(today(), expiry);
         return days / 365.0;
     }
 

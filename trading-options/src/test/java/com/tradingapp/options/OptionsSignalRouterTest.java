@@ -11,6 +11,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -26,13 +28,18 @@ public class OptionsSignalRouterTest {
 
     private static final String SYMBOL = "AAPL";
     private static final double PRICE = 150.0;
+    // Fixed market-hours clock so pre-close (15:45 ET) check never fires during tests
+    private static final ZonedDateTime MARKET_OPEN =
+            ZonedDateTime.of(2025, 6, 10, 10, 0, 0, 0, ZoneId.of("America/New_York"));
 
     private OptionsSignalRouter buildRouter(Account account, TransactionLog log) {
         BlackScholesEngine bsEngine = new BlackScholesEngine();
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, log);
         PriceHistory priceHistory = buildPriceHistory();
         List<String> msgs = new ArrayList<>();
-        return new OptionsSignalRouter(bsEngine, optExec, account, priceHistory, msgs::add);
+        OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, priceHistory, msgs::add);
+        router.setClock(() -> MARKET_OPEN);
+        return router;
     }
 
     private PriceHistory buildPriceHistory() {
@@ -62,11 +69,13 @@ public class OptionsSignalRouterTest {
         Account account = new Account();
         TransactionLog log = new TransactionLog(tempDir.resolve("put.db").toString());
         OptionsSignalRouter router = buildRouter(account, log);
+        // Simulate bear market so putMin drops to 4; 4 sell signals → MOMENTUM_NEAR_TERM put
+        router.setUptrendSupplier(() -> false);
 
-        router.evaluate(SYMBOL, PRICE, 0, 3, "test signals", "");
+        router.evaluate(SYMBOL, PRICE, 0, 4, "test signals", "");
 
-        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_PUT"),
-                "PUT position should be opened on 3 sell signals");
+        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_NEARTERM_PUT"),
+                "PUT position should be opened in bear market with 4 sell signals");
     }
 
     @Test
@@ -78,14 +87,18 @@ public class OptionsSignalRouterTest {
         router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
         assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"));
 
-        // Reversal now requires 2 consecutive bars of opposing signals before closing
-        router.evaluate(SYMBOL, PRICE, 0, 3, "sell", "");
+        // Reversal requires 4+ opposing signals for 3 consecutive bars before closing
+        router.evaluate(SYMBOL, PRICE, 0, 4, "sell", "");
         assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
                 "CALL should still be open after only 1 bar of sell signals");
 
-        router.evaluate(SYMBOL, PRICE, 0, 3, "sell", "");
+        router.evaluate(SYMBOL, PRICE, 0, 4, "sell", "");
+        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
+                "CALL should still be open after only 2 bars of sell signals");
+
+        router.evaluate(SYMBOL, PRICE, 0, 4, "sell", "");
         assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
-                "CALL position should be closed after 2 consecutive bars of sell signals");
+                "CALL position should be closed after 3 consecutive bars of sell signals");
     }
 
     @Test
@@ -98,6 +111,7 @@ public class OptionsSignalRouterTest {
         for (int i = 0; i < 25; i++) ph.record(SYMBOL, 150.0, 1_000_000.0);
         List<String> msgs = new ArrayList<>();
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, ph, msgs::add);
+        router.setClock(() -> MARKET_OPEN);
 
         router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
 
@@ -126,12 +140,13 @@ public class OptionsSignalRouterTest {
         Account account = new Account();
         TransactionLog log = new TransactionLog(tempDir.resolve("put_stop.db").toString());
         OptionsSignalRouter router = buildRouter(account, log);
+        router.setUptrendSupplier(() -> false); // bear market — putMin=4
 
-        router.evaluate(SYMBOL, PRICE, 0, 3, "sell", "");
-        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_PUT"));
+        router.evaluate(SYMBOL, PRICE, 0, 4, "sell", "");
+        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_NEARTERM_PUT"));
 
         router.evaluate(SYMBOL, 200.0, 0, 0, "neutral", "");
-        assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_PUT"),
+        assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_NEARTERM_PUT"),
                 "PUT position should be closed when premium falls to 50% of cost");
     }
 
@@ -182,12 +197,13 @@ public class OptionsSignalRouterTest {
         Account account = new Account();
         TransactionLog log = new TransactionLog(tempDir.resolve("put_profit.db").toString());
         OptionsSignalRouter router = buildRouter(account, log);
+        router.setUptrendSupplier(() -> false); // bear market — putMin=4
 
-        router.evaluate(SYMBOL, PRICE, 0, 3, "sell", "");
-        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_PUT"));
+        router.evaluate(SYMBOL, PRICE, 0, 4, "sell", "");
+        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_NEARTERM_PUT"));
 
         router.evaluate(SYMBOL, 50.0, 0, 0, "neutral", "");
-        assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_PUT"),
+        assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_NEARTERM_PUT"),
                 "PUT position should be closed when premium reaches 2x of cost");
     }
 
@@ -204,6 +220,7 @@ public class OptionsSignalRouterTest {
         BlackScholesEngine bsEngine = new BlackScholesEngine();
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, log);
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, buildPriceHistory(), msgs::add);
+        router.setClock(() -> MARKET_OPEN);
 
         router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
 
@@ -226,6 +243,7 @@ public class OptionsSignalRouterTest {
         for (int i = 0; i < 20; i++) ph.record(SYMBOL, i % 2 == 0 ? 100.0 : 200.0, 1_000_000.0);
 
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, ph, msgs::add);
+        router.setClock(() -> MARKET_OPEN);
         router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
 
         assertFalse(account.getOptionsPositions().containsKey(SYMBOL + "_CALL"),
@@ -246,6 +264,7 @@ public class OptionsSignalRouterTest {
         for (int i = 0; i < 40; i++) ph.record(SYMBOL, i % 2 == 0 ? 148.0 : 152.0, 1_000_000.0);
 
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, ph, msgs::add);
+        router.setClock(() -> MARKET_OPEN);
         router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
 
         assertFalse(msgs.stream().anyMatch(m -> m.contains("IV surge")),
@@ -262,6 +281,7 @@ public class OptionsSignalRouterTest {
         BlackScholesEngine bsEngine = new BlackScholesEngine();
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, log);
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, buildPriceHistory(), msgs::add);
+        router.setClock(() -> MARKET_OPEN);
 
         router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
 
@@ -281,6 +301,7 @@ public class OptionsSignalRouterTest {
         BlackScholesEngine bsEngine = new BlackScholesEngine();
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, log);
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, buildPriceHistory(), msgs::add);
+        router.setClock(() -> MARKET_OPEN);
 
         router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
 
@@ -300,10 +321,12 @@ public class OptionsSignalRouterTest {
         BlackScholesEngine bsEngine = new BlackScholesEngine();
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, log);
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, buildPriceHistory(), msgs::add);
+        router.setClock(() -> MARKET_OPEN);
+        router.setUptrendSupplier(() -> false); // bear market — putMin=4
 
-        router.evaluate(SYMBOL, PRICE, 0, 3, "sell", "");
+        router.evaluate(SYMBOL, PRICE, 0, 4, "sell", "");
 
-        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_PUT"),
+        assertTrue(account.getOptionsPositions().containsKey(SYMBOL + "_NEARTERM_PUT"),
                 "PUT should be allowed as protective hedge when equity position is open");
     }
 
@@ -317,6 +340,7 @@ public class OptionsSignalRouterTest {
         ph.record(SYMBOL, 150.0, 1_000_000.0);
         List<String> msgs = new ArrayList<>();
         OptionsSignalRouter router = new OptionsSignalRouter(bsEngine, optExec, account, ph, msgs::add);
+        router.setClock(() -> MARKET_OPEN);
 
         router.evaluate(SYMBOL, PRICE, 3, 0, "buy", "");
 

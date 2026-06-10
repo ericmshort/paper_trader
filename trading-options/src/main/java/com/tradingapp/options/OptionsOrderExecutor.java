@@ -20,8 +20,8 @@ public class OptionsOrderExecutor {
     static final double OPTION_BUY_SLIPPAGE  = 0.05;
     static final double OPTION_SELL_SLIPPAGE = 0.02; // haircut on credit received
 
-    private final Account account;
-    private final TransactionLog transactionLog;
+    private Account account;
+    private TransactionLog transactionLog;
     private final OptionsSubmitter submitter;
 
     // Tracks stock legs of open covered-call positions (keyed by posKey)
@@ -37,6 +37,9 @@ public class OptionsOrderExecutor {
         this.transactionLog = transactionLog;
         this.submitter = submitter;
     }
+
+    public void setTransactionLog(TransactionLog log) { this.transactionLog = log; }
+    public void setAccount(Account account) { this.account = account; }
 
     public void buyCall(String symbol, double strike, LocalDate expiry, int contracts,
                         double premium, String signalStr, String featureCsv) {

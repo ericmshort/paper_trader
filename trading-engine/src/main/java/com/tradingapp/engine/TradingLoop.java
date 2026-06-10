@@ -30,6 +30,9 @@ import java.util.stream.Collectors;
 public class TradingLoop implements Runnable {
 
     static final double SIGNAL_THRESHOLD = 2.5;
+    // Sell threshold is higher than buy — signal sells had a 4% win rate at 2.5, meaning they
+    // were cutting winners early. Requiring stronger consensus before exiting on signals alone.
+    private static final double SELL_SIGNAL_THRESHOLD = 4.0;
     private double maxPortfolioExposure = 0.60;
     private static final LocalTime MARKET_OPEN      = LocalTime.of(9, 30);
     private static final LocalTime MARKET_CLOSE     = LocalTime.of(16, 0);
@@ -311,7 +314,7 @@ public class TradingLoop implements Runnable {
                 if (trailingStop.check(symbol, price) && hasPosition) {
                     // Trailing stop always fires regardless of hold time — it's a loss-protection rule.
                     Position pos = account.getPositions().get(symbol);
-                    brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Trailing stop: 2% drawdown from peak");
+                    brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Trailing stop: 4% drawdown from peak");
                     account.removePosition(symbol);
                     trailingStop.reset(symbol);
                     entryTimes.remove(symbol);
@@ -320,7 +323,7 @@ public class TradingLoop implements Runnable {
                     researchCallback.accept(symbol + " on 60-min re-entry cooldown after trailing stop (price $"
                             + String.format("%.2f", price) + (ep != null ? " < peak, entry was $" + String.format("%.2f", ep) : "") + ")");
                     uiRefreshCallback.run();
-                } else if (weightedSells >= SIGNAL_THRESHOLD && hasPosition) {
+                } else if (weightedSells >= SELL_SIGNAL_THRESHOLD && hasPosition) {
                     ZonedDateTime entryTime = entryTimes.get(symbol);
                     long heldMinutes = entryTime != null
                             ? Duration.between(entryTime, now).toMinutes() : Long.MAX_VALUE;

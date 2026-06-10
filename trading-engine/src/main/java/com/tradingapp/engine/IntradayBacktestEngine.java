@@ -24,7 +24,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
 public class IntradayBacktestEngine {
@@ -43,7 +42,7 @@ public class IntradayBacktestEngine {
             List<String> watchlist,
             Map<String, List<IntradayBar>> barsBySymbol,
             double startingBalance,
-            BiFunction<Account, PriceHistory, OptionsEvaluator> optEvalFactory,
+            OptionsEvaluator optEval,
             Consumer<String> progressCallback) throws Exception {
 
         File tmpDb = File.createTempFile("backtest", ".db");
@@ -62,11 +61,13 @@ public class IntradayBacktestEngine {
         AtomicReference<ZonedDateTime> virtualClock = new AtomicReference<>(
                 ZonedDateTime.now(ET));
 
+        if (optEval != null) {
+            optEval.onBacktestInit(txLog, account, priceHistory, virtualClock::get);
+        }
+
         Map<String, IntradayBar> currentBars = new HashMap<>();
 
         QuoteProvider replayProvider = new ReplayQuoteProvider(currentBars);
-
-        MutableOptionsEvaluator mutableEval = new MutableOptionsEvaluator();
 
         List<String> eventLog = new ArrayList<>();
         Consumer<String> logCollector = msg -> {
@@ -77,7 +78,7 @@ public class IntradayBacktestEngine {
         TradingLoop loop = new TradingLoop(
                 replayProvider, priceHistory, indicators, trailingStop, broker, fees,
                 watchlist, logCollector, () -> {}, account,
-                virtualClock::get, mutableEval);
+                virtualClock::get, optEval);
         loop.setTransactionLog(txLog);
         loop.setAvoidOvernightHolds(true);
 
@@ -99,8 +100,8 @@ public class IntradayBacktestEngine {
             CandleHistory candleHistory = new CandleHistory();
             loop.setCandleHistory(candleHistory);
 
-            if (optEvalFactory != null) {
-                mutableEval.setDelegate(optEvalFactory.apply(account, priceHistory));
+            if (optEval != null) {
+                optEval.resetForDay(date);
             }
 
             TreeMap<ZonedDateTime, List<IntradayBar>> timeSlots = byDateByTime.get(date);
@@ -167,19 +168,6 @@ public class IntradayBacktestEngine {
             }
         }
         return maxDD;
-    }
-
-    static class MutableOptionsEvaluator implements OptionsEvaluator {
-        private volatile OptionsEvaluator delegate;
-
-        void setDelegate(OptionsEvaluator delegate) { this.delegate = delegate; }
-
-        @Override
-        public void evaluate(String symbol, double price, int buySignals, int sellSignals,
-                             String signalStr, String featureCsv) {
-            OptionsEvaluator d = delegate;
-            if (d != null) d.evaluate(symbol, price, buySignals, sellSignals, signalStr, featureCsv);
-        }
     }
 
     static class ReplayQuoteProvider implements QuoteProvider {
