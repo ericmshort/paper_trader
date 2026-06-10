@@ -89,7 +89,8 @@ public class IntradayBacktestRunner {
 
         // --- Wire OptionsSignalRouter (shared instance; account/log/clock wired by engine) ---
         double maxExposure = cfg.getMaxPortfolioExposurePct() / 100.0;
-        // Use only strategies that require ≥4 signals — avoids noise trades from 3-signal bar
+        // Use only strategies that require ≥4 signals — 3-signal entries (LONG_CALL/LONG_PUT)
+        // were tested and reduced return by 6.74% while quadrupling max drawdown.
         Set<String> backtestStrategies = Set.of("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM");
 
         // Placeholder account/history — replaced by engine's shared objects in onBacktestInit
