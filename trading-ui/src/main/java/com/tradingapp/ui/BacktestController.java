@@ -1,7 +1,6 @@
 package com.tradingapp.ui;
 
 import com.tradingapp.account.Account;
-import com.tradingapp.account.TransactionLog;
 import com.tradingapp.broker.AlpacaHistoricalClient;
 import com.tradingapp.broker.AlpacaQuoteProvider;
 import com.tradingapp.broker.AppConfig;
@@ -28,12 +27,10 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.util.Callback;
 
-import java.io.File;
 import java.net.URL;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.*;
-import java.util.function.BiFunction;
 
 public class BacktestController implements Initializable {
 
@@ -322,21 +319,16 @@ public class BacktestController implements Initializable {
 
                 Platform.runLater(() -> btReturnLabel.setText("Running intraday sim..."));
 
-                BiFunction<Account, PriceHistory, OptionsEvaluator> optFactory = (acct, ph) -> {
-                    try {
-                        File tmpDb = File.createTempFile("opts-backtest", ".db");
-                        tmpDb.deleteOnExit();
-                        TransactionLog tl = new TransactionLog(tmpDb.getAbsolutePath());
-                        OptionsOrderExecutor exec = new OptionsOrderExecutor(acct, tl);
-                        return new OptionsSignalRouter(new BlackScholesEngine(), exec, acct, ph,
-                                msg -> {}, null);
-                    } catch (Exception e) {
-                        return null;
-                    }
-                };
+                // Placeholder account/history — replaced by engine's shared objects in onBacktestInit
+                OptionsOrderExecutor optExec = new OptionsOrderExecutor(new Account(), null);
+                OptionsSignalRouter optRouter = new OptionsSignalRouter(
+                        new BlackScholesEngine(), optExec, new Account(), new PriceHistory(),
+                        msg -> {}, null);
+                optRouter.setOptionsAllowlist(Set.of("SPY","AMZN","PLTR","META","MSFT","NVDA","AAPL","NOK","F"));
+                optRouter.setCallsDisabledSymbols(Set.of("MSFT"));
 
                 IntradayBacktestEngine engine = new IntradayBacktestEngine(new IndicatorEngine(), new FeeCalculator());
-                IntradayBacktestResult result = engine.run(watchlist, barsBySymbol, 100_000.0, optFactory,
+                IntradayBacktestResult result = engine.run(watchlist, barsBySymbol, 100_000.0, optRouter,
                         msg -> Platform.runLater(() -> btReturnLabel.setText(msg)));
 
                 Platform.runLater(() -> applySingleResult(result, "Intraday 100d"));

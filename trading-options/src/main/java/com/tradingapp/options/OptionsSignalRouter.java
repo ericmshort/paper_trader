@@ -2,6 +2,7 @@ package com.tradingapp.options;
 
 import com.tradingapp.account.Account;
 import com.tradingapp.account.OptionsPosition;
+import com.tradingapp.account.TransactionLog;
 import com.tradingapp.data.OptionsChain;
 import com.tradingapp.data.OptionsQuote;
 import com.tradingapp.data.PriceHistory;
@@ -9,7 +10,11 @@ import com.tradingapp.data.QuoteProvider;
 import com.tradingapp.engine.OptionsEvaluator;
 
 import java.time.DayOfWeek;
+import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -17,6 +22,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * Day-trading options router. Maps signal strength to intraday strategies only:
@@ -34,10 +40,14 @@ import java.util.function.Consumer;
  */
 public class OptionsSignalRouter implements OptionsEvaluator {
 
+    private static final ZoneId ET = ZoneId.of("America/New_York");
+    // All open options positions are force-closed at this time to avoid overnight holds.
+    private static final LocalTime PRE_CLOSE_CUTOFF = LocalTime.of(15, 45);
+
     private final BlackScholesEngine bsEngine;
     private final OptionsOrderExecutor optExec;
-    private final Account account;
-    private final PriceHistory priceHistory;
+    private Account account;
+    private PriceHistory priceHistory;
     private final Consumer<String> researchCallback;
     private final QuoteProvider dataClient;
 
@@ -47,22 +57,36 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private static final double IV_SURGE_THRESHOLD = 1.2;  // skip if recent vol > 1.2x long-term (IV crush guard)
     private static final int    IV_WINDOW          = 20;
     private static final double PROFIT_TARGET      = 2.0;
-    private static final double STOP_LOSS_FRAC     = 0.35;  // close if premium drops to 35% of entry
+    // Exit when premium drops to 50% of entry — tighter than 35% to limit per-trade loss.
+    private static final double STOP_LOSS_FRAC     = 0.50;
     private static final double DEEP_ITM_OFFSET    = 10.0;
 
+    // Cooldown re-entry window (virtual time, works in both live and backtest)
+    private static final long COOLDOWN_MINUTES = 15L;
+
     private final Set<String> sessionStopLossed = new HashSet<>();
-    private final Map<String, Long> lastMultiLegCloseMs    = new HashMap<>();
-    private final Map<String, Long> lastDirectionalCloseMs = new HashMap<>();
-    private final Map<String, Long> lastAnyCloseMs         = new HashMap<>();
+    private final Map<String, ZonedDateTime> lastMultiLegCloseTime    = new HashMap<>();
+    private final Map<String, ZonedDateTime> lastDirectionalCloseTime = new HashMap<>();
+    private final Map<String, ZonedDateTime> lastAnyCloseTime         = new HashMap<>();
     private final Map<String, Integer> reversalConsecutive = new HashMap<>();
-    private static final long MULTILEG_REENTRY_COOLDOWN_MS = 15 * 60 * 1000L;
+
     private LocalDate stopLossResetDate;
     private BooleanSupplier uptrendSupplier;
-    private Set<String> enabledStrategies = new HashSet<>();
+    private Set<String> enabledStrategies    = new HashSet<>();
+    // If non-empty, only these symbols may open new options positions.
+    private Set<String> optionsAllowlist      = new HashSet<>();
+    // Symbols in this set may open puts but not calls.
+    private Set<String> callsDisabledSymbols  = new HashSet<>();
+
+    // Virtual clock: real ZonedDateTime::now in live trading; virtual clock in backtest.
+    private Supplier<ZonedDateTime> clock = ZonedDateTime::now;
 
     public void setUptrendSupplier(BooleanSupplier s) { this.uptrendSupplier = s; }
     public void setMaxPortfolioExposure(double fraction) { this.maxPortfolioExposure = fraction; }
     public void setEnabledStrategies(Set<String> strategies) { this.enabledStrategies = new HashSet<>(strategies); }
+    public void setClock(Supplier<ZonedDateTime> clock) { this.clock = clock; }
+    public void setOptionsAllowlist(Set<String> symbols) { this.optionsAllowlist = new HashSet<>(symbols); }
+    public void setCallsDisabledSymbols(Set<String> symbols) { this.callsDisabledSymbols = new HashSet<>(symbols); }
     private boolean isStrategyEnabled(String name) { return enabledStrategies.isEmpty() || enabledStrategies.contains(name); }
 
     public OptionsSignalRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
@@ -82,10 +106,51 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         this.dataClient       = dataClient;
     }
 
+    // ── Backtest lifecycle ────────────────────────────────────────────────────
+
+    @Override
+    public void onBacktestInit(TransactionLog sharedLog, Account sharedAccount,
+                               PriceHistory sharedHistory, Supplier<ZonedDateTime> clock) {
+        optExec.setTransactionLog(sharedLog);
+        optExec.setAccount(sharedAccount);
+        this.account = sharedAccount;
+        this.priceHistory = sharedHistory;
+        this.clock = clock;
+        // Gate puts/calls using SPY's 50-bar intraday MA.
+        // SPY intraday price < 50-bar MA → short-term downtrend → allow puts, block calls.
+        this.uptrendSupplier = () -> {
+            List<Double> spy = sharedHistory.getPrices("SPY");
+            if (spy.size() < 50) return true; // insufficient history — assume uptrend (bias toward calls)
+            double ma50 = spy.subList(spy.size() - 50, spy.size()).stream()
+                    .mapToDouble(Double::doubleValue).average().orElse(spy.get(spy.size() - 1));
+            return spy.get(spy.size() - 1) >= ma50;
+        };
+    }
+
+    @Override
+    public void resetForDay(LocalDate date) {
+        bsEngine.setReferenceDate(date);
+        sessionStopLossed.clear();
+        lastMultiLegCloseTime.clear();
+        lastDirectionalCloseTime.clear();
+        lastAnyCloseTime.clear();
+        reversalConsecutive.clear();
+        stopLossResetDate = date;
+    }
+
+    // ── Main evaluation ───────────────────────────────────────────────────────
+
     @Override
     public void evaluate(String symbol, double price, int buySignals, int sellSignals,
                          String signalStr, String featureCsv) {
         resetIfNewDay();
+
+        // ── Pre-close: force-close all open options for this symbol ───────────
+        LocalTime time = clock.get().toLocalTime();
+        if (!time.isBefore(PRE_CLOSE_CUTOFF)) {
+            forceCloseAllForSymbol(symbol, price);
+            return;
+        }
 
         String callKey          = symbol + "_CALL";
         String putKey           = symbol + "_PUT";
@@ -160,6 +225,9 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         // Block calls in downtrend — symmetric to the per-method put block in uptrend
         boolean inDowntrend = uptrendSupplier != null && !uptrendSupplier.getAsBoolean();
+        // Require more sell signals to open a put in a bull market — loosens in a bear market
+        int putMin = inDowntrend ? 4 : 5;
+        String marketRegime = inDowntrend ? "bear" : "bull";
 
         boolean hasDirectional = opts.containsKey(callKey)          || opts.containsKey(putKey)
                               || opts.containsKey(highDeltaCallKey)  || opts.containsKey(highDeltaPutKey)
@@ -167,47 +235,101 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         boolean hasMultiLeg   = opts.containsKey(zeroDteCallKey)    || opts.containsKey(zeroDtePutKey);
 
         // ── 5. Cooldown check ─────────────────────────────────────────────────
-        Long lastClose = lastAnyCloseMs.getOrDefault(symbol, 0L);
-        if (System.currentTimeMillis() - lastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
+        ZonedDateTime now = clock.get();
+        ZonedDateTime epoch = ZonedDateTime.of(2000, 1, 1, 0, 0, 0, 0, ET);
+        ZonedDateTime lastClose = lastAnyCloseTime.getOrDefault(symbol, epoch);
+        if (Duration.between(lastClose, now).toMinutes() < COOLDOWN_MINUTES) {
             researchCallback.accept(symbol + " skip: options cooldown ("
-                    + ((System.currentTimeMillis() - lastClose) / 60000) + "m elapsed, need 15m)");
+                    + Duration.between(lastClose, now).toMinutes() + "m elapsed, need " + COOLDOWN_MINUTES + "m)");
             return;
         }
 
-        // ── 6. Entry ──────────────────────────────────────────────────────────
+        // ── 6. Entry (per-symbol options filters) ────────────────────────────
+        boolean optionsAllowed = optionsAllowlist.isEmpty() || optionsAllowlist.contains(symbol);
+        if (!optionsAllowed) {
+            researchCallback.accept(symbol + " options skip: not in options allowlist");
+            return;
+        }
+        boolean callsAllowed = !callsDisabledSymbols.contains(symbol);
+
         if (extremeBullish && !hasDirectional && !hasMultiLeg) {
-            if (inDowntrend)
+            if (!callsAllowed)
+                researchCallback.accept(symbol + " CALL skip: calls disabled for symbol");
+            else if (inDowntrend)
                 researchCallback.accept(symbol + " CALL skip: SPY downtrend");
             else if (isStrategyEnabled("HIGH_DELTA_SCALP"))
                 tryOpenHighDeltaScalp(symbol, price, K, expiry, T, sigma, true, signalStr, featureCsv);
 
         } else if (veryStrongBull && !hasDirectional && !hasMultiLeg) {
-            if (inDowntrend)
+            if (!callsAllowed)
+                researchCallback.accept(symbol + " CALL skip: calls disabled for symbol");
+            else if (inDowntrend)
                 researchCallback.accept(symbol + " CALL skip: SPY downtrend");
             else if (isStrategyEnabled("MOMENTUM_NEAR_TERM"))
                 tryOpenMomentumNearTerm(symbol, price, true, sigma, signalStr, featureCsv);
 
         } else if (purelyBullish && !hasDirectional && !hasMultiLeg) {
-            if (inDowntrend)
+            if (!callsAllowed)
+                researchCallback.accept(symbol + " CALL skip: calls disabled for symbol");
+            else if (inDowntrend)
                 researchCallback.accept(symbol + " CALL skip: SPY downtrend");
             else if (isStrategyEnabled("LONG_CALL"))
                 tryOpenLongCall(symbol, price, K, expiry, T, sigma, signalStr, featureCsv, callKey, opts);
 
         } else if (extremeBearish && !hasDirectional && !hasMultiLeg) {
-            if (isStrategyEnabled("HIGH_DELTA_SCALP"))
+            if (sellSignals < putMin)
+                researchCallback.accept(symbol + " PUT skip: need " + putMin + "+ signals in " + marketRegime + " (have " + sellSignals + ")");
+            else if (isStrategyEnabled("HIGH_DELTA_SCALP"))
                 tryOpenHighDeltaScalp(symbol, price, K, expiry, T, sigma, false, signalStr, featureCsv);
 
         } else if (veryStrongBear && !hasDirectional && !hasMultiLeg) {
-            if (isStrategyEnabled("MOMENTUM_NEAR_TERM"))
+            if (sellSignals < putMin)
+                researchCallback.accept(symbol + " PUT skip: need " + putMin + "+ signals in " + marketRegime + " (have " + sellSignals + ")");
+            else if (isStrategyEnabled("MOMENTUM_NEAR_TERM"))
                 tryOpenMomentumNearTerm(symbol, price, false, sigma, signalStr, featureCsv);
 
         } else if (purelyBearish && !hasDirectional && !hasMultiLeg) {
-            if (isStrategyEnabled("LONG_PUT"))
+            if (sellSignals < putMin)
+                researchCallback.accept(symbol + " PUT skip: need " + putMin + "+ signals in " + marketRegime + " (have " + sellSignals + ")");
+            else if (isStrategyEnabled("LONG_PUT"))
                 tryOpenLongPut(symbol, price, K, expiry, T, sigma, signalStr, featureCsv, putKey, sellSignals, opts);
 
         } else if (mixedStrong && !hasDirectional && !hasMultiLeg) {
-            if (isZeroDteDay() && isStrategyEnabled("ZERO_DTE"))
+            if (callsAllowed && isZeroDteDay() && isStrategyEnabled("ZERO_DTE"))
                 tryOpenZeroDTE(symbol, price, K, sigma, signalStr, featureCsv);
+        }
+    }
+
+    // ── Pre-close force-exit ──────────────────────────────────────────────────
+
+    private void forceCloseAllForSymbol(String symbol, double stockPrice) {
+        String[] keys = {
+            symbol + "_CALL",          symbol + "_PUT",
+            symbol + "_HIGHDELTA_CALL", symbol + "_HIGHDELTA_PUT",
+            symbol + "_NEARTERM_CALL",  symbol + "_NEARTERM_PUT",
+            symbol + "_ZEROTE_CALL",    symbol + "_ZEROTE_PUT"
+        };
+        LocalDate virtualDate = clock.get().toLocalDate();
+        for (String key : keys) {
+            OptionsPosition pos = account.getOptionsPositions().get(key);
+            if (pos == null) continue;
+            boolean isCall = "CALL".equals(pos.getType());
+            double sigma = computeVol(symbol);
+            double T = bsEngine.timeToExpiry(pos.getExpiry());
+            double premium;
+            if (sigma > 0 && T > 0) {
+                premium = isCall
+                    ? bsEngine.callPrice(stockPrice, pos.getStrike(), RISK_FREE_RATE, T, sigma)
+                    : bsEngine.putPrice(stockPrice, pos.getStrike(), RISK_FREE_RATE, T, sigma);
+            } else {
+                premium = isCall
+                    ? Math.max(0, stockPrice - pos.getStrike())
+                    : Math.max(0, pos.getStrike() - stockPrice);
+            }
+            optExec.closePosition(key, premium, "Pre-close: avoid overnight hold");
+            lastAnyCloseTime.put(symbol, clock.get());
+            researchCallback.accept(symbol + (isCall ? " CALL" : " PUT")
+                    + " closed pre-close prem=" + String.format("%.2f", premium));
         }
     }
 
@@ -219,6 +341,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         OptionsPosition pos = opts.get(posKey);
         if (pos == null) return;
 
+        LocalDate virtualDate = clock.get().toLocalDate();
         double T     = bsEngine.timeToExpiry(pos.getExpiry());
         double sigma = computeVol(symbol);
         boolean canPrice = sigma > 0 && T > 0;
@@ -229,19 +352,23 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         boolean premiumStop  = canPrice && currentPremium <= pos.getPremiumPaid() * STOP_LOSS_FRAC;
         boolean profitTarget = currentPremium >= pos.getPremiumPaid() * PROFIT_TARGET;
-        boolean nearExpiry   = pos.daysToExpiry() < 3;
+        boolean nearExpiry   = pos.daysToExpiry(virtualDate) < 3;
 
-        // Require 2 consecutive ticks of opposing signals before exiting on reversal
+        // Require 4+ opposing signals for 3 consecutive ticks before exiting on reversal —
+        // same entry-strength bar to trigger exit, prevents churn on intraday noise.
         int consecutive;
-        if (reversalSignals >= 2) {
+        if (reversalSignals >= 4) {
             consecutive = reversalConsecutive.merge(posKey, 1, Integer::sum);
         } else {
             reversalConsecutive.remove(posKey);
             consecutive = 0;
         }
-        boolean reversal = consecutive >= 2;
+        boolean reversal = consecutive >= 3;
 
-        if (!premiumStop && !profitTarget && !reversal && !nearExpiry) return;
+        // Always close if premium is essentially worthless, even if canPrice is false
+        boolean worthless = !canPrice && pos.getPremiumPaid() > 0;
+
+        if (!premiumStop && !profitTarget && !reversal && !nearExpiry && !worthless) return;
 
         reversalConsecutive.remove(posKey);
         String reason;
@@ -250,11 +377,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                                         currentPremium, pos.getPremiumPaid());
         else if (premiumStop)  reason = String.format("Premium stop-loss: %.2f <= %.0f%% of %.2f",
                                         currentPremium, STOP_LOSS_FRAC * 100, pos.getPremiumPaid());
-        else                   reason = "Signal reversal (2 bars): " + (isCall ? "SELL" : "BUY");
+        else if (worthless)    reason = "Premium collapsed to zero";
+        else                   reason = "Signal reversal (3 bars): " + (isCall ? "SELL" : "BUY");
 
-        if (premiumStop) sessionStopLossed.add(posKey);
-        lastDirectionalCloseMs.put(posKey, System.currentTimeMillis());
-        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
+        if (premiumStop || worthless) sessionStopLossed.add(posKey);
+        lastDirectionalCloseTime.put(posKey, clock.get());
+        lastAnyCloseTime.put(symbol, clock.get());
         optExec.closePosition(posKey, currentPremium, reason);
         researchCallback.accept(symbol + (isCall ? " CALL" : " PUT") + " closed: " + reason
                 + " prem=" + String.format("%.2f", currentPremium));
@@ -270,6 +398,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         OptionsPosition putPos  = opts.get(putKey);
         if (callPos == null || putPos == null) return;
 
+        LocalDate virtualDate = clock.get().toLocalDate();
         double sigma = computeVol(symbol);
         double T = strategyName.equals("ZEROTE") ? 0.5 / 365.0 : bsEngine.timeToExpiry(callPos.getExpiry());
 
@@ -288,8 +417,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         boolean premiumStop  = totalPaid > 0 && totalCurrent <= totalPaid * STOP_LOSS_FRAC;
         boolean profitTarget = totalPaid > 0 && totalCurrent >= totalPaid * PROFIT_TARGET;
         boolean nearExpiry   = strategyName.equals("ZEROTE")
-                ? callPos.daysToExpiry() < 1
-                : callPos.daysToExpiry() < 3;
+                ? callPos.daysToExpiry(virtualDate) < 1
+                : callPos.daysToExpiry(virtualDate) < 3;
 
         if (!premiumStop && !profitTarget && !nearExpiry) return;
 
@@ -301,8 +430,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                                         totalCurrent, STOP_LOSS_FRAC * 100, totalPaid);
 
         if (premiumStop) sessionStopLossed.add(symbol + "_MULTILEG");
-        lastMultiLegCloseMs.put(symbol, System.currentTimeMillis());
-        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
+        lastMultiLegCloseTime.put(symbol, clock.get());
+        lastAnyCloseTime.put(symbol, clock.get());
         optExec.closeBuyPair(callKey, putKey, callPrem, putPrem, reason);
         researchCallback.accept(String.format("%s %s closed: %s combined=%.2f",
                 symbol, strategyName, reason, totalCurrent));
@@ -317,8 +446,9 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             researchCallback.accept(symbol + " CALL skip: stop-loss cooldown");
             return;
         }
-        Long callLastClose = lastDirectionalCloseMs.get(callKey);
-        if (callLastClose != null && System.currentTimeMillis() - callLastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
+        ZonedDateTime epoch = ZonedDateTime.of(2000, 1, 1, 0, 0, 0, 0, ET);
+        ZonedDateTime callLastClose = lastDirectionalCloseTime.getOrDefault(callKey, epoch);
+        if (Duration.between(callLastClose, clock.get()).toMinutes() < COOLDOWN_MINUTES) {
             researchCallback.accept(symbol + " CALL skip: re-entry cooldown");
             return;
         }
@@ -335,7 +465,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (contracts < 1) return;
 
         optExec.buyCall(symbol, K, expiry, contracts, premium, signalStr, featureCsv);
-        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
+        lastAnyCloseTime.put(symbol, clock.get());
         GreeksResult g = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, true);
         researchCallback.accept(symbol + " CALL K=" + K + " exp=" + expiry
                 + " x" + contracts + " prem=" + String.format("%.2f", premium) + " | " + g);
@@ -350,13 +480,14 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             researchCallback.accept(symbol + " PUT skip: stop-loss cooldown");
             return;
         }
-        Long putLastClose = lastDirectionalCloseMs.get(putKey);
-        if (putLastClose != null && System.currentTimeMillis() - putLastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
+        ZonedDateTime epoch = ZonedDateTime.of(2000, 1, 1, 0, 0, 0, 0, ET);
+        ZonedDateTime putLastClose = lastDirectionalCloseTime.getOrDefault(putKey, epoch);
+        if (Duration.between(putLastClose, clock.get()).toMinutes() < COOLDOWN_MINUTES) {
             researchCallback.accept(symbol + " PUT skip: re-entry cooldown");
             return;
         }
         if (uptrendSupplier != null && uptrendSupplier.getAsBoolean()) {
-            researchCallback.accept(symbol + " PUT skip: bull market (SPY above 50-day MA)");
+            researchCallback.accept(symbol + " PUT skip: SPY above 20-bar MA (uptrend)");
             return;
         }
         double optionsBudget = account.getPositions().containsKey(symbol)
@@ -371,7 +502,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (contracts < 1) return;
 
         optExec.buyPut(symbol, K, expiry, contracts, premium, signalStr, featureCsv);
-        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
+        lastAnyCloseTime.put(symbol, clock.get());
         GreeksResult g = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, false);
         researchCallback.accept(symbol + " PUT K=" + K + " exp=" + expiry
                 + " x" + contracts + " prem=" + String.format("%.2f", premium) + " | " + g);
@@ -387,8 +518,9 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             researchCallback.accept(symbol + (isCall ? " HIGH-DELTA CALL" : " HIGH-DELTA PUT") + " skip: stop-loss cooldown");
             return;
         }
-        Long hdLastClose = lastDirectionalCloseMs.get(posKey);
-        if (hdLastClose != null && System.currentTimeMillis() - hdLastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
+        ZonedDateTime epoch = ZonedDateTime.of(2000, 1, 1, 0, 0, 0, 0, ET);
+        ZonedDateTime hdLastClose = lastDirectionalCloseTime.getOrDefault(posKey, epoch);
+        if (Duration.between(hdLastClose, clock.get()).toMinutes() < COOLDOWN_MINUTES) {
             researchCallback.accept(symbol + (isCall ? " HIGH-DELTA CALL" : " HIGH-DELTA PUT") + " skip: re-entry cooldown");
             return;
         }
@@ -397,7 +529,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             return;
         }
         if (!isCall && uptrendSupplier != null && uptrendSupplier.getAsBoolean()) {
-            researchCallback.accept(symbol + " HIGH-DELTA PUT skip: bull market");
+            researchCallback.accept(symbol + " HIGH-DELTA PUT skip: SPY above 20-bar MA (uptrend)");
             return;
         }
         double deepK   = isCall ? Math.max(1.0, K - DEEP_ITM_OFFSET) : K + DEEP_ITM_OFFSET;
@@ -417,7 +549,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (isCall) optExec.buyCallAs(posKey, symbol, deepK, nearExpiry, contracts, premium, signalStr, featureCsv);
         else        optExec.buyPutAs (posKey, symbol, deepK, nearExpiry, contracts, premium, signalStr, featureCsv);
         if (!account.getOptionsPositions().containsKey(posKey)) return;
-        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
+        lastAnyCloseTime.put(symbol, clock.get());
 
         GreeksResult g = bsEngine.greeks(price, deepK, RISK_FREE_RATE, nearT, sigma, isCall);
         researchCallback.accept(String.format("%s HIGH-DELTA %s K=%.0f (deep ITM) exp=%s x%d prem=%.2f | %s",
@@ -433,8 +565,9 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             researchCallback.accept(symbol + (isCall ? " NEARTERM CALL" : " NEARTERM PUT") + " skip: stop-loss cooldown");
             return;
         }
-        Long ntLastClose = lastDirectionalCloseMs.get(posKey);
-        if (ntLastClose != null && System.currentTimeMillis() - ntLastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
+        ZonedDateTime epoch = ZonedDateTime.of(2000, 1, 1, 0, 0, 0, 0, ET);
+        ZonedDateTime ntLastClose = lastDirectionalCloseTime.getOrDefault(posKey, epoch);
+        if (Duration.between(ntLastClose, clock.get()).toMinutes() < COOLDOWN_MINUTES) {
             researchCallback.accept(symbol + (isCall ? " NEARTERM CALL" : " NEARTERM PUT") + " skip: re-entry cooldown");
             return;
         }
@@ -443,7 +576,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             return;
         }
         if (!isCall && uptrendSupplier != null && uptrendSupplier.getAsBoolean()) {
-            researchCallback.accept(symbol + " NEARTERM PUT skip: bull market");
+            researchCallback.accept(symbol + " NEARTERM PUT skip: SPY above 20-bar MA (uptrend)");
             return;
         }
         LocalDate nearExpiry = bsEngine.selectNearTermExpiry();
@@ -462,7 +595,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (isCall) optExec.buyCallAs(posKey, symbol, K, nearExpiry, contracts, premium, signalStr, featureCsv);
         else        optExec.buyPutAs (posKey, symbol, K, nearExpiry, contracts, premium, signalStr, featureCsv);
         if (!account.getOptionsPositions().containsKey(posKey)) return;
-        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
+        lastAnyCloseTime.put(symbol, clock.get());
 
         GreeksResult g = bsEngine.greeks(price, K, RISK_FREE_RATE, nearT, sigma, isCall);
         researchCallback.accept(String.format("%s NEAR-TERM %s K=%.0f exp=%s x%d prem=%.2f | %s",
@@ -480,13 +613,14 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             researchCallback.accept(symbol + " ZERO-DTE skip: stop-loss cooldown");
             return;
         }
-        Long lastClose = lastMultiLegCloseMs.get(symbol);
-        if (lastClose != null && System.currentTimeMillis() - lastClose < MULTILEG_REENTRY_COOLDOWN_MS) {
+        ZonedDateTime epoch = ZonedDateTime.of(2000, 1, 1, 0, 0, 0, 0, ET);
+        ZonedDateTime lastClose = lastMultiLegCloseTime.getOrDefault(symbol, epoch);
+        if (Duration.between(lastClose, clock.get()).toMinutes() < COOLDOWN_MINUTES) {
             researchCallback.accept(symbol + " ZERO-DTE skip: re-entry cooldown");
             return;
         }
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = clock.get().toLocalDate();
         double T = 0.5 / 365.0;
         double callPremium = resolvePremium(symbol, K, today, true,  T, sigma, price);
         double putPremium  = resolvePremium(symbol, K, today, false, T, sigma, price);
@@ -509,7 +643,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             researchCallback.accept(symbol + " ZERO-DTE did not open (legs rejected)");
             return;
         }
-        lastAnyCloseMs.put(symbol, System.currentTimeMillis());
+        lastAnyCloseTime.put(symbol, clock.get());
 
         GreeksResult cg = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, true);
         GreeksResult pg = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, false);
@@ -541,7 +675,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     }
 
     private boolean isZeroDteDay() {
-        return LocalDate.now().getDayOfWeek() == DayOfWeek.FRIDAY;
+        return clock.get().toLocalDate().getDayOfWeek() == DayOfWeek.FRIDAY;
     }
 
     private double computeVol(String symbol) {
@@ -551,11 +685,11 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     }
 
     private void resetIfNewDay() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = clock.get().toLocalDate();
         if (!today.equals(stopLossResetDate)) {
             sessionStopLossed.clear();
-            lastMultiLegCloseMs.clear();
-            lastDirectionalCloseMs.clear();
+            lastMultiLegCloseTime.clear();
+            lastDirectionalCloseTime.clear();
             reversalConsecutive.clear();
             stopLossResetDate = today;
         }

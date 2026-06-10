@@ -37,6 +37,10 @@ public class AppConfig {
     // Strategies enabled for live trading. Defaults to day-trading set.
     private Set<String> enabledStrategies = new LinkedHashSet<>(
             Arrays.asList("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM", "LONG_CALL", "LONG_PUT", "ZERO_DTE"));
+    // If non-empty, only these symbols may trade options. Empty = all symbols allowed.
+    private Set<String> optionsSymbolAllowlist = new LinkedHashSet<>();
+    // Symbols in this set may trade puts but not calls.
+    private Set<String> optionsCallsDisabled   = new LinkedHashSet<>();
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
@@ -78,6 +82,18 @@ public class AppConfig {
                         .map(String::strip).filter(s -> !s.isEmpty())
                         .collect(Collectors.toCollection(LinkedHashSet::new));
             }
+            String allowlistRaw = props.getProperty("options.symbol.allowlist", "");
+            if (!allowlistRaw.isBlank()) {
+                config.optionsSymbolAllowlist = Arrays.stream(allowlistRaw.split(","))
+                        .map(String::strip).filter(s -> !s.isEmpty())
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
+            }
+            String callsDisabledRaw = props.getProperty("options.calls.disabled", "");
+            if (!callsDisabledRaw.isBlank()) {
+                config.optionsCallsDisabled = Arrays.stream(callsDisabledRaw.split(","))
+                        .map(String::strip).filter(s -> !s.isEmpty())
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
+            }
         } catch (IOException ignored) {}
         return config;
     }
@@ -97,6 +113,8 @@ public class AppConfig {
             props.setProperty("risk.market_regime_filter", String.valueOf(marketRegimeFilterEnabled));
             props.setProperty("risk.earnings_blackout_days", String.valueOf(earningsBlackoutDays));
             props.setProperty("strategy.enabled", String.join(",", enabledStrategies));
+            props.setProperty("options.symbol.allowlist", String.join(",", optionsSymbolAllowlist));
+            props.setProperty("options.calls.disabled", String.join(",", optionsCallsDisabled));
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
             }
@@ -138,6 +156,12 @@ public class AppConfig {
 
     public String getClaudeApiKey() { return claudeApiKey; }
     public void setClaudeApiKey(String key) { this.claudeApiKey = key; }
+
+    public Set<String> getOptionsSymbolAllowlist() { return optionsSymbolAllowlist; }
+    public void setOptionsSymbolAllowlist(Set<String> symbols) { this.optionsSymbolAllowlist = new LinkedHashSet<>(symbols); }
+
+    public Set<String> getOptionsCallsDisabled() { return optionsCallsDisabled; }
+    public void setOptionsCallsDisabled(Set<String> symbols) { this.optionsCallsDisabled = new LinkedHashSet<>(symbols); }
 
     public boolean isAlpacaBroker() {
         return brokerType == BrokerType.ALPACA_PAPER || brokerType == BrokerType.ALPACA_LIVE;

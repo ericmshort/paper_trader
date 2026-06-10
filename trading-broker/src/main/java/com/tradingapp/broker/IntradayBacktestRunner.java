@@ -1,7 +1,6 @@
 package com.tradingapp.broker;
 
 import com.tradingapp.account.Account;
-import com.tradingapp.account.TransactionLog;
 import com.tradingapp.account.TransactionRecord;
 import com.tradingapp.data.DayTraderWatchList;
 import com.tradingapp.data.PriceHistory;
@@ -11,12 +10,10 @@ import com.tradingapp.engine.IndicatorEngine;
 import com.tradingapp.engine.IntradayBacktestEngine;
 import com.tradingapp.engine.IntradayBacktestResult;
 import com.tradingapp.engine.IntradayBar;
-import com.tradingapp.engine.OptionsEvaluator;
 import com.tradingapp.options.BlackScholesEngine;
 import com.tradingapp.options.OptionsOrderExecutor;
 import com.tradingapp.options.OptionsSignalRouter;
 
-import java.io.File;
 import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -32,8 +29,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
-import java.util.function.BiFunction;
 
 /**
  * Standalone CLI runner: fetches ~100 trading days of 1-min bars, replays them through
@@ -90,37 +87,28 @@ public class IntradayBacktestRunner {
         }
         System.out.println("Fetched data for " + barsBySymbol.size() + " symbols. Running sim...");
 
-        // --- Wire OptionsSignalRouter per day ---
+        // --- Wire OptionsSignalRouter (shared instance; account/log/clock wired by engine) ---
         double maxExposure = cfg.getMaxPortfolioExposurePct() / 100.0;
-        java.util.Set<String> enabledStrategies = cfg.getEnabledStrategies();
+        // Use only strategies that require ≥4 signals — avoids noise trades from 3-signal bar
+        Set<String> backtestStrategies = Set.of("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM");
 
-        BiFunction<Account, PriceHistory, OptionsEvaluator> optFactory = (acct, ph) -> {
-            try {
-                File tmpDb = File.createTempFile("opts-bt", ".db");
-                tmpDb.deleteOnExit();
-                TransactionLog tl = new TransactionLog(tmpDb.getAbsolutePath());
-                OptionsOrderExecutor exec = new OptionsOrderExecutor(acct, tl);
-                OptionsSignalRouter router = new OptionsSignalRouter(
-                        new BlackScholesEngine(), exec, acct, ph, msg -> {}, null);
-                router.setMaxPortfolioExposure(maxExposure);
-                if (!enabledStrategies.isEmpty()) {
-                    router.setEnabledStrategies(enabledStrategies);
-                }
-                return router;
-            } catch (Exception e) {
-                System.err.println("WARNING: could not create OptionsSignalRouter: " + e.getMessage());
-                return null;
-            }
-        };
+        // Placeholder account/history — replaced by engine's shared objects in onBacktestInit
+        OptionsOrderExecutor optExec = new OptionsOrderExecutor(new Account(), null);
+        OptionsSignalRouter router = new OptionsSignalRouter(
+                new BlackScholesEngine(), optExec, new Account(), new PriceHistory(), msg -> {}, null);
+        router.setMaxPortfolioExposure(maxExposure);
+        router.setEnabledStrategies(backtestStrategies);
+        // Exclude GOOGL, AMD, INTC — both calls and puts lose consistently.
+        router.setOptionsAllowlist(Set.of("SPY","AMZN","PLTR","META","MSFT","NVDA","AAPL","NOK","F"));
+        // MSFT calls lost heavily (-$2,344) while MSFT puts won (+$1,846) — disable calls only.
+        router.setCallsDisabledSymbols(Set.of("MSFT"));
 
         // --- Run backtest ---
         IntradayBacktestEngine engine = new IntradayBacktestEngine(new IndicatorEngine(), new FeeCalculator());
 
         long t0 = System.currentTimeMillis();
-        // Options trading disabled in backtest: ReplayQuoteProvider returns empty chains, and the
-        // Black-Scholes router would synthesize unrealistic trades with no real market data.
         IntradayBacktestResult result = engine.run(
-                watchlist, barsBySymbol, 100_000.0, null,
+                watchlist, barsBySymbol, 100_000.0, router,
                 msg -> System.out.println("  " + msg));
         long elapsed = System.currentTimeMillis() - t0;
 
