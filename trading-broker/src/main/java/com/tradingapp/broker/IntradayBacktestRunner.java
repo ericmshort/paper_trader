@@ -117,8 +117,10 @@ public class IntradayBacktestRunner {
         IntradayBacktestEngine engine = new IntradayBacktestEngine(new IndicatorEngine(), new FeeCalculator());
 
         long t0 = System.currentTimeMillis();
+        // Options trading disabled in backtest: ReplayQuoteProvider returns empty chains, and the
+        // Black-Scholes router would synthesize unrealistic trades with no real market data.
         IntradayBacktestResult result = engine.run(
-                watchlist, barsBySymbol, 100_000.0, optFactory,
+                watchlist, barsBySymbol, 100_000.0, null,
                 msg -> System.out.println("  " + msg));
         long elapsed = System.currentTimeMillis() - t0;
 

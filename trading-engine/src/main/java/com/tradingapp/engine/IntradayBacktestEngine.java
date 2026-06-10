@@ -94,6 +94,8 @@ public class IntradayBacktestEngine {
             dayNum++;
             if (progressCallback != null) progressCallback.accept("Day " + dayNum + "/" + tradingDays.size() + ": " + date);
 
+            trailingStop.resetAll();
+
             CandleHistory candleHistory = new CandleHistory();
             loop.setCandleHistory(candleHistory);
 

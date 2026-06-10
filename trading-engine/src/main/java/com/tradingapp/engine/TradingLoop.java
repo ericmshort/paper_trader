@@ -315,7 +315,10 @@ public class TradingLoop implements Runnable {
                     account.removePosition(symbol);
                     trailingStop.reset(symbol);
                     entryTimes.remove(symbol);
-                    entryPrices.remove(symbol);
+                    Double ep = entryPrices.remove(symbol);
+                    lossCooldowns.put(symbol, now);
+                    researchCallback.accept(symbol + " on 60-min re-entry cooldown after trailing stop (price $"
+                            + String.format("%.2f", price) + (ep != null ? " < peak, entry was $" + String.format("%.2f", ep) : "") + ")");
                     uiRefreshCallback.run();
                 } else if (weightedSells >= SIGNAL_THRESHOLD && hasPosition) {
                     ZonedDateTime entryTime = entryTimes.get(symbol);
@@ -388,6 +391,9 @@ public class TradingLoop implements Runnable {
                                     "Signals: " + buys + "/" + signals.size() + " BUY", featureCsv);
                             entryTimes.put(symbol, now);
                             entryPrices.put(symbol, price);
+                            // Reset peak to entry price so the 2% trailing stop is measured
+                            // from where we entered, not from an earlier intraday high.
+                            trailingStop.reset(symbol);
                             uiRefreshCallback.run();
                         }
                     }

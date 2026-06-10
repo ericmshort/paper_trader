@@ -357,7 +357,15 @@ public class TransactionLog {
     }
 
     public int countWins() {
-        String sql = "SELECT COUNT(*) FROM transactions WHERE action='SELL' AND (price_per_unit * quantity) >= fee_charged";
+        // A round-trip is a win when sell price > entry price of the most recent preceding buy
+        String sql = "SELECT COUNT(*) FROM transactions s" +
+                " WHERE s.action IN ('SELL','CALL_SELL','PUT_SELL')" +
+                " AND s.price_per_unit > (" +
+                "   SELECT b.price_per_unit FROM transactions b" +
+                "   WHERE b.symbol = s.symbol" +
+                "     AND b.action IN ('BUY','CALL_BUY','PUT_BUY')" +
+                "     AND b.id < s.id" +
+                "   ORDER BY b.id DESC LIMIT 1)";
         try (Connection conn = connect();
              Statement stmt = conn.createStatement();
              ResultSet rs = stmt.executeQuery(sql)) {
@@ -376,7 +384,14 @@ public class TransactionLog {
     }
 
     public int countLosses() {
-        String sql = "SELECT COUNT(*) FROM transactions WHERE action='SELL' AND (price_per_unit * quantity) < fee_charged";
+        String sql = "SELECT COUNT(*) FROM transactions s" +
+                " WHERE s.action IN ('SELL','CALL_SELL','PUT_SELL')" +
+                " AND s.price_per_unit <= (" +
+                "   SELECT b.price_per_unit FROM transactions b" +
+                "   WHERE b.symbol = s.symbol" +
+                "     AND b.action IN ('BUY','CALL_BUY','PUT_BUY')" +
+                "     AND b.id < s.id" +
+                "   ORDER BY b.id DESC LIMIT 1)";
         try (Connection conn = connect();
              Statement stmt = conn.createStatement();
              ResultSet rs = stmt.executeQuery(sql)) {

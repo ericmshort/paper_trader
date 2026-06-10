@@ -23,4 +23,8 @@ public class TrailingStopMonitor {
     public void reset(String symbol) {
         peaks.remove(symbol);
     }
+
+    public void resetAll() {
+        peaks.clear();
+    }
 }
