@@ -100,8 +100,8 @@ public class IntradayBacktestRunner {
         router.setEnabledStrategies(backtestStrategies);
         // Exclude GOOGL, AMD, INTC — both calls and puts lose consistently.
         router.setOptionsAllowlist(Set.of("SPY","AMZN","PLTR","META","MSFT","NVDA","AAPL","NOK","F"));
-        // MSFT calls lost heavily (-$2,344) while MSFT puts won (+$1,846) — disable calls only.
         router.setCallsDisabledSymbols(Set.of("MSFT"));
+        router.setPutsDisabledSymbols(Set.of("NVDA"));
 
         // --- Run backtest ---
         IntradayBacktestEngine engine = new IntradayBacktestEngine(new IndicatorEngine(), new FeeCalculator());

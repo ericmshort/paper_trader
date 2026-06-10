@@ -326,6 +326,7 @@ public class BacktestController implements Initializable {
                         msg -> {}, null);
                 optRouter.setOptionsAllowlist(Set.of("SPY","AMZN","PLTR","META","MSFT","NVDA","AAPL","NOK","F"));
                 optRouter.setCallsDisabledSymbols(Set.of("MSFT"));
+                optRouter.setPutsDisabledSymbols(Set.of("NVDA"));
 
                 IntradayBacktestEngine engine = new IntradayBacktestEngine(new IndicatorEngine(), new FeeCalculator());
                 IntradayBacktestResult result = engine.run(watchlist, barsBySymbol, 100_000.0, optRouter,

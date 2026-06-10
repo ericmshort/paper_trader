@@ -41,6 +41,8 @@ public class AppConfig {
     private Set<String> optionsSymbolAllowlist = new LinkedHashSet<>();
     // Symbols in this set may trade puts but not calls.
     private Set<String> optionsCallsDisabled   = new LinkedHashSet<>();
+    // Symbols in this set may trade calls but not puts.
+    private Set<String> optionsPutsDisabled    = new LinkedHashSet<>();
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
@@ -94,6 +96,12 @@ public class AppConfig {
                         .map(String::strip).filter(s -> !s.isEmpty())
                         .collect(Collectors.toCollection(LinkedHashSet::new));
             }
+            String putsDisabledRaw = props.getProperty("options.puts.disabled", "");
+            if (!putsDisabledRaw.isBlank()) {
+                config.optionsPutsDisabled = Arrays.stream(putsDisabledRaw.split(","))
+                        .map(String::strip).filter(s -> !s.isEmpty())
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
+            }
         } catch (IOException ignored) {}
         return config;
     }
@@ -115,6 +123,7 @@ public class AppConfig {
             props.setProperty("strategy.enabled", String.join(",", enabledStrategies));
             props.setProperty("options.symbol.allowlist", String.join(",", optionsSymbolAllowlist));
             props.setProperty("options.calls.disabled", String.join(",", optionsCallsDisabled));
+            props.setProperty("options.puts.disabled",  String.join(",", optionsPutsDisabled));
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
             }
@@ -162,6 +171,9 @@ public class AppConfig {
 
     public Set<String> getOptionsCallsDisabled() { return optionsCallsDisabled; }
     public void setOptionsCallsDisabled(Set<String> symbols) { this.optionsCallsDisabled = new LinkedHashSet<>(symbols); }
+
+    public Set<String> getOptionsPutsDisabled() { return optionsPutsDisabled; }
+    public void setOptionsPutsDisabled(Set<String> symbols) { this.optionsPutsDisabled = new LinkedHashSet<>(symbols); }
 
     public boolean isAlpacaBroker() {
         return brokerType == BrokerType.ALPACA_PAPER || brokerType == BrokerType.ALPACA_LIVE;

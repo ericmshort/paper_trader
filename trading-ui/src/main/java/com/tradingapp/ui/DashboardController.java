@@ -245,6 +245,7 @@ public class DashboardController implements Initializable {
                 bsEngine, optExec, account, priceHistory, researchCb, optionsDataClient);
         optionsRouter.setOptionsAllowlist(appConfig.getOptionsSymbolAllowlist());
         optionsRouter.setCallsDisabledSymbols(appConfig.getOptionsCallsDisabled());
+        optionsRouter.setPutsDisabledSymbols(appConfig.getOptionsPutsDisabled());
 
         Path weightsPath = AppConfig.getDataDir().resolve("signal-weights.json");
         SignalWeights initialWeights;

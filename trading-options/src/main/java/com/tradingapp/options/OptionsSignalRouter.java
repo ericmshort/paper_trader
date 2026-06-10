@@ -77,6 +77,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private Set<String> optionsAllowlist      = new HashSet<>();
     // Symbols in this set may open puts but not calls.
     private Set<String> callsDisabledSymbols  = new HashSet<>();
+    // Symbols in this set may open calls but not puts.
+    private Set<String> putsDisabledSymbols   = new HashSet<>();
 
     // Virtual clock: real ZonedDateTime::now in live trading; virtual clock in backtest.
     private Supplier<ZonedDateTime> clock = ZonedDateTime::now;
@@ -87,6 +89,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     public void setClock(Supplier<ZonedDateTime> clock) { this.clock = clock; }
     public void setOptionsAllowlist(Set<String> symbols) { this.optionsAllowlist = new HashSet<>(symbols); }
     public void setCallsDisabledSymbols(Set<String> symbols) { this.callsDisabledSymbols = new HashSet<>(symbols); }
+    public void setPutsDisabledSymbols(Set<String> symbols)  { this.putsDisabledSymbols  = new HashSet<>(symbols); }
     private boolean isStrategyEnabled(String name) { return enabledStrategies.isEmpty() || enabledStrategies.contains(name); }
 
     public OptionsSignalRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
@@ -251,6 +254,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             return;
         }
         boolean callsAllowed = !callsDisabledSymbols.contains(symbol);
+        boolean putsAllowed  = !putsDisabledSymbols.contains(symbol);
 
         if (extremeBullish && !hasDirectional && !hasMultiLeg) {
             if (!callsAllowed)
@@ -277,25 +281,31 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                 tryOpenLongCall(symbol, price, K, expiry, T, sigma, signalStr, featureCsv, callKey, opts);
 
         } else if (extremeBearish && !hasDirectional && !hasMultiLeg) {
-            if (sellSignals < putMin)
+            if (!putsAllowed)
+                researchCallback.accept(symbol + " PUT skip: puts disabled for symbol");
+            else if (sellSignals < putMin)
                 researchCallback.accept(symbol + " PUT skip: need " + putMin + "+ signals in " + marketRegime + " (have " + sellSignals + ")");
             else if (isStrategyEnabled("HIGH_DELTA_SCALP"))
                 tryOpenHighDeltaScalp(symbol, price, K, expiry, T, sigma, false, signalStr, featureCsv);
 
         } else if (veryStrongBear && !hasDirectional && !hasMultiLeg) {
-            if (sellSignals < putMin)
+            if (!putsAllowed)
+                researchCallback.accept(symbol + " PUT skip: puts disabled for symbol");
+            else if (sellSignals < putMin)
                 researchCallback.accept(symbol + " PUT skip: need " + putMin + "+ signals in " + marketRegime + " (have " + sellSignals + ")");
             else if (isStrategyEnabled("MOMENTUM_NEAR_TERM"))
                 tryOpenMomentumNearTerm(symbol, price, false, sigma, signalStr, featureCsv);
 
         } else if (purelyBearish && !hasDirectional && !hasMultiLeg) {
-            if (sellSignals < putMin)
+            if (!putsAllowed)
+                researchCallback.accept(symbol + " PUT skip: puts disabled for symbol");
+            else if (sellSignals < putMin)
                 researchCallback.accept(symbol + " PUT skip: need " + putMin + "+ signals in " + marketRegime + " (have " + sellSignals + ")");
             else if (isStrategyEnabled("LONG_PUT"))
                 tryOpenLongPut(symbol, price, K, expiry, T, sigma, signalStr, featureCsv, putKey, sellSignals, opts);
 
         } else if (mixedStrong && !hasDirectional && !hasMultiLeg) {
-            if (callsAllowed && isZeroDteDay() && isStrategyEnabled("ZERO_DTE"))
+            if (callsAllowed && putsAllowed && isZeroDteDay() && isStrategyEnabled("ZERO_DTE"))
                 tryOpenZeroDTE(symbol, price, K, sigma, signalStr, featureCsv);
         }
     }
@@ -543,7 +553,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                     + " skip: premium too low (" + String.format("%.4f", premium) + ")");
             return;
         }
-        int contracts = Math.min(5, (int) (account.getBalance() * 0.05 / (premium * 100)));
+        // 5+ signal entry — highest conviction; allocate 8% of balance, up to 8 contracts.
+        int contracts = Math.min(8, (int) (account.getBalance() * 0.08 / (premium * 100)));
         if (contracts < 1) return;
 
         if (isCall) optExec.buyCallAs(posKey, symbol, deepK, nearExpiry, contracts, premium, signalStr, featureCsv);
@@ -589,7 +600,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             researchCallback.accept(symbol + (isCall ? " NEARTERM CALL" : " NEARTERM PUT") + " skip: premium too low");
             return;
         }
-        int contracts = Math.min(5, (int) (account.getBalance() * 0.05 / (premium * 100)));
+        // 4-signal entry — strong conviction; allocate 8% of balance, up to 8 contracts.
+        int contracts = Math.min(8, (int) (account.getBalance() * 0.08 / (premium * 100)));
         if (contracts < 1) return;
 
         if (isCall) optExec.buyCallAs(posKey, symbol, K, nearExpiry, contracts, premium, signalStr, featureCsv);
