@@ -47,6 +47,8 @@ public class AppConfig {
     private int downtrendPutMinSignals = 4;
     // When false, equity (stock) buys are disabled; only options trades execute.
     private boolean stockTradingEnabled = true;
+    // Fraction of entry premium at which an options position is stop-lossed (default 0.50 = 50%).
+    private double optionsStopLossFrac = 0.50;
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
@@ -112,6 +114,10 @@ public class AppConfig {
             } catch (NumberFormatException ignored) {}
             config.stockTradingEnabled = Boolean.parseBoolean(
                     props.getProperty("stock.trading.enabled", "true"));
+            try {
+                config.optionsStopLossFrac = Double.parseDouble(
+                        props.getProperty("options.stop_loss_frac", "0.50"));
+            } catch (NumberFormatException ignored) {}
         } catch (IOException ignored) {}
         return config;
     }
@@ -136,6 +142,7 @@ public class AppConfig {
             props.setProperty("options.puts.disabled",  String.join(",", optionsPutsDisabled));
             props.setProperty("options.downtrend_put_min_signals", String.valueOf(downtrendPutMinSignals));
             props.setProperty("stock.trading.enabled", String.valueOf(stockTradingEnabled));
+            props.setProperty("options.stop_loss_frac", String.valueOf(optionsStopLossFrac));
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
             }
@@ -179,6 +186,9 @@ public class AppConfig {
 
     public boolean isStockTradingEnabled() { return stockTradingEnabled; }
     public void setStockTradingEnabled(boolean v) { this.stockTradingEnabled = v; }
+
+    public double getOptionsStopLossFrac() { return optionsStopLossFrac; }
+    public void setOptionsStopLossFrac(double frac) { this.optionsStopLossFrac = frac; }
 
     public String getClaudeApiKey() { return claudeApiKey; }
     public void setClaudeApiKey(String key) { this.claudeApiKey = key; }

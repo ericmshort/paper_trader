@@ -56,13 +56,16 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private double maxPortfolioExposure         = 0.60;
     private static final double IV_SURGE_THRESHOLD = 1.2;  // skip if recent vol > 1.2x long-term (IV crush guard)
     private static final int    IV_WINDOW          = 20;
-    private static final double PROFIT_TARGET      = 2.0;
+    // Exit when premium reaches this multiple of entry (configurable; default 2x).
+    private double profitTarget                     = 2.0;
     // Exit when premium drops to this fraction of entry (configurable; default 50%).
     private double stopLossFrac                    = 0.50;
     private static final double DEEP_ITM_OFFSET    = 10.0;
 
     // Cooldown re-entry window (virtual time, works in both live and backtest)
-    private static final long COOLDOWN_MINUTES = 15L;
+    private long cooldownMinutes = 15L;
+    // If set, no new options entries are opened before this time (e.g. skip first 30 min).
+    private LocalTime entryStartTime = null;
 
     private final Set<String> sessionStopLossed = new HashSet<>();
     private final Map<String, ZonedDateTime> lastMultiLegCloseTime    = new HashMap<>();
@@ -90,7 +93,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     public void setMaxPortfolioExposure(double fraction) { this.maxPortfolioExposure = fraction; }
     public void setEnabledStrategies(Set<String> strategies) { this.enabledStrategies = new HashSet<>(strategies); }
     public void setClock(Supplier<ZonedDateTime> clock) { this.clock = clock; }
-    public void setStopLossFrac(double frac)          { this.stopLossFrac = frac; }
+    public void setStopLossFrac(double frac)           { this.stopLossFrac = frac; }
+    public void setProfitTarget(double multiple)       { this.profitTarget = multiple; }
+    public void setCooldownMinutes(long minutes)       { this.cooldownMinutes = minutes; }
+    public void setEntryStartTime(LocalTime time)      { this.entryStartTime = time; }
     public void setEntryCutoff(LocalTime time)         { this.entryCutoff = time; }
     public void setOptionsAllowlist(Set<String> symbols) { this.optionsAllowlist = new HashSet<>(symbols); }
     public void setCallsDisabledSymbols(Set<String> symbols) { this.callsDisabledSymbols = new HashSet<>(symbols); }
@@ -247,13 +253,16 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         ZonedDateTime now = clock.get();
         ZonedDateTime epoch = ZonedDateTime.of(2000, 1, 1, 0, 0, 0, 0, ET);
         ZonedDateTime lastClose = lastAnyCloseTime.getOrDefault(symbol, epoch);
-        if (Duration.between(lastClose, now).toMinutes() < COOLDOWN_MINUTES) {
+        if (Duration.between(lastClose, now).toMinutes() < cooldownMinutes) {
             researchCallback.accept(symbol + " skip: options cooldown ("
-                    + Duration.between(lastClose, now).toMinutes() + "m elapsed, need " + COOLDOWN_MINUTES + "m)");
+                    + Duration.between(lastClose, now).toMinutes() + "m elapsed, need " + cooldownMinutes + "m)");
             return;
         }
 
-        // ── 6. Entry cutoff: block new positions after this time ─────────────
+        // ── 6. Entry timing guards ───────────────────────────────────────────
+        if (entryStartTime != null && time.isBefore(entryStartTime)) {
+            return;
+        }
         if (entryCutoff != null && !time.isBefore(entryCutoff)) {
             return;
         }
@@ -371,9 +380,9 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                           : bsEngine.putPrice(price, pos.getStrike(), RISK_FREE_RATE, T, sigma))
                 : 0.0;
 
-        boolean premiumStop  = canPrice && currentPremium <= pos.getPremiumPaid() * stopLossFrac;
-        boolean profitTarget = currentPremium >= pos.getPremiumPaid() * PROFIT_TARGET;
-        boolean nearExpiry   = pos.daysToExpiry(virtualDate) < 3;
+        boolean premiumStop      = canPrice && currentPremium <= pos.getPremiumPaid() * stopLossFrac;
+        boolean hitProfitTarget  = currentPremium >= pos.getPremiumPaid() * profitTarget;
+        boolean nearExpiry       = pos.daysToExpiry(virtualDate) < 3;
 
         // Require 4+ opposing signals for 3 consecutive ticks before exiting on reversal —
         // same entry-strength bar to trigger exit, prevents churn on intraday noise.
@@ -389,13 +398,13 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         // Always close if premium is essentially worthless, even if canPrice is false
         boolean worthless = !canPrice && pos.getPremiumPaid() > 0;
 
-        if (!premiumStop && !profitTarget && !reversal && !nearExpiry && !worthless) return;
+        if (!premiumStop && !hitProfitTarget && !reversal && !nearExpiry && !worthless) return;
 
         reversalConsecutive.remove(posKey);
         String reason;
-        if (nearExpiry)        reason = "Expiry <3 days";
-        else if (profitTarget) reason = String.format("Profit target: %.2f >= 2x of %.2f",
-                                        currentPremium, pos.getPremiumPaid());
+        if (nearExpiry)             reason = "Expiry <3 days";
+        else if (hitProfitTarget)   reason = String.format("Profit target: %.2f >= %.1fx of %.2f",
+                                            currentPremium, profitTarget, pos.getPremiumPaid());
         else if (premiumStop)  reason = String.format("Premium stop-loss: %.2f <= %.0f%% of %.2f",
                                         currentPremium, stopLossFrac * 100, pos.getPremiumPaid());
         else if (worthless)    reason = "Premium collapsed to zero";
@@ -435,18 +444,18 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         double totalCurrent = callPrem * 100 * callPos.getContracts()
                             + putPrem  * 100 * putPos.getContracts();
 
-        boolean premiumStop  = totalPaid > 0 && totalCurrent <= totalPaid * stopLossFrac;
-        boolean profitTarget = totalPaid > 0 && totalCurrent >= totalPaid * PROFIT_TARGET;
+        boolean premiumStop     = totalPaid > 0 && totalCurrent <= totalPaid * stopLossFrac;
+        boolean hitProfitTarget = totalPaid > 0 && totalCurrent >= totalPaid * profitTarget;
         boolean nearExpiry   = strategyName.equals("ZEROTE")
                 ? callPos.daysToExpiry(virtualDate) < 1
                 : callPos.daysToExpiry(virtualDate) < 3;
 
-        if (!premiumStop && !profitTarget && !nearExpiry) return;
+        if (!premiumStop && !hitProfitTarget && !nearExpiry) return;
 
         String reason;
-        if (nearExpiry)        reason = "Expiry <" + (strategyName.equals("ZEROTE") ? "1 day" : "3 days");
-        else if (profitTarget) reason = String.format("Profit target: combined %.2f >= 2x of %.2f",
-                                        totalCurrent, totalPaid);
+        if (nearExpiry)             reason = "Expiry <" + (strategyName.equals("ZEROTE") ? "1 day" : "3 days");
+        else if (hitProfitTarget)   reason = String.format("Profit target: combined %.2f >= %.1fx of %.2f",
+                                            totalCurrent, profitTarget, totalPaid);
         else                   reason = String.format("Premium stop-loss: combined %.2f <= %.0f%% of %.2f",
                                         totalCurrent, stopLossFrac * 100, totalPaid);
 
@@ -469,7 +478,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         }
         ZonedDateTime epoch = ZonedDateTime.of(2000, 1, 1, 0, 0, 0, 0, ET);
         ZonedDateTime callLastClose = lastDirectionalCloseTime.getOrDefault(callKey, epoch);
-        if (Duration.between(callLastClose, clock.get()).toMinutes() < COOLDOWN_MINUTES) {
+        if (Duration.between(callLastClose, clock.get()).toMinutes() < cooldownMinutes) {
             researchCallback.accept(symbol + " CALL skip: re-entry cooldown");
             return;
         }
@@ -503,7 +512,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         }
         ZonedDateTime epoch = ZonedDateTime.of(2000, 1, 1, 0, 0, 0, 0, ET);
         ZonedDateTime putLastClose = lastDirectionalCloseTime.getOrDefault(putKey, epoch);
-        if (Duration.between(putLastClose, clock.get()).toMinutes() < COOLDOWN_MINUTES) {
+        if (Duration.between(putLastClose, clock.get()).toMinutes() < cooldownMinutes) {
             researchCallback.accept(symbol + " PUT skip: re-entry cooldown");
             return;
         }
@@ -541,7 +550,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         }
         ZonedDateTime epoch = ZonedDateTime.of(2000, 1, 1, 0, 0, 0, 0, ET);
         ZonedDateTime hdLastClose = lastDirectionalCloseTime.getOrDefault(posKey, epoch);
-        if (Duration.between(hdLastClose, clock.get()).toMinutes() < COOLDOWN_MINUTES) {
+        if (Duration.between(hdLastClose, clock.get()).toMinutes() < cooldownMinutes) {
             researchCallback.accept(symbol + (isCall ? " HIGH-DELTA CALL" : " HIGH-DELTA PUT") + " skip: re-entry cooldown");
             return;
         }
@@ -589,7 +598,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         }
         ZonedDateTime epoch = ZonedDateTime.of(2000, 1, 1, 0, 0, 0, 0, ET);
         ZonedDateTime ntLastClose = lastDirectionalCloseTime.getOrDefault(posKey, epoch);
-        if (Duration.between(ntLastClose, clock.get()).toMinutes() < COOLDOWN_MINUTES) {
+        if (Duration.between(ntLastClose, clock.get()).toMinutes() < cooldownMinutes) {
             researchCallback.accept(symbol + (isCall ? " NEARTERM CALL" : " NEARTERM PUT") + " skip: re-entry cooldown");
             return;
         }
@@ -638,7 +647,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         }
         ZonedDateTime epoch = ZonedDateTime.of(2000, 1, 1, 0, 0, 0, 0, ET);
         ZonedDateTime lastClose = lastMultiLegCloseTime.getOrDefault(symbol, epoch);
-        if (Duration.between(lastClose, clock.get()).toMinutes() < COOLDOWN_MINUTES) {
+        if (Duration.between(lastClose, clock.get()).toMinutes() < cooldownMinutes) {
             researchCallback.accept(symbol + " ZERO-DTE skip: re-entry cooldown");
             return;
         }
