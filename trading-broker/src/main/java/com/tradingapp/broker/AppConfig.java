@@ -5,6 +5,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalTime;
+import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Properties;
@@ -49,6 +51,8 @@ public class AppConfig {
     private boolean stockTradingEnabled = true;
     // Fraction of entry premium at which an options position is stop-lossed (default 0.50 = 50%).
     private double optionsStopLossFrac = 0.50;
+    // No new options entries after this ET time (null = no cutoff).
+    private LocalTime optionsEntryCutoff = null;
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
@@ -118,6 +122,11 @@ public class AppConfig {
                 config.optionsStopLossFrac = Double.parseDouble(
                         props.getProperty("options.stop_loss_frac", "0.50"));
             } catch (NumberFormatException ignored) {}
+            String cutoffRaw = props.getProperty("options.entry_cutoff", "");
+            if (!cutoffRaw.isBlank()) {
+                try { config.optionsEntryCutoff = LocalTime.parse(cutoffRaw); }
+                catch (DateTimeParseException ignored) {}
+            }
         } catch (IOException ignored) {}
         return config;
     }
@@ -143,6 +152,7 @@ public class AppConfig {
             props.setProperty("options.downtrend_put_min_signals", String.valueOf(downtrendPutMinSignals));
             props.setProperty("stock.trading.enabled", String.valueOf(stockTradingEnabled));
             props.setProperty("options.stop_loss_frac", String.valueOf(optionsStopLossFrac));
+            props.setProperty("options.entry_cutoff", optionsEntryCutoff != null ? optionsEntryCutoff.toString() : "");
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
             }
@@ -201,6 +211,9 @@ public class AppConfig {
 
     public Set<String> getOptionsPutsDisabled() { return optionsPutsDisabled; }
     public void setOptionsPutsDisabled(Set<String> symbols) { this.optionsPutsDisabled = new LinkedHashSet<>(symbols); }
+
+    public LocalTime getOptionsEntryCutoff() { return optionsEntryCutoff; }
+    public void setOptionsEntryCutoff(LocalTime t) { this.optionsEntryCutoff = t; }
 
     public boolean isAlpacaBroker() {
         return brokerType == BrokerType.ALPACA_PAPER || brokerType == BrokerType.ALPACA_LIVE;

@@ -85,6 +85,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     // Symbols in this set may open calls but not puts.
     private Set<String> putsDisabledSymbols   = new HashSet<>();
     private int downtrendPutMinSignals        = 4;
+    private boolean avoidOvernightHolds      = true;
 
     // Virtual clock: real ZonedDateTime::now in live trading; virtual clock in backtest.
     private Supplier<ZonedDateTime> clock = ZonedDateTime::now;
@@ -97,6 +98,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     public void setProfitTarget(double multiple)       { this.profitTarget = multiple; }
     public void setCooldownMinutes(long minutes)       { this.cooldownMinutes = minutes; }
     public void setEntryStartTime(LocalTime time)      { this.entryStartTime = time; }
+    public void setAvoidOvernightHolds(boolean v)      { this.avoidOvernightHolds = v; }
     public void setEntryCutoff(LocalTime time)         { this.entryCutoff = time; }
     public void setOptionsAllowlist(Set<String> symbols) { this.optionsAllowlist = new HashSet<>(symbols); }
     public void setCallsDisabledSymbols(Set<String> symbols) { this.callsDisabledSymbols = new HashSet<>(symbols); }
@@ -162,7 +164,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         // ── Pre-close: force-close all open options for this symbol ───────────
         LocalTime time = clock.get().toLocalTime();
-        if (!time.isBefore(PRE_CLOSE_CUTOFF)) {
+        if (avoidOvernightHolds && !time.isBefore(PRE_CLOSE_CUTOFF)) {
             forceCloseAllForSymbol(symbol, price);
             return;
         }

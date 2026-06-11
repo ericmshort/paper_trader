@@ -11,6 +11,8 @@ import javafx.scene.control.*;
 import javafx.scene.layout.HBox;
 
 import java.net.URL;
+import java.time.LocalTime;
+import java.time.format.DateTimeParseException;
 import java.util.LinkedHashSet;
 import java.util.Optional;
 import java.util.ResourceBundle;
@@ -44,6 +46,7 @@ public class SettingsController implements Initializable {
     @FXML private TextField optionsStopLossField;
     @FXML private TextField downtrendPutMinSignalsField;
     @FXML private TextArea  optionsAllowlistArea;
+    @FXML private TextField entryCutoffField;
     @FXML private TextField callsDisabledField;
     @FXML private TextField putsDisabledField;
     @FXML private PasswordField claudeApiKeyField;
@@ -109,6 +112,7 @@ public class SettingsController implements Initializable {
         optionsStopLossField.setText(String.valueOf((int) Math.round(cfg.getOptionsStopLossFrac() * 100)));
         downtrendPutMinSignalsField.setText(String.valueOf(cfg.getDowntrendPutMinSignals()));
         optionsAllowlistArea.setText(String.join(",", cfg.getOptionsSymbolAllowlist()));
+        entryCutoffField.setText(cfg.getOptionsEntryCutoff() != null ? cfg.getOptionsEntryCutoff().toString() : "");
         callsDisabledField.setText(String.join(",", cfg.getOptionsCallsDisabled()));
         putsDisabledField.setText(String.join(",", cfg.getOptionsPutsDisabled()));
         updateAlpacaFieldVisibility();
@@ -338,6 +342,11 @@ public class SettingsController implements Initializable {
             cfg.setDowntrendPutMinSignals(Math.min(6, Math.max(1, n)));
         } catch (NumberFormatException ignored) {}
         cfg.setOptionsSymbolAllowlist(parseSymbolSet(optionsAllowlistArea.getText()));
+        String cutoffText = entryCutoffField.getText().strip();
+        if (!cutoffText.isBlank()) {
+            try { cfg.setOptionsEntryCutoff(LocalTime.parse(cutoffText)); }
+            catch (DateTimeParseException ignored) {}
+        }
         cfg.setOptionsCallsDisabled(parseSymbolSet(callsDisabledField.getText()));
         cfg.setOptionsPutsDisabled(parseSymbolSet(putsDisabledField.getText()));
         return cfg;

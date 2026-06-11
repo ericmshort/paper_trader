@@ -173,6 +173,15 @@
     </HBox>
 
     <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Last Entry:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="entryCutoffField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="14:45"/>
+        <Label text="ET — no new positions after this time (HH:mm, leave blank for no cutoff)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
         <Label text="Put Min Signals:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
         <TextField fx:id="downtrendPutMinSignalsField" prefWidth="60"
                    style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
