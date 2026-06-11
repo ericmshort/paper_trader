@@ -255,10 +255,11 @@ public class DashboardController implements Initializable {
             initialWeights = new SignalWeights();
         }
         MLSignalEvaluator mlEval = new MLSignalEvaluator(initialWeights, weightsPath);
-        // Auto-retraining disabled: early trade history was corrupted by the options position
-        // key-mismatch bug (excessive contract accumulation). Re-enable once we have a clean
-        // history of at least 50 trades placed under correct conditions.
-        Runnable trainingCallback = null;
+        Runnable trainingCallback = () -> {
+            mlEval.retrain(transactionLog);
+            Platform.runLater(() -> researchArea.appendText(
+                "ML weights updated: " + mlEval.getWeightsSummary() + "\n"));
+        };
 
         EarningsCalendar earningsCalendar = new EarningsCalendar();
 
