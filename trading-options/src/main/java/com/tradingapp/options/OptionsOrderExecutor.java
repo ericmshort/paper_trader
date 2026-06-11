@@ -544,7 +544,13 @@ public class OptionsOrderExecutor {
     /** Updates account state and logs a single leg close. Does not submit to broker. */
     private void recordClose(String posKey, OptionsPosition pos, double currentPremium,
                              double fee, String reason, String externalId, String groupId) {
-        double proceeds = currentPremium * 100 * pos.getContracts();
+        // In live trading the BS-computed premium may be stale or zero at close time.
+        // Use cost basis as a placeholder so the account balance doesn't crater before
+        // Alpaca confirms the real fill price (syncAccount will correct it shortly after).
+        double accountingPremium = (submitter != null && currentPremium <= 0)
+                ? pos.getPremiumPaid()
+                : currentPremium;
+        double proceeds = accountingPremium * 100 * pos.getContracts();
         double net = proceeds - fee;
         account.setBalance(account.getBalance() + net);
         account.removeOptionsPosition(posKey);
