@@ -45,6 +45,8 @@ public class AppConfig {
     private Set<String> optionsPutsDisabled    = new LinkedHashSet<>();
     // Minimum sell signals required to open a put during a confirmed SPY downtrend.
     private int downtrendPutMinSignals = 4;
+    // When false, equity (stock) buys are disabled; only options trades execute.
+    private boolean stockTradingEnabled = true;
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
@@ -108,6 +110,8 @@ public class AppConfig {
                 config.downtrendPutMinSignals = Integer.parseInt(
                         props.getProperty("options.downtrend_put_min_signals", "4"));
             } catch (NumberFormatException ignored) {}
+            config.stockTradingEnabled = Boolean.parseBoolean(
+                    props.getProperty("stock.trading.enabled", "true"));
         } catch (IOException ignored) {}
         return config;
     }
@@ -131,6 +135,7 @@ public class AppConfig {
             props.setProperty("options.calls.disabled", String.join(",", optionsCallsDisabled));
             props.setProperty("options.puts.disabled",  String.join(",", optionsPutsDisabled));
             props.setProperty("options.downtrend_put_min_signals", String.valueOf(downtrendPutMinSignals));
+            props.setProperty("stock.trading.enabled", String.valueOf(stockTradingEnabled));
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
             }
@@ -171,6 +176,9 @@ public class AppConfig {
     public boolean isStrategyEnabled(String name) { return enabledStrategies.contains(name); }
     public int getDowntrendPutMinSignals() { return downtrendPutMinSignals; }
     public void setDowntrendPutMinSignals(int n) { this.downtrendPutMinSignals = n; }
+
+    public boolean isStockTradingEnabled() { return stockTradingEnabled; }
+    public void setStockTradingEnabled(boolean v) { this.stockTradingEnabled = v; }
 
     public String getClaudeApiKey() { return claudeApiKey; }
     public void setClaudeApiKey(String key) { this.claudeApiKey = key; }

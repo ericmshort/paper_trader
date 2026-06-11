@@ -43,8 +43,8 @@ public class TradingLoop implements Runnable {
     // No new stock entries after 2:30 PM — gives every position at least 75 min of runway
     // before the 3:45 forced sweep. Entries after 2:30 have too little time to recover from a bad tick.
     private static final LocalTime LAST_ENTRY_TIME = LocalTime.of(14, 30);
-    // Cap on simultaneous stock positions — day traders manage 3–5 names, not 30
-    private static final int MAX_CONCURRENT_STOCK_POSITIONS = 5;
+    // Cap on simultaneous stock positions — configurable for backtesting; default mirrors live trading
+    private int maxConcurrentStockPositions = 5;
     // VIX above this level means panic/spreads blow out — skip new directional entries
     private static final double VIX_BLOCK_THRESHOLD = 35.0;
     private static final ZoneId ET = ZoneId.of("America/New_York");
@@ -72,6 +72,7 @@ public class TradingLoop implements Runnable {
     private boolean avoidOvernightHolds = true;
     private boolean marketRegimeFilterEnabled = true;
     private Set<String> inverseEtfSymbols = Set.of();
+    private boolean stockTradingEnabled = true;
     private EarningsCalendar earningsCalendar;
     private int earningsBlackoutDays = 3;
     private int minHoldMinutes = 15;
@@ -168,6 +169,8 @@ public class TradingLoop implements Runnable {
     public void setAvoidOvernightHolds(boolean v) { this.avoidOvernightHolds = v; }
     public void setMarketRegimeFilterEnabled(boolean v) { this.marketRegimeFilterEnabled = v; }
     public void setInverseEtfSymbols(Set<String> symbols) { this.inverseEtfSymbols = symbols; }
+    public void setMaxConcurrentStockPositions(int n) { this.maxConcurrentStockPositions = n; }
+    public void setStockTradingEnabled(boolean v) { this.stockTradingEnabled = v; }
     public boolean isUptrend() { return isMarketInUptrend(); }
     public void setEarningsCalendar(EarningsCalendar cal) { this.earningsCalendar = cal; }
     public void setEarningsBlackoutDays(int days) { this.earningsBlackoutDays = days; }
@@ -386,13 +389,13 @@ public class TradingLoop implements Runnable {
                                 + " deployed, limit " + String.format("%.0f%%", maxPortfolioExposure * 100) + ")");
                     } else if (account.isDailyLossHalted()) {
                         researchCallback.accept(symbol + " BUY skipped: daily loss limit active");
-                    } else if (account.getPositions().size() >= MAX_CONCURRENT_STOCK_POSITIONS) {
+                    } else if (account.getPositions().size() >= maxConcurrentStockPositions) {
                         researchCallback.accept(symbol + " BUY skipped: max concurrent positions ("
-                                + MAX_CONCURRENT_STOCK_POSITIONS + ") already open");
+                                + maxConcurrentStockPositions + ") already open");
                     } else if (isVixSpiking()) {
                         researchCallback.accept(symbol + " BUY skipped: VIX spike above "
                                 + (int) VIX_BLOCK_THRESHOLD + " — widened spreads, panic conditions");
-                    } else {
+                    } else if (stockTradingEnabled) {
                         int shares = fees.maxShares(account.getBalance(), price);
                         if (shares > 0) {
                             brokerClient.submitBuy(symbol, shares, price, signalStr,

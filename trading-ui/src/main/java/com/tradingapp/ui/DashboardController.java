@@ -298,6 +298,7 @@ public class DashboardController implements Initializable {
         tradingLoop.setEarningsCalendar(earningsCalendar);
         tradingLoop.setEarningsBlackoutDays(appConfig.getEarningsBlackoutDays());
         optionsRouter.setUptrendSupplier(tradingLoop::isUptrend);
+        tradingLoop.setStockTradingEnabled(appConfig.isStockTradingEnabled());
 
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "trading-loop");
