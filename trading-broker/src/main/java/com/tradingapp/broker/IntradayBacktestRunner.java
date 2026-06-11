@@ -63,13 +63,19 @@ public class IntradayBacktestRunner {
         }
         LocalDate startDate = endDate.minusDays(140);
 
-        List<String> watchlist = new ArrayList<>(DayTraderWatchList.SYMBOLS);
+        // Empty = confirmation run; populate for swap-testing candidates against the final 30
+        List<String> newCandidates = List.of();
+
+        List<String> baseWatchlist = new ArrayList<>(DayTraderWatchList.SYMBOLS);
+        List<String> allSymbols = new ArrayList<>(baseWatchlist);
+        allSymbols.addAll(newCandidates);
+
         Map<String, List<IntradayBar>> barsBySymbol = new LinkedHashMap<>();
 
-        System.out.println("Fetching bars " + startDate + " -> " + endDate + " for " + watchlist.size() + " symbols...");
-        int total = watchlist.size();
+        System.out.println("Fetching bars " + startDate + " -> " + endDate + " for " + allSymbols.size() + " symbols...");
+        int total = allSymbols.size();
         int idx = 0;
-        for (String sym : watchlist) {
+        for (String sym : allSymbols) {
             idx++;
             final int cur = idx;
             try {
@@ -90,26 +96,39 @@ public class IntradayBacktestRunner {
         double maxExposure = cfg.getMaxPortfolioExposurePct() / 100.0;
         IntradayBacktestEngine engine = new IntradayBacktestEngine(new IndicatorEngine(), new FeeCalculator());
 
-        // Base symbol sets — options allowlist excludes GOOGL/AMD/INTC; QQQ/TSLA added for Run E
-        Set<String> BASE_ALLOWLIST    = Set.of("SPY","AMZN","PLTR","META","MSFT","NVDA","AAPL","NOK","F");
-        Set<String> EXPANDED_ALLOWLIST= Set.of("SPY","AMZN","PLTR","META","MSFT","NVDA","AAPL","NOK","F","QQQ","TSLA");
-        Set<String> CALLS_DISABLED    = Set.of("MSFT");
-        Set<String> CALLS_DISABLED_PLUS_META = Set.of("MSFT","META");
-        java.time.LocalTime CUTOFF_230 = java.time.LocalTime.of(14, 30);
+        // Final 30-symbol options allowlist — QQQ and TSLA excluded (options not beneficial)
+        Set<String> BASE_OPTS      = Set.of("SPY","AAPL","MSFT","NVDA","META","AMZN","PLTR",
+                                             "LLY","HD","ORCL","RTX","GS","TSM","TGT",
+                                             "MA","CVX","UNH","NOW","GILD","SBUX","ADBE",
+                                             "AXP","LOW","REGN","MRNA","COP","XOM","AVGO");
+        Set<String> CALLS_DISABLED = Set.of("MSFT");
 
-        // Build a fresh router with given parameters
-        record RunCfg(String label, Set<String> allowlist, Set<String> callsDisabled,
-                      double stopFrac, java.time.LocalTime cutoff) {}
-
-        java.util.List<RunCfg> runs = java.util.List.of(
-            new RunCfg("A: Baseline (current 32.26%)",      BASE_ALLOWLIST,     CALLS_DISABLED,           0.50, null),
-            new RunCfg("B: + Tighter stop (35%)",           BASE_ALLOWLIST,     CALLS_DISABLED,           0.65, null),
-            new RunCfg("C: + 2:30 PM entry cutoff",         BASE_ALLOWLIST,     CALLS_DISABLED,           0.65, CUTOFF_230),
-            new RunCfg("D: + Disable META calls",           BASE_ALLOWLIST,     CALLS_DISABLED_PLUS_META, 0.65, CUTOFF_230),
-            new RunCfg("E: + QQQ + TSLA (all four)",        EXPANDED_ALLOWLIST, CALLS_DISABLED_PLUS_META, 0.65, CUTOFF_230)
-        );
-
+        record RunCfg(String label, List<String> watchlist, Set<String> optAllowlist) {}
         record RunResult(String label, IntradayBacktestResult result) {}
+
+        java.util.List<RunCfg> runs = new java.util.ArrayList<>();
+
+        if (newCandidates.isEmpty()) {
+            // Watchlist is at capacity — single confirmation run with all 30 symbols
+            runs.add(new RunCfg("FINAL: all 30 symbols (capacity confirmation)", baseWatchlist, BASE_OPTS));
+        } else {
+            // Screening mode — baseline + one run per candidate + combined
+            runs.add(new RunCfg("A: Baseline", baseWatchlist, BASE_OPTS));
+            for (String sym : newCandidates) {
+                List<String> wl = new ArrayList<>(baseWatchlist);
+                if (barsBySymbol.containsKey(sym)) wl.add(sym);
+                java.util.HashSet<String> opts = new java.util.HashSet<>(BASE_OPTS);
+                opts.add(sym);
+                runs.add(new RunCfg(String.format("%-6s", sym) + ": baseline + " + sym, wl, Set.copyOf(opts)));
+            }
+            List<String> allWl = new ArrayList<>(baseWatchlist);
+            java.util.HashSet<String> allOpts = new java.util.HashSet<>(BASE_OPTS);
+            for (String sym : newCandidates) {
+                if (barsBySymbol.containsKey(sym)) { allWl.add(sym); allOpts.add(sym); }
+            }
+            runs.add(new RunCfg("ALL: baseline + all candidates", allWl, Set.copyOf(allOpts)));
+        }
+
         java.util.List<RunResult> results = new java.util.ArrayList<>();
 
         for (RunCfg cfg2 : runs) {
@@ -119,14 +138,12 @@ public class IntradayBacktestRunner {
                     new BlackScholesEngine(), optExec, new Account(), new PriceHistory(), msg -> {}, null);
             router.setMaxPortfolioExposure(maxExposure);
             router.setEnabledStrategies(Set.of("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM"));
-            router.setOptionsAllowlist(cfg2.allowlist());
-            router.setCallsDisabledSymbols(cfg2.callsDisabled());
+            router.setOptionsAllowlist(cfg2.optAllowlist());
+            router.setCallsDisabledSymbols(CALLS_DISABLED);
             router.setPutsDisabledSymbols(Set.of("NVDA"));
-            router.setStopLossFrac(cfg2.stopFrac());
-            if (cfg2.cutoff() != null) router.setEntryCutoff(cfg2.cutoff());
 
             long t0 = System.currentTimeMillis();
-            IntradayBacktestResult r = engine.run(watchlist, barsBySymbol, 100_000.0, router, msg -> {});
+            IntradayBacktestResult r = engine.run(cfg2.watchlist(), barsBySymbol, 100_000.0, router, msg -> {});
             System.out.printf("Done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
                     (System.currentTimeMillis() - t0) / 1000.0,
                     r.getTotalReturnPct(), r.getMaxDrawdownPct(),
