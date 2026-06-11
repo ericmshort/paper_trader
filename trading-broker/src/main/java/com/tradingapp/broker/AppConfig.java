@@ -43,6 +43,8 @@ public class AppConfig {
     private Set<String> optionsCallsDisabled   = new LinkedHashSet<>();
     // Symbols in this set may trade calls but not puts.
     private Set<String> optionsPutsDisabled    = new LinkedHashSet<>();
+    // Minimum sell signals required to open a put during a confirmed SPY downtrend.
+    private int downtrendPutMinSignals = 4;
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
@@ -102,6 +104,10 @@ public class AppConfig {
                         .map(String::strip).filter(s -> !s.isEmpty())
                         .collect(Collectors.toCollection(LinkedHashSet::new));
             }
+            try {
+                config.downtrendPutMinSignals = Integer.parseInt(
+                        props.getProperty("options.downtrend_put_min_signals", "4"));
+            } catch (NumberFormatException ignored) {}
         } catch (IOException ignored) {}
         return config;
     }
@@ -124,6 +130,7 @@ public class AppConfig {
             props.setProperty("options.symbol.allowlist", String.join(",", optionsSymbolAllowlist));
             props.setProperty("options.calls.disabled", String.join(",", optionsCallsDisabled));
             props.setProperty("options.puts.disabled",  String.join(",", optionsPutsDisabled));
+            props.setProperty("options.downtrend_put_min_signals", String.valueOf(downtrendPutMinSignals));
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
             }
@@ -162,6 +169,8 @@ public class AppConfig {
     public Set<String> getEnabledStrategies() { return enabledStrategies; }
     public void setEnabledStrategies(Set<String> strategies) { this.enabledStrategies = new LinkedHashSet<>(strategies); }
     public boolean isStrategyEnabled(String name) { return enabledStrategies.contains(name); }
+    public int getDowntrendPutMinSignals() { return downtrendPutMinSignals; }
+    public void setDowntrendPutMinSignals(int n) { this.downtrendPutMinSignals = n; }
 
     public String getClaudeApiKey() { return claudeApiKey; }
     public void setClaudeApiKey(String key) { this.claudeApiKey = key; }

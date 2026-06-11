@@ -132,6 +132,7 @@ public class IntradayBacktestRunner {
         java.util.List<RunResult> results = new java.util.ArrayList<>();
 
         for (RunCfg cfg2 : runs) {
+            // ── Base run (uptrend-corrected) ──────────────────────────────────
             System.out.println("\n=== " + cfg2.label() + " ===");
             OptionsOrderExecutor optExec = new OptionsOrderExecutor(new Account(), null);
             OptionsSignalRouter router = new OptionsSignalRouter(
@@ -143,12 +144,35 @@ public class IntradayBacktestRunner {
             router.setPutsDisabledSymbols(Set.of("NVDA"));
 
             long t0 = System.currentTimeMillis();
-            IntradayBacktestResult r = engine.run(cfg2.watchlist(), barsBySymbol, 100_000.0, router, msg -> {});
+            IntradayBacktestResult r = engine.run(cfg2.watchlist(), barsBySymbol, 100_000.0, router, msg -> {},
+                    Set.of(), loop -> router.setUptrendSupplier(loop::isUptrend));
             System.out.printf("Done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
                     (System.currentTimeMillis() - t0) / 1000.0,
                     r.getTotalReturnPct(), r.getMaxDrawdownPct(),
                     r.getTotalTrades(), r.getWins(), r.getLosses());
             results.add(new RunResult(cfg2.label(), r));
+
+            // ── +LONG_PUT variant (downtrendMin=3) ────────────────────────────
+            String bearLabel = cfg2.label() + " +LONG_PUT(min=3)";
+            System.out.println("\n=== " + bearLabel + " ===");
+            OptionsOrderExecutor optExec2 = new OptionsOrderExecutor(new Account(), null);
+            OptionsSignalRouter router2 = new OptionsSignalRouter(
+                    new BlackScholesEngine(), optExec2, new Account(), new PriceHistory(), msg -> {}, null);
+            router2.setMaxPortfolioExposure(maxExposure);
+            router2.setEnabledStrategies(Set.of("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM", "LONG_PUT"));
+            router2.setOptionsAllowlist(cfg2.optAllowlist());
+            router2.setCallsDisabledSymbols(CALLS_DISABLED);
+            router2.setPutsDisabledSymbols(Set.of("NVDA"));
+            router2.setDowntrendPutMinSignals(3);
+
+            long t1 = System.currentTimeMillis();
+            IntradayBacktestResult r2 = engine.run(cfg2.watchlist(), barsBySymbol, 100_000.0, router2, msg -> {},
+                    Set.of(), loop -> router2.setUptrendSupplier(loop::isUptrend));
+            System.out.printf("Done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
+                    (System.currentTimeMillis() - t1) / 1000.0,
+                    r2.getTotalReturnPct(), r2.getMaxDrawdownPct(),
+                    r2.getTotalTrades(), r2.getWins(), r2.getLosses());
+            results.add(new RunResult(bearLabel, r2));
         }
 
         // --- Comparison table ---
@@ -157,9 +181,10 @@ public class IntradayBacktestRunner {
         System.out.println("-".repeat(80));
         for (RunResult rr : results) {
             IntradayBacktestResult r = rr.result();
+            double wr = r.getTotalTrades() > 0 ? 100.0 * r.getWins() / r.getTotalTrades() : 0.0;
             System.out.printf("%-40s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
                     rr.label(), r.getTotalReturnPct(), r.getMaxDrawdownPct(),
-                    r.getTotalTrades(), 100.0 * r.getWins() / r.getTotalTrades());
+                    r.getTotalTrades(), wr);
         }
 
         // Write report for the highest-return run

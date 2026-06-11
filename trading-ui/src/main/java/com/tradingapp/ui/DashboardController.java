@@ -292,6 +292,7 @@ public class DashboardController implements Initializable {
         tradingLoop.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
         optionsRouter.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
         optionsRouter.setEnabledStrategies(appConfig.getEnabledStrategies());
+        optionsRouter.setDowntrendPutMinSignals(appConfig.getDowntrendPutMinSignals());
         tradingLoop.setAvoidOvernightHolds(appConfig.isAvoidOvernightHolds());
         tradingLoop.setMarketRegimeFilterEnabled(appConfig.isMarketRegimeFilterEnabled());
         tradingLoop.setEarningsCalendar(earningsCalendar);
