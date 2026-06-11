@@ -87,8 +87,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private int downtrendPutMinSignals        = 4;
     private boolean avoidOvernightHolds      = true;
 
-    // Virtual clock: real ZonedDateTime::now in live trading; virtual clock in backtest.
-    private Supplier<ZonedDateTime> clock = ZonedDateTime::now;
+    // Virtual clock: ET in live trading; virtual clock in backtest.
+    private Supplier<ZonedDateTime> clock = () -> ZonedDateTime.now(ET);
 
     public void setUptrendSupplier(BooleanSupplier s) { this.uptrendSupplier = s; }
     public void setMaxPortfolioExposure(double fraction) { this.maxPortfolioExposure = fraction; }
