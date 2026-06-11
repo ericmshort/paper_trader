@@ -382,6 +382,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                           : bsEngine.putPrice(price, pos.getStrike(), RISK_FREE_RATE, T, sigma))
                 : 0.0;
 
+        // If sigma is unavailable but the option hasn't expired, skip evaluation —
+        // a dry quote feed does not mean the position is worthless.
+        if (!canPrice && T > 0) return;
+
         boolean premiumStop      = canPrice && currentPremium <= pos.getPremiumPaid() * stopLossFrac;
         boolean hitProfitTarget  = currentPremium >= pos.getPremiumPaid() * profitTarget;
         boolean nearExpiry       = pos.daysToExpiry(virtualDate) < 3;
@@ -397,7 +401,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         }
         boolean reversal = consecutive >= 3;
 
-        // Always close if premium is essentially worthless, even if canPrice is false
+        // Close as worthless only when the option has actually expired (T <= 0).
         boolean worthless = !canPrice && pos.getPremiumPaid() > 0;
 
         if (!premiumStop && !hitProfitTarget && !reversal && !nearExpiry && !worthless) return;
