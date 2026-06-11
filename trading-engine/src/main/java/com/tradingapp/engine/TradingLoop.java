@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -70,6 +71,7 @@ public class TradingLoop implements Runnable {
     private TransactionLog transactionLog;
     private boolean avoidOvernightHolds = true;
     private boolean marketRegimeFilterEnabled = true;
+    private Set<String> inverseEtfSymbols = Set.of();
     private EarningsCalendar earningsCalendar;
     private int earningsBlackoutDays = 3;
     private int minHoldMinutes = 15;
@@ -165,6 +167,7 @@ public class TradingLoop implements Runnable {
     public void setTransactionLog(TransactionLog log) { this.transactionLog = log; }
     public void setAvoidOvernightHolds(boolean v) { this.avoidOvernightHolds = v; }
     public void setMarketRegimeFilterEnabled(boolean v) { this.marketRegimeFilterEnabled = v; }
+    public void setInverseEtfSymbols(Set<String> symbols) { this.inverseEtfSymbols = symbols; }
     public boolean isUptrend() { return isMarketInUptrend(); }
     public void setEarningsCalendar(EarningsCalendar cal) { this.earningsCalendar = cal; }
     public void setEarningsBlackoutDays(int days) { this.earningsBlackoutDays = days; }
@@ -370,8 +373,10 @@ public class TradingLoop implements Runnable {
                         // Silent — fires on nearly every ORB-false-breakout tick; logging would flood the feed.
                     } else if (rsiOverbought) {
                         researchCallback.accept(symbol + " BUY skipped: RSI overbought");
-                    } else if (!isMarketInUptrend()) {
-                        researchCallback.accept(symbol + " BUY skipped: SPY below 5-day MA (short-term downtrend)");
+                    } else if (inverseEtfSymbols.contains(symbol) ? isMarketInUptrend() : !isMarketInUptrend()) {
+                        researchCallback.accept(symbol + (inverseEtfSymbols.contains(symbol)
+                                ? " BUY skipped: SPY in uptrend (inverse ETF — needs downtrend)"
+                                : " BUY skipped: SPY below 5-day MA (short-term downtrend)"));
                     } else if (daysToEarnings <= earningsBlackoutDays) {
                         researchCallback.accept(symbol + " BUY skipped: earnings in "
                                 + daysToEarnings + " day" + (daysToEarnings == 1 ? "" : "s"));

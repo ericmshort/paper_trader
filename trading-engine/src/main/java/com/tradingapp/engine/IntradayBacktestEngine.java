@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -44,6 +45,27 @@ public class IntradayBacktestEngine {
             double startingBalance,
             OptionsEvaluator optEval,
             Consumer<String> progressCallback) throws Exception {
+        return run(watchlist, barsBySymbol, startingBalance, optEval, progressCallback, Set.of(), null);
+    }
+
+    public IntradayBacktestResult run(
+            List<String> watchlist,
+            Map<String, List<IntradayBar>> barsBySymbol,
+            double startingBalance,
+            OptionsEvaluator optEval,
+            Consumer<String> progressCallback,
+            Set<String> inverseEtfSymbols) throws Exception {
+        return run(watchlist, barsBySymbol, startingBalance, optEval, progressCallback, inverseEtfSymbols, null);
+    }
+
+    public IntradayBacktestResult run(
+            List<String> watchlist,
+            Map<String, List<IntradayBar>> barsBySymbol,
+            double startingBalance,
+            OptionsEvaluator optEval,
+            Consumer<String> progressCallback,
+            Set<String> inverseEtfSymbols,
+            java.util.function.Consumer<TradingLoop> loopConfig) throws Exception {
 
         File tmpDb = File.createTempFile("backtest", ".db");
         tmpDb.deleteOnExit();
@@ -81,6 +103,8 @@ public class IntradayBacktestEngine {
                 virtualClock::get, optEval);
         loop.setTransactionLog(txLog);
         loop.setAvoidOvernightHolds(true);
+        if (!inverseEtfSymbols.isEmpty()) loop.setInverseEtfSymbols(inverseEtfSymbols);
+        if (loopConfig != null) loopConfig.accept(loop);
 
         TreeMap<LocalDate, TreeMap<ZonedDateTime, List<IntradayBar>>> byDateByTime = groupBars(barsBySymbol);
 

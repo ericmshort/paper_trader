@@ -81,6 +81,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private Set<String> callsDisabledSymbols  = new HashSet<>();
     // Symbols in this set may open calls but not puts.
     private Set<String> putsDisabledSymbols   = new HashSet<>();
+    private int downtrendPutMinSignals        = 4;
 
     // Virtual clock: real ZonedDateTime::now in live trading; virtual clock in backtest.
     private Supplier<ZonedDateTime> clock = ZonedDateTime::now;
@@ -94,6 +95,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     public void setOptionsAllowlist(Set<String> symbols) { this.optionsAllowlist = new HashSet<>(symbols); }
     public void setCallsDisabledSymbols(Set<String> symbols) { this.callsDisabledSymbols = new HashSet<>(symbols); }
     public void setPutsDisabledSymbols(Set<String> symbols)  { this.putsDisabledSymbols  = new HashSet<>(symbols); }
+    public void setDowntrendPutMinSignals(int n)              { this.downtrendPutMinSignals = n; }
     private boolean isStrategyEnabled(String name) { return enabledStrategies.isEmpty() || enabledStrategies.contains(name); }
 
     public OptionsSignalRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
@@ -233,7 +235,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         // Block calls in downtrend — symmetric to the per-method put block in uptrend
         boolean inDowntrend = uptrendSupplier != null && !uptrendSupplier.getAsBoolean();
         // Require more sell signals to open a put in a bull market — loosens in a bear market
-        int putMin = inDowntrend ? 4 : 5;
+        int putMin = inDowntrend ? downtrendPutMinSignals : 5;
         String marketRegime = inDowntrend ? "bear" : "bull";
 
         boolean hasDirectional = opts.containsKey(callKey)          || opts.containsKey(putKey)
