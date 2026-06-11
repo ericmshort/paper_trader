@@ -39,6 +39,13 @@ public class SettingsController implements Initializable {
     @FXML private CheckBox strategyLongCall;
     @FXML private CheckBox strategyLongPut;
     @FXML private CheckBox strategyZeroDte;
+    @FXML private CheckBox avoidOvernightHoldsCheck;
+    @FXML private CheckBox stockTradingDisabledCheck;
+    @FXML private TextField optionsStopLossField;
+    @FXML private TextField downtrendPutMinSignalsField;
+    @FXML private TextArea  optionsAllowlistArea;
+    @FXML private TextField callsDisabledField;
+    @FXML private TextField putsDisabledField;
     @FXML private PasswordField claudeApiKeyField;
     @FXML private Button testConnectionButton;
     @FXML private Label statusLabel;
@@ -97,6 +104,13 @@ public class SettingsController implements Initializable {
         strategyLongCall.setSelected(enabled.contains("LONG_CALL"));
         strategyLongPut.setSelected(enabled.contains("LONG_PUT"));
         strategyZeroDte.setSelected(enabled.contains("ZERO_DTE"));
+        avoidOvernightHoldsCheck.setSelected(cfg.isAvoidOvernightHolds());
+        stockTradingDisabledCheck.setSelected(!cfg.isStockTradingEnabled());
+        optionsStopLossField.setText(String.valueOf((int) Math.round(cfg.getOptionsStopLossFrac() * 100)));
+        downtrendPutMinSignalsField.setText(String.valueOf(cfg.getDowntrendPutMinSignals()));
+        optionsAllowlistArea.setText(String.join(",", cfg.getOptionsSymbolAllowlist()));
+        callsDisabledField.setText(String.join(",", cfg.getOptionsCallsDisabled()));
+        putsDisabledField.setText(String.join(",", cfg.getOptionsPutsDisabled()));
         updateAlpacaFieldVisibility();
         updateQuoteNote();
     }
@@ -301,7 +315,7 @@ public class SettingsController implements Initializable {
             cfg.setMaxPortfolioExposurePct(Math.min(100, Math.max(1, exposure)));
         } catch (NumberFormatException ignored) {}
         cfg.setClaudeApiKey(claudeApiKeyField.getText().strip());
-        cfg.setAvoidOvernightHolds(true);
+        cfg.setAvoidOvernightHolds(avoidOvernightHoldsCheck.isSelected());
         cfg.setMarketRegimeFilterEnabled(marketRegimeFilterCheck.isSelected());
         try {
             int days = Integer.parseInt(earningsBlackoutField.getText().strip());
@@ -314,7 +328,29 @@ public class SettingsController implements Initializable {
         if (strategyLongPut.isSelected())           strategies.add("LONG_PUT");
         if (strategyZeroDte.isSelected())           strategies.add("ZERO_DTE");
         cfg.setEnabledStrategies(strategies);
+        cfg.setStockTradingEnabled(!stockTradingDisabledCheck.isSelected());
+        try {
+            int pct = Integer.parseInt(optionsStopLossField.getText().strip());
+            cfg.setOptionsStopLossFrac(Math.min(90, Math.max(10, pct)) / 100.0);
+        } catch (NumberFormatException ignored) {}
+        try {
+            int n = Integer.parseInt(downtrendPutMinSignalsField.getText().strip());
+            cfg.setDowntrendPutMinSignals(Math.min(6, Math.max(1, n)));
+        } catch (NumberFormatException ignored) {}
+        cfg.setOptionsSymbolAllowlist(parseSymbolSet(optionsAllowlistArea.getText()));
+        cfg.setOptionsCallsDisabled(parseSymbolSet(callsDisabledField.getText()));
+        cfg.setOptionsPutsDisabled(parseSymbolSet(putsDisabledField.getText()));
         return cfg;
+    }
+
+    private Set<String> parseSymbolSet(String raw) {
+        Set<String> result = new LinkedHashSet<>();
+        if (raw == null || raw.isBlank()) return result;
+        for (String s : raw.split("[,\\s]+")) {
+            String sym = s.strip().toUpperCase();
+            if (!sym.isEmpty()) result.add(sym);
+        }
+        return result;
     }
 
     private void setStatus(String msg, boolean success) {

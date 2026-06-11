@@ -119,6 +119,13 @@
     </HBox>
 
     <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Overnight Holds:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <CheckBox fx:id="avoidOvernightHoldsCheck"
+                  style="-fx-text-fill: #e0e0e0;"
+                  text="Force-close all positions at 15:45 ET (avoid overnight holds)"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
         <Label text="Earnings Blackout:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
         <TextField fx:id="earningsBlackoutField" prefWidth="60"
                    style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
@@ -142,6 +149,68 @@
         <CheckBox fx:id="strategyLongPut" text="Long Put" style="-fx-text-fill: #e0e0e0;"/>
         <CheckBox fx:id="strategyZeroDte" text="Zero-DTE (Fridays)" style="-fx-text-fill: #e0e0e0;"/>
     </HBox>
+
+    <Separator/>
+
+    <!-- Options Trading section -->
+    <Label text="Options Trading"
+           style="-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #aaaaaa;"/>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Trade Mode:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <CheckBox fx:id="stockTradingDisabledCheck"
+                  style="-fx-text-fill: #e0e0e0;"
+                  text="Options-only mode (disable all stock/equity buys)"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Options Stop-Loss:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="optionsStopLossField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="30"/>
+        <Label text="% — exit when premium drops to this % of entry (10–90)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Put Min Signals:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="downtrendPutMinSignalsField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="3"/>
+        <Label text="sell signals required to open a put during SPY downtrend (1–6)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="TOP_LEFT">
+        <Label text="Options Allowlist:" style="-fx-text-fill: #e0e0e0;" prefWidth="140" prefHeight="24"/>
+        <VBox spacing="4">
+            <TextArea fx:id="optionsAllowlistArea" prefWidth="380" prefHeight="72"
+                      wrapText="true"
+                      style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                      promptText="SPY,AAPL,MSFT,…  (leave blank to allow all symbols)"/>
+            <Label text="Comma-separated symbols allowed to trade options. Leave blank to allow all."
+                   style="-fx-font-size: 11px; -fx-text-fill: #888888;"/>
+        </VBox>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Calls Disabled:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="callsDisabledField" prefWidth="380"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="e.g. MSFT,TSLA  (leave blank for none)"/>
+    </HBox>
+    <Label text="Symbols in this list may trade puts but not calls."
+           style="-fx-font-size: 11px; -fx-text-fill: #888888;" HBox.hgrow="ALWAYS"
+           padding="-fx-padding: 0 0 0 152px;"/>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Puts Disabled:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="putsDisabledField" prefWidth="380"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="e.g. NVDA  (leave blank for none)"/>
+    </HBox>
+    <Label text="Symbols in this list may trade calls but not puts."
+           style="-fx-font-size: 11px; -fx-text-fill: #888888;" HBox.hgrow="ALWAYS"/>
 
     <Separator/>
 
