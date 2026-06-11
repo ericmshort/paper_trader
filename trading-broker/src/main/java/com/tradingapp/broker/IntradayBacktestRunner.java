@@ -87,42 +87,72 @@ public class IntradayBacktestRunner {
         }
         System.out.println("Fetched data for " + barsBySymbol.size() + " symbols. Running sim...");
 
-        // --- Wire OptionsSignalRouter (shared instance; account/log/clock wired by engine) ---
         double maxExposure = cfg.getMaxPortfolioExposurePct() / 100.0;
-        // Use only strategies that require ≥4 signals — 3-signal entries (LONG_CALL/LONG_PUT)
-        // were tested and reduced return by 6.74% while quadrupling max drawdown.
-        Set<String> backtestStrategies = Set.of("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM");
-
-        // Placeholder account/history — replaced by engine's shared objects in onBacktestInit
-        OptionsOrderExecutor optExec = new OptionsOrderExecutor(new Account(), null);
-        OptionsSignalRouter router = new OptionsSignalRouter(
-                new BlackScholesEngine(), optExec, new Account(), new PriceHistory(), msg -> {}, null);
-        router.setMaxPortfolioExposure(maxExposure);
-        router.setEnabledStrategies(backtestStrategies);
-        // Exclude GOOGL, AMD, INTC — both calls and puts lose consistently.
-        router.setOptionsAllowlist(Set.of("SPY","AMZN","PLTR","META","MSFT","NVDA","AAPL","NOK","F"));
-        router.setCallsDisabledSymbols(Set.of("MSFT"));
-        router.setPutsDisabledSymbols(Set.of("NVDA"));
-
-        // --- Run backtest ---
         IntradayBacktestEngine engine = new IntradayBacktestEngine(new IndicatorEngine(), new FeeCalculator());
 
-        long t0 = System.currentTimeMillis();
-        IntradayBacktestResult result = engine.run(
-                watchlist, barsBySymbol, 100_000.0, router,
-                msg -> System.out.println("  " + msg));
-        long elapsed = System.currentTimeMillis() - t0;
+        // Base symbol sets — options allowlist excludes GOOGL/AMD/INTC; QQQ/TSLA added for Run E
+        Set<String> BASE_ALLOWLIST    = Set.of("SPY","AMZN","PLTR","META","MSFT","NVDA","AAPL","NOK","F");
+        Set<String> EXPANDED_ALLOWLIST= Set.of("SPY","AMZN","PLTR","META","MSFT","NVDA","AAPL","NOK","F","QQQ","TSLA");
+        Set<String> CALLS_DISABLED    = Set.of("MSFT");
+        Set<String> CALLS_DISABLED_PLUS_META = Set.of("MSFT","META");
+        java.time.LocalTime CUTOFF_230 = java.time.LocalTime.of(14, 30);
 
-        System.out.printf("Sim done in %.1fs%n", elapsed / 1000.0);
-        System.out.printf("Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
-                result.getTotalReturnPct(), result.getMaxDrawdownPct(),
-                result.getTotalTrades(), result.getWins(), result.getLosses());
+        // Build a fresh router with given parameters
+        record RunCfg(String label, Set<String> allowlist, Set<String> callsDisabled,
+                      double stopFrac, java.time.LocalTime cutoff) {}
 
-        // --- Write report ---
-        try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(reportPath))) {
-            writeReport(out, result, startDate, endDate);
+        java.util.List<RunCfg> runs = java.util.List.of(
+            new RunCfg("A: Baseline (current 32.26%)",      BASE_ALLOWLIST,     CALLS_DISABLED,           0.50, null),
+            new RunCfg("B: + Tighter stop (35%)",           BASE_ALLOWLIST,     CALLS_DISABLED,           0.65, null),
+            new RunCfg("C: + 2:30 PM entry cutoff",         BASE_ALLOWLIST,     CALLS_DISABLED,           0.65, CUTOFF_230),
+            new RunCfg("D: + Disable META calls",           BASE_ALLOWLIST,     CALLS_DISABLED_PLUS_META, 0.65, CUTOFF_230),
+            new RunCfg("E: + QQQ + TSLA (all four)",        EXPANDED_ALLOWLIST, CALLS_DISABLED_PLUS_META, 0.65, CUTOFF_230)
+        );
+
+        record RunResult(String label, IntradayBacktestResult result) {}
+        java.util.List<RunResult> results = new java.util.ArrayList<>();
+
+        for (RunCfg cfg2 : runs) {
+            System.out.println("\n=== " + cfg2.label() + " ===");
+            OptionsOrderExecutor optExec = new OptionsOrderExecutor(new Account(), null);
+            OptionsSignalRouter router = new OptionsSignalRouter(
+                    new BlackScholesEngine(), optExec, new Account(), new PriceHistory(), msg -> {}, null);
+            router.setMaxPortfolioExposure(maxExposure);
+            router.setEnabledStrategies(Set.of("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM"));
+            router.setOptionsAllowlist(cfg2.allowlist());
+            router.setCallsDisabledSymbols(cfg2.callsDisabled());
+            router.setPutsDisabledSymbols(Set.of("NVDA"));
+            router.setStopLossFrac(cfg2.stopFrac());
+            if (cfg2.cutoff() != null) router.setEntryCutoff(cfg2.cutoff());
+
+            long t0 = System.currentTimeMillis();
+            IntradayBacktestResult r = engine.run(watchlist, barsBySymbol, 100_000.0, router, msg -> {});
+            System.out.printf("Done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
+                    (System.currentTimeMillis() - t0) / 1000.0,
+                    r.getTotalReturnPct(), r.getMaxDrawdownPct(),
+                    r.getTotalTrades(), r.getWins(), r.getLosses());
+            results.add(new RunResult(cfg2.label(), r));
         }
-        System.out.println("Report written: " + reportPath);
+
+        // --- Comparison table ---
+        System.out.println("\n=== COMPARISON ===");
+        System.out.printf("%-40s  %8s  %8s  %7s  %7s%n", "Config", "Return", "MaxDD", "Trades", "WinRate");
+        System.out.println("-".repeat(80));
+        for (RunResult rr : results) {
+            IntradayBacktestResult r = rr.result();
+            System.out.printf("%-40s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
+                    rr.label(), r.getTotalReturnPct(), r.getMaxDrawdownPct(),
+                    r.getTotalTrades(), 100.0 * r.getWins() / r.getTotalTrades());
+        }
+
+        // Write report for the highest-return run
+        RunResult best = results.stream()
+                .max(Comparator.comparingDouble(rr -> rr.result().getTotalReturnPct()))
+                .orElseThrow();
+        try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(reportPath))) {
+            writeReport(out, best.result(), startDate, endDate);
+        }
+        System.out.println("\nReport written for best run (" + best.label() + "): " + reportPath);
     }
 
     private static void writeReport(PrintWriter out, IntradayBacktestResult result,

@@ -57,8 +57,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private static final double IV_SURGE_THRESHOLD = 1.2;  // skip if recent vol > 1.2x long-term (IV crush guard)
     private static final int    IV_WINDOW          = 20;
     private static final double PROFIT_TARGET      = 2.0;
-    // Exit when premium drops to 50% of entry — tighter than 35% to limit per-trade loss.
-    private static final double STOP_LOSS_FRAC     = 0.50;
+    // Exit when premium drops to this fraction of entry (configurable; default 50%).
+    private double stopLossFrac                    = 0.50;
     private static final double DEEP_ITM_OFFSET    = 10.0;
 
     // Cooldown re-entry window (virtual time, works in both live and backtest)
@@ -73,6 +73,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private LocalDate stopLossResetDate;
     private BooleanSupplier uptrendSupplier;
     private Set<String> enabledStrategies    = new HashSet<>();
+    // If set, no new options entries are opened at or after this time (closes still run).
+    private LocalTime entryCutoff             = null;
     // If non-empty, only these symbols may open new options positions.
     private Set<String> optionsAllowlist      = new HashSet<>();
     // Symbols in this set may open puts but not calls.
@@ -87,6 +89,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     public void setMaxPortfolioExposure(double fraction) { this.maxPortfolioExposure = fraction; }
     public void setEnabledStrategies(Set<String> strategies) { this.enabledStrategies = new HashSet<>(strategies); }
     public void setClock(Supplier<ZonedDateTime> clock) { this.clock = clock; }
+    public void setStopLossFrac(double frac)          { this.stopLossFrac = frac; }
+    public void setEntryCutoff(LocalTime time)         { this.entryCutoff = time; }
     public void setOptionsAllowlist(Set<String> symbols) { this.optionsAllowlist = new HashSet<>(symbols); }
     public void setCallsDisabledSymbols(Set<String> symbols) { this.callsDisabledSymbols = new HashSet<>(symbols); }
     public void setPutsDisabledSymbols(Set<String> symbols)  { this.putsDisabledSymbols  = new HashSet<>(symbols); }
@@ -247,7 +251,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             return;
         }
 
-        // ── 6. Entry (per-symbol options filters) ────────────────────────────
+        // ── 6. Entry cutoff: block new positions after this time ─────────────
+        if (entryCutoff != null && !time.isBefore(entryCutoff)) {
+            return;
+        }
+
+        // ── 7. Entry (per-symbol options filters) ────────────────────────────
         boolean optionsAllowed = optionsAllowlist.isEmpty() || optionsAllowlist.contains(symbol);
         if (!optionsAllowed) {
             researchCallback.accept(symbol + " options skip: not in options allowlist");
@@ -360,7 +369,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                           : bsEngine.putPrice(price, pos.getStrike(), RISK_FREE_RATE, T, sigma))
                 : 0.0;
 
-        boolean premiumStop  = canPrice && currentPremium <= pos.getPremiumPaid() * STOP_LOSS_FRAC;
+        boolean premiumStop  = canPrice && currentPremium <= pos.getPremiumPaid() * stopLossFrac;
         boolean profitTarget = currentPremium >= pos.getPremiumPaid() * PROFIT_TARGET;
         boolean nearExpiry   = pos.daysToExpiry(virtualDate) < 3;
 
@@ -386,7 +395,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         else if (profitTarget) reason = String.format("Profit target: %.2f >= 2x of %.2f",
                                         currentPremium, pos.getPremiumPaid());
         else if (premiumStop)  reason = String.format("Premium stop-loss: %.2f <= %.0f%% of %.2f",
-                                        currentPremium, STOP_LOSS_FRAC * 100, pos.getPremiumPaid());
+                                        currentPremium, stopLossFrac * 100, pos.getPremiumPaid());
         else if (worthless)    reason = "Premium collapsed to zero";
         else                   reason = "Signal reversal (3 bars): " + (isCall ? "SELL" : "BUY");
 
@@ -424,7 +433,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         double totalCurrent = callPrem * 100 * callPos.getContracts()
                             + putPrem  * 100 * putPos.getContracts();
 
-        boolean premiumStop  = totalPaid > 0 && totalCurrent <= totalPaid * STOP_LOSS_FRAC;
+        boolean premiumStop  = totalPaid > 0 && totalCurrent <= totalPaid * stopLossFrac;
         boolean profitTarget = totalPaid > 0 && totalCurrent >= totalPaid * PROFIT_TARGET;
         boolean nearExpiry   = strategyName.equals("ZEROTE")
                 ? callPos.daysToExpiry(virtualDate) < 1
@@ -437,7 +446,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         else if (profitTarget) reason = String.format("Profit target: combined %.2f >= 2x of %.2f",
                                         totalCurrent, totalPaid);
         else                   reason = String.format("Premium stop-loss: combined %.2f <= %.0f%% of %.2f",
-                                        totalCurrent, STOP_LOSS_FRAC * 100, totalPaid);
+                                        totalCurrent, stopLossFrac * 100, totalPaid);
 
         if (premiumStop) sessionStopLossed.add(symbol + "_MULTILEG");
         lastMultiLegCloseTime.put(symbol, clock.get());

@@ -9,15 +9,17 @@ import java.util.List;
 public class DayTraderWatchList {
 
     public static final List<String> SYMBOLS = List.of(
-        // Broad market — used for regime filter and as low-volatility trade targets
-        "SPY",
+        // Broad market ETFs — regime filter and low-volatility options targets
+        "SPY", "QQQ",
         // Mega-cap tech with consistent positive P&L in backtests
         "AAPL", "MSFT", "NVDA", "AMD",
+        // High-momentum individual names
+        "TSLA",
         // Large-cap internet
         "META", "AMZN", "GOOGL",
         // Mid-cap tech outperformers
         "INTC", "PLTR",
-        // High-volume low-beta with tight spreads — F and NOK trade well with indicator signals
+        // High-volume low-beta with tight spreads
         "F", "NOK"
     );
 }
