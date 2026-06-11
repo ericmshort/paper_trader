@@ -168,7 +168,7 @@
         <TextField fx:id="optionsStopLossField" prefWidth="60"
                    style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
                    promptText="30"/>
-        <Label text="% — exit when premium drops to this % of entry (10–90)"
+        <Label text="exit when premium drops to this pct of entry cost (10–90)"
                style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
     </HBox>
 
@@ -200,8 +200,7 @@
                    promptText="e.g. MSFT,TSLA  (leave blank for none)"/>
     </HBox>
     <Label text="Symbols in this list may trade puts but not calls."
-           style="-fx-font-size: 11px; -fx-text-fill: #888888;" HBox.hgrow="ALWAYS"
-           padding="-fx-padding: 0 0 0 152px;"/>
+           style="-fx-font-size: 11px; -fx-text-fill: #888888;"/>
 
     <HBox spacing="12" alignment="CENTER_LEFT">
         <Label text="Puts Disabled:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
@@ -210,7 +209,7 @@
                    promptText="e.g. NVDA  (leave blank for none)"/>
     </HBox>
     <Label text="Symbols in this list may trade calls but not puts."
-           style="-fx-font-size: 11px; -fx-text-fill: #888888;" HBox.hgrow="ALWAYS"/>
+           style="-fx-font-size: 11px; -fx-text-fill: #888888;"/>
 
     <Separator/>
 
