@@ -131,19 +131,19 @@ public class IntradayBacktestRunner {
         java.util.List<RunResult> results = new java.util.ArrayList<>();
 
         for (RunCfg cfg2 : runs) {
-            // ── Base run (uptrend-corrected) ──────────────────────────────────
             System.out.println("\n=== " + cfg2.label() + " ===");
             OptionsOrderExecutor optExec = new OptionsOrderExecutor(new Account(), null);
             OptionsSignalRouter router = new OptionsSignalRouter(
                     new BlackScholesEngine(), optExec, new Account(), new PriceHistory(), msg -> {}, null);
             router.setMaxPortfolioExposure(maxExposure);
-            router.setEnabledStrategies(Set.of("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM", "LONG_CALL"));
+            router.setEnabledStrategies(cfg.getEnabledStrategies());
             router.setStopLossFrac(cfg.getOptionsStopLossFrac());
             router.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
             if (cfg.getOptionsEntryCutoff() != null) router.setEntryCutoff(cfg.getOptionsEntryCutoff());
             router.setOptionsAllowlist(cfg2.optAllowlist());
             router.setCallsDisabledSymbols(CALLS_DISABLED);
             router.setPutsDisabledSymbols(cfg.getOptionsPutsDisabled());
+            router.setDowntrendPutMinSignals(cfg.getDowntrendPutMinSignals());
 
             long t0 = System.currentTimeMillis();
             IntradayBacktestResult r = engine.run(cfg2.watchlist(), barsBySymbol, 100_000.0, router, msg -> {},
@@ -158,40 +158,8 @@ public class IntradayBacktestRunner {
                     r.getTotalReturnPct(), r.getMaxDrawdownPct(),
                     r.getTotalTrades(), r.getWins(), r.getLosses());
             results.add(new RunResult(cfg2.label(), r));
-
-            // ── +LONG_PUT variant (production config) ────────────────────────
-            String bearLabel = cfg2.label() + " +LONG_PUT(min=" + cfg.getDowntrendPutMinSignals() + ")";
-            System.out.println("\n=== " + bearLabel + " ===");
-            OptionsOrderExecutor optExec2 = new OptionsOrderExecutor(new Account(), null);
-            OptionsSignalRouter router2 = new OptionsSignalRouter(
-                    new BlackScholesEngine(), optExec2, new Account(), new PriceHistory(), msg -> {}, null);
-            router2.setMaxPortfolioExposure(maxExposure);
-            router2.setEnabledStrategies(Set.of("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM", "LONG_CALL", "LONG_PUT"));
-            router2.setStopLossFrac(cfg.getOptionsStopLossFrac());
-            router2.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
-            if (cfg.getOptionsEntryCutoff() != null) router2.setEntryCutoff(cfg.getOptionsEntryCutoff());
-            router2.setOptionsAllowlist(cfg2.optAllowlist());
-            router2.setCallsDisabledSymbols(CALLS_DISABLED);
-            router2.setPutsDisabledSymbols(cfg.getOptionsPutsDisabled());
-            router2.setDowntrendPutMinSignals(cfg.getDowntrendPutMinSignals());
-
-            long t1 = System.currentTimeMillis();
-            IntradayBacktestResult r2 = engine.run(cfg2.watchlist(), barsBySymbol, 100_000.0, router2, msg -> {},
-                    Set.of(), loop -> {
-                        router2.setUptrendSupplier(loop::isUptrend);
-                        loop.setStockTradingEnabled(false);
-                        loop.setMaxConcurrentStockPositions(10);
-                        loop.setAvoidOvernightHolds(false);
-                    });
-            System.out.printf("Done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
-                    (System.currentTimeMillis() - t1) / 1000.0,
-                    r2.getTotalReturnPct(), r2.getMaxDrawdownPct(),
-                    r2.getTotalTrades(), r2.getWins(), r2.getLosses());
-            results.add(new RunResult(bearLabel, r2));
         }
 
-        // --- Comparison table ---
-        System.out.println("\n=== COMPARISON ===");
         System.out.printf("%-40s  %8s  %8s  %7s  %7s%n", "Config", "Return", "MaxDD", "Trades", "WinRate");
         System.out.println("-".repeat(80));
         for (RunResult rr : results) {
