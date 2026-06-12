@@ -95,9 +95,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     // When true, all open positions for a symbol are closed immediately when the daily loss limit fires.
     // Intended for backtest use only — live trading leaves this false.
     private boolean closePositionsOnHalt      = false;
-    // Tracks the date on which we've already issued the broker-side EOD close-all, so we
-    // don't repeat the Alpaca call on every subsequent price tick after pre-close time.
+    // Set to the date once GET /positions confirms no open options remain after EOD close-all.
     private LocalDate brokerCloseAllDate      = null;
+    // Set to true once the halt close-all confirms all positions are gone for the day.
+    private boolean haltCloseDone             = false;
     // When set, called at the start of each day to update the options allowlist dynamically.
     private java.util.function.Function<java.time.LocalDate, Set<String>> dailyAllowlistProvider = null;
 
@@ -259,12 +260,14 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (avoidOvernightHolds && !time.isBefore(effectiveForceCloseTime)) {
             LocalDate today = clock.get().toLocalDate();
             if (today.equals(brokerCloseAllDate)) {
-                return; // broker close-all already issued today
+                return; // confirmed all clear with broker — nothing left to do
             }
-            if (optExec.closeAllFromBroker()) {
-                // Live broker: fetch Alpaca positions and DELETE each OCC symbol once per day
+            int result = optExec.closeAllFromBroker();
+            if (result == 0) {
                 brokerCloseAllDate = today;
-                researchCallback.accept("EOD: issued close-all to broker for all open options positions");
+                researchCallback.accept("EOD: all options positions confirmed closed");
+            } else if (result > 0) {
+                researchCallback.accept("EOD: " + result + " position(s) submitted for close — retrying next tick");
             } else {
                 // Paper trading: close this symbol's positions using local state + BS pricing
                 forceCloseAllForSymbol(symbol, price);
@@ -316,7 +319,18 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (prices.size() < 2) return;
 
         if (account.isDailyLossHalted()) {
-            if (closePositionsOnHalt) forceCloseAllForSymbol(symbol, price);
+            if (!haltCloseDone) {
+                int result = optExec.closeAllFromBroker();
+                if (result == 0) {
+                    haltCloseDone = true;
+                    researchCallback.accept("HALT: all options positions confirmed closed");
+                } else if (result > 0) {
+                    researchCallback.accept("HALT: " + result + " position(s) submitted for close — retrying next tick");
+                } else if (closePositionsOnHalt) {
+                    // Paper trading / backtest fallback
+                    forceCloseAllForSymbol(symbol, price);
+                }
+            }
             researchCallback.accept(symbol + " options skip: daily loss limit active");
             return;
         }
@@ -1003,6 +1017,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             lastMultiLegCloseTime.clear();
             lastDirectionalCloseTime.clear();
             reversalConsecutive.clear();
+            haltCloseDone = false;
             stopLossResetDate = today;
         }
     }

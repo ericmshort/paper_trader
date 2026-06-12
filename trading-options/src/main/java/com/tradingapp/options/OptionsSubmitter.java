@@ -55,10 +55,12 @@ public interface OptionsSubmitter {
 
     /**
      * Close every open options position held at the broker by fetching the live position list
-     * and issuing a DELETE for each OCC symbol. Returns true if the broker was contacted
-     * (regardless of individual close outcomes), false if not supported (paper trading).
+     * and issuing a DELETE for each OCC symbol found.
+     * Returns -1 if not supported (paper trading), 0 if no open options remain,
+     * or a positive count of positions that were found and submitted for close (retry on next tick
+     * until this returns 0 to confirm all are gone).
      */
-    default boolean closeAllOptionsPositions() {
-        return false;
+    default int closeAllOptionsPositions() {
+        return -1;
     }
 }

@@ -40,7 +40,7 @@ public class OptionsOrderExecutor {
 
     public void setTransactionLog(TransactionLog log) { this.transactionLog = log; }
     public void setAccount(Account account) { this.account = account; }
-    public boolean closeAllFromBroker() { return submitter != null && submitter.closeAllOptionsPositions(); }
+    public int closeAllFromBroker() { return submitter != null ? submitter.closeAllOptionsPositions() : -1; }
 
     public void buyCall(String symbol, double strike, LocalDate expiry, int contracts,
                         double premium, String signalStr, String featureCsv) {

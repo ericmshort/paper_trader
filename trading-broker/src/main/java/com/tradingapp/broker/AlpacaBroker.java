@@ -730,27 +730,29 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
     }
 
     @Override
-    public boolean closeAllOptionsPositions() {
+    public int closeAllOptionsPositions() {
         try {
             JSONArray positions = getJsonArray("/positions");
-            if (positions == null) return true;
+            if (positions == null) return 0;
+            int found = 0;
             for (int i = 0; i < positions.length(); i++) {
                 String symbol = positions.getJSONObject(i).optString("symbol");
                 if (!isOccSymbol(symbol)) continue;
-                LOG.info("EOD force-close: " + symbol);
+                found++;
+                LOG.info("Force-close: " + symbol);
                 try {
                     HttpResponse<String> resp = deletePosition(symbol);
                     if (resp.statusCode() != 200 && resp.statusCode() != 201) {
-                        LOG.warning("EOD close failed for " + symbol + " (" + resp.statusCode() + "): " + resp.body());
+                        LOG.warning("Force-close failed for " + symbol + " (" + resp.statusCode() + "): " + resp.body());
                     }
                 } catch (Exception e) {
-                    LOG.warning("EOD close error for " + symbol + ": " + e.getMessage());
+                    LOG.warning("Force-close error for " + symbol + ": " + e.getMessage());
                 }
             }
-            return true;
+            return found;
         } catch (Exception e) {
-            LOG.warning("EOD close-all failed: " + e.getMessage());
-            return false;
+            LOG.warning("Force-close-all failed: " + e.getMessage());
+            return -1;
         }
     }
 
