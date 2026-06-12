@@ -559,22 +559,15 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     // ── Pre-close force-exit ──────────────────────────────────────────────────
 
     private void forceCloseAllForSymbol(String symbol, double stockPrice) {
-        String[] keys = {
-            symbol + "_CALL",            symbol + "_PUT",
-            symbol + "_HIGHDELTA_CALL",  symbol + "_HIGHDELTA_PUT",
-            symbol + "_NEARTERM_CALL",   symbol + "_NEARTERM_PUT",
-            symbol + "_ZEROTE_CALL",     symbol + "_ZEROTE_PUT",
-            symbol + "_BREAKOUT_CALL",   symbol + "_BREAKOUT_PUT",
-            symbol + "_STOCH_CALL",      symbol + "_STOCH_PUT",
-            symbol + "_RS_CALL",         symbol + "_RS_PUT",
-            symbol + "_MACD_CALL",       symbol + "_MACD_PUT"
-        };
-        LocalDate virtualDate = clock.get().toLocalDate();
+        List<String> keys = account.getOptionsPositions().entrySet().stream()
+                .filter(e -> symbol.equals(e.getValue().getSymbol()))
+                .map(Map.Entry::getKey)
+                .collect(java.util.stream.Collectors.toList());
+        double sigma = computeVol(symbol);
         for (String key : keys) {
             OptionsPosition pos = account.getOptionsPositions().get(key);
             if (pos == null) continue;
             boolean isCall = "CALL".equals(pos.getType());
-            double sigma = computeVol(symbol);
             double T = bsEngine.timeToExpiry(pos.getExpiry());
             double premium;
             if (sigma > 0 && T > 0) {
