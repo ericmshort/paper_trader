@@ -120,19 +120,25 @@ public class TradingLoopTest {
             SignalResult.buy("VolumeSurge", 2.5),
             SignalResult.buy("VWAP", 150.0),
             SignalResult.neutral("ORB", 148.0),
-            SignalResult.buy("Candlestick", 1.0)
+            SignalResult.buy("Candlestick", 1.0),
+            SignalResult.buy("MACD", 0.5),
+            SignalResult.sell("STOCHASTIC", 88.0),
+            SignalResult.buy("RELATIVE_STRENGTH", 0.02)
         );
         java.lang.reflect.Method m = TradingLoop.class.getDeclaredMethod("extractFeatureCsv", List.class);
         m.setAccessible(true);
         String csv = (String) m.invoke(loop, signals);
         String[] parts = csv.split(",");
-        assertEquals(6, parts.length);
+        assertEquals(9, parts.length);
         assertEquals(25.0,  Double.parseDouble(parts[0]), 0.001); // RSI
         assertEquals(102.0, Double.parseDouble(parts[1]), 0.001); // BollingerBands
         assertEquals(2.5,   Double.parseDouble(parts[2]), 0.001); // VolumeSurge
         assertEquals(150.0, Double.parseDouble(parts[3]), 0.001); // VWAP
         assertEquals(148.0, Double.parseDouble(parts[4]), 0.001); // ORB
         assertEquals(1.0,   Double.parseDouble(parts[5]), 0.001); // Candlestick
+        assertEquals(0.5,   Double.parseDouble(parts[6]), 0.001); // MACD
+        assertEquals(88.0,  Double.parseDouble(parts[7]), 0.001); // STOCHASTIC
+        assertEquals(0.02,  Double.parseDouble(parts[8]), 0.001); // RELATIVE_STRENGTH
     }
 
     @Test

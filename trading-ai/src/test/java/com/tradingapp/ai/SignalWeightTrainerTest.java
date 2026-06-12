@@ -13,7 +13,7 @@ class SignalWeightTrainerTest {
     void returnsDefaultWeightsWhenFewerThanMinTrades() {
         List<LabeledTrade> trades = new ArrayList<>();
         for (int i = 0; i < 9; i++) {
-            trades.add(new LabeledTrade(new FeatureVector(50, 100, 1.5, 0.0, 0.0, 0.0), true));
+            trades.add(new LabeledTrade(new FeatureVector(50, 100, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), true));
         }
         SignalWeights weights = new SignalWeightTrainer().train(trades);
         for (int i = 0; i < SignalWeights.NUM_FEATURES; i++) {
@@ -31,7 +31,7 @@ class SignalWeightTrainerTest {
             sum += weights.getWeight(i);
             assertTrue(weights.getWeight(i) > 0, "Weight " + i + " should be positive");
         }
-        assertEquals(6.0, sum, 0.01);
+        assertEquals(9.0, sum, 0.01);
     }
 
     @Test
@@ -49,7 +49,7 @@ class SignalWeightTrainerTest {
             boolean win = (i % 2 == 0);
             // RSI low (oversold) for wins, high (overbought) for losses — creates info gain
             double rsi = win ? 25.0 + i * 0.1 : 75.0 + i * 0.1;
-            trades.add(new LabeledTrade(new FeatureVector(rsi, 100, 1.5, 0.0, 0.0, 0.0), win));
+            trades.add(new LabeledTrade(new FeatureVector(rsi, 100, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), win));
         }
         return trades;
     }

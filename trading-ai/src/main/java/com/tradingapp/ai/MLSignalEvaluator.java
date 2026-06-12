@@ -21,7 +21,10 @@ public class MLSignalEvaluator implements SignalWeightEvaluator {
         "VolumeSurge", 2,
         "VWAP", 3,
         "ORB", 4,
-        "Candlestick", 5
+        "Candlestick", 5,
+        "MACD", 6,
+        "STOCHASTIC", 7,
+        "RELATIVE_STRENGTH", 8
     );
 
     private final SignalWeights weights;

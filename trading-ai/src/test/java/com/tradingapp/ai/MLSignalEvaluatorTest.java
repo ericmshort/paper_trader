@@ -12,7 +12,7 @@ class MLSignalEvaluatorTest {
     @Test
     void weightedBuyScoreSumsWeightsOfBuySignals() {
         // RSI=2.0, Bollinger=1.0, VolumeSurge=1.0, VWAP=0.5, ORB=0.5, Candlestick=0.5
-        SignalWeights weights = new SignalWeights(new double[]{2.0, 1.0, 1.0, 0.5, 0.5, 0.5});
+        SignalWeights weights = new SignalWeights(new double[]{2.0, 1.0, 1.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0});
         MLSignalEvaluator eval = new MLSignalEvaluator(weights);
 
         List<SignalResult> signals = List.of(
@@ -26,7 +26,7 @@ class MLSignalEvaluatorTest {
 
     @Test
     void weightedSellScoreSumsWeightsOfSellSignals() {
-        SignalWeights weights = new SignalWeights(new double[]{2.0, 1.0, 1.0, 0.5, 0.5, 0.5});
+        SignalWeights weights = new SignalWeights(new double[]{2.0, 1.0, 1.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0});
         MLSignalEvaluator eval = new MLSignalEvaluator(weights);
 
         List<SignalResult> signals = List.of(
@@ -40,7 +40,7 @@ class MLSignalEvaluatorTest {
 
     @Test
     void unknownIndicatorNamesAreIgnored() {
-        SignalWeights weights = new SignalWeights(new double[]{1.0, 1.0, 1.0, 1.0, 1.0, 1.0});
+        SignalWeights weights = new SignalWeights(new double[]{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0});
         MLSignalEvaluator eval = new MLSignalEvaluator(weights);
 
         List<SignalResult> signals = List.of(

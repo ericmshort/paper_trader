@@ -474,7 +474,10 @@ public class TradingLoop implements Runnable {
         return vix > 0 && vix > VIX_BLOCK_THRESHOLD;
     }
 
-    private static final String[] FEATURE_NAMES = {"RSI", "BollingerBands", "VolumeSurge", "VWAP", "ORB", "Candlestick"};
+    private static final String[] FEATURE_NAMES = {
+        "RSI", "BollingerBands", "VolumeSurge", "VWAP", "ORB", "Candlestick",
+        "MACD", "STOCHASTIC", "RELATIVE_STRENGTH"
+    };
 
     private String extractFeatureCsv(List<SignalResult> signals) {
         double[] vals = new double[FEATURE_NAMES.length];

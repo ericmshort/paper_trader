@@ -8,17 +8,20 @@ import java.util.logging.Logger;
 public class SignalWeights {
 
     private static final Logger LOG = Logger.getLogger(SignalWeights.class.getName());
-    public static final int NUM_FEATURES = 6;
-    private static final String[] NAMES = {"RSI", "BollingerBands", "VolumeSurge", "VWAP", "ORB", "Candlestick"};
+    public static final int NUM_FEATURES = 9;
+    private static final String[] NAMES = {
+        "RSI", "BollingerBands", "VolumeSurge", "VWAP", "ORB", "Candlestick",
+        "MACD", "STOCHASTIC", "RELATIVE_STRENGTH"
+    };
 
     private final double[] weights;
 
     public SignalWeights() {
-        this.weights = new double[]{1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
+        this.weights = new double[]{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
     }
 
     public SignalWeights(double[] weights) {
-        if (weights.length != NUM_FEATURES) throw new IllegalArgumentException("Expected 6 weights");
+        if (weights.length != NUM_FEATURES) throw new IllegalArgumentException("Expected 9 weights");
         this.weights = weights.clone();
     }
 
