@@ -4,39 +4,41 @@ import java.util.List;
 
 /**
  * 30-symbol watchlist — at the Alpaca WebSocket Free tier cap.
- * Screened under the corrected D2 backtest (options-only, uptrendSupplier wired,
- * LONG_PUT min=3). Each symbol's delta is vs the SPY-alone baseline.
+ * All 30 are options-eligible (no QQQ/TSLA exclusions needed).
+ * Selected by 2-year net options P&L ranking across the 100-symbol MasterUniverse.
  */
 public class DayTraderWatchList {
 
     public static final List<String> SYMBOLS = List.of(
-        // Core — regime filter + market breadth signal
-        "SPY", "QQQ",
-        // Core mega-cap tech — deep options markets
-        "AAPL", "MSFT", "NVDA", "TSLA", "META", "AMZN", "PLTR",
-        // D2 screening survivors (originally confirmed, re-verified under corrected framework)
-        "LLY",   // +7.7pp (original), retained
-        "ORCL",  // +5.8pp (original), retained
-        "RTX",   // +6.0pp (original), retained
-        "GS",    // +5.5pp (original), retained
-        "TSM",   // +2.0pp (original), retained
-        "TGT",   // +1.5pp (original), retained
-        "MA",    // +1.6pp (original), retained
-        "UNH",   // +1.3pp (original), retained
-        "GILD",  // +1.9pp (original), retained
-        "AXP",   // +10.8pp (original), retained
-        "MRNA",  // +2.5pp (original), retained
-        "COP",   // +0.9pp (original), retained
-        "XOM",   // +0.6pp (original), retained
-        // Redeemed losers — false negatives under the flawed backtest
-        "ADBE",  // +2.89pp delta (D2 screener)
-        "LOW",   // +0.66pp delta (D2 screener)
-        // New additions — screened under corrected D2 framework
-        "NET",   // +10.30pp delta — highest of all candidates
-        "CRWD",  // +4.06pp delta, 67% WR
-        "PG",    // +1.57pp delta, 67% WR, 1.54% MaxDD (best risk-adjusted new entry)
-        "AMD",   // +1.38pp delta, 56% WR, 1.61% MaxDD
-        "WMT",   // +1.01pp delta
-        "QCOM"   // +0.32pp delta, 60% WR, 2.39% MaxDD (preferred over CRM for lower MaxDD)
+        "SPY",   // regime anchor
+        "NOC",   // $11,079 net P&L, 56.3% WR
+        "NVDA",  // $9,752
+        "MSFT",  // $8,584
+        "COST",  // $7,701
+        "VRTX",  // $6,524
+        "AMGN",  // $6,318
+        "CRWD",  // $6,139
+        "RTX",   // $5,905
+        "GD",    // $3,810
+        "GS",    // $3,660
+        "AVGO",  // $3,353
+        "LRCX",  // $2,681
+        "XOM",   // $2,675
+        "ADBE",  // $2,612
+        "WMT",   // $2,397
+        "TGT",   // $2,333
+        "DE",    // $2,204
+        "ORCL",  // $2,065
+        "AMZN",  // $2,046
+        "PG",    // $1,921
+        "LLY",   // $1,918
+        "PANW",  // $1,847
+        "BLK",   // $1,654
+        "NOW",   // $1,623
+        "MA",    // $1,521
+        "REGN",  // $1,448
+        "META",  // $1,425
+        "MS",    // $1,173
+        "AMAT"   // $984  (COIN excluded — crypto correlation risk)
     );
 }

@@ -86,6 +86,14 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private Set<String> putsDisabledSymbols   = new HashSet<>();
     private int downtrendPutMinSignals        = 4;
     private boolean avoidOvernightHolds      = true;
+    // Effective force-close time — overridden to 12:30 on market half-days.
+    private LocalTime effectiveForceCloseTime = PRE_CLOSE_CUTOFF;
+    // Saved normal entry cutoff so it can be restored after a half-day session.
+    private LocalTime normalEntryCutoff       = null;
+    // When false, the half-day early-close guard is disabled (for A/B comparison only).
+    private boolean holidayGuardEnabled       = true;
+    // When set, called at the start of each day to update the options allowlist dynamically.
+    private java.util.function.Function<java.time.LocalDate, Set<String>> dailyAllowlistProvider = null;
 
     // Virtual clock: ET in live trading; virtual clock in backtest.
     private Supplier<ZonedDateTime> clock = () -> ZonedDateTime.now(ET);
@@ -99,7 +107,11 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     public void setCooldownMinutes(long minutes)       { this.cooldownMinutes = minutes; }
     public void setEntryStartTime(LocalTime time)      { this.entryStartTime = time; }
     public void setAvoidOvernightHolds(boolean v)      { this.avoidOvernightHolds = v; }
-    public void setEntryCutoff(LocalTime time)         { this.entryCutoff = time; }
+    public void setEntryCutoff(LocalTime time)         { this.entryCutoff = time; this.normalEntryCutoff = time; }
+    public void setHolidayGuardEnabled(boolean v)      { this.holidayGuardEnabled = v; }
+    public void setDailyAllowlistProvider(java.util.function.Function<java.time.LocalDate, Set<String>> p) {
+        this.dailyAllowlistProvider = p;
+    }
     public void setOptionsAllowlist(Set<String> symbols) { this.optionsAllowlist = new HashSet<>(symbols); }
     public void setCallsDisabledSymbols(Set<String> symbols) { this.callsDisabledSymbols = new HashSet<>(symbols); }
     public void setPutsDisabledSymbols(Set<String> symbols)  { this.putsDisabledSymbols  = new HashSet<>(symbols); }
@@ -153,6 +165,17 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         lastAnyCloseTime.clear();
         reversalConsecutive.clear();
         stopLossResetDate = date;
+        if (dailyAllowlistProvider != null) {
+            optionsAllowlist = new java.util.HashSet<>(dailyAllowlistProvider.apply(date));
+        }
+        // On market half-days (early close 1pm ET), force-close at 12:30 and block entries after 11:30
+        if (holidayGuardEnabled && MarketCalendar.isHalfDay(date)) {
+            effectiveForceCloseTime = MarketCalendar.HALF_DAY_FORCE_CLOSE;
+            entryCutoff = MarketCalendar.HALF_DAY_ENTRY_CUTOFF;
+        } else {
+            effectiveForceCloseTime = PRE_CLOSE_CUTOFF;
+            entryCutoff = normalEntryCutoff;
+        }
     }
 
     // ── Main evaluation ───────────────────────────────────────────────────────
@@ -164,7 +187,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         // ── Pre-close: force-close all open options for this symbol ───────────
         LocalTime time = clock.get().toLocalTime();
-        if (avoidOvernightHolds && !time.isBefore(PRE_CLOSE_CUTOFF)) {
+        if (avoidOvernightHolds && !time.isBefore(effectiveForceCloseTime)) {
             forceCloseAllForSymbol(symbol, price);
             return;
         }

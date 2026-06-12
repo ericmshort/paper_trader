@@ -21,11 +21,14 @@ risk.market_regime_filter=true
 risk.max_portfolio_exposure_pct=70.0
 
 # --- Strategies ---
-# LONG_CALL / LONG_PUT (3-signal entries) were tested and showed no benefit — omit them
-strategy.enabled=HIGH_DELTA_SCALP,MOMENTUM_NEAR_TERM
+strategy.enabled=HIGH_DELTA_SCALP,MOMENTUM_NEAR_TERM,LONG_CALL,LONG_PUT
+options.stop_loss_frac=0.30
+options.downtrend_put_min_signals=3
+options.entry_cutoff=14:45
 
 # --- Options filters ---
-# All 30 watchlist symbols except QQQ and TSLA (options on those showed no benefit)
-options.symbol.allowlist=SPY,AAPL,MSFT,NVDA,META,AMZN,PLTR,LLY,HD,ORCL,RTX,GS,TSM,TGT,MA,CVX,UNH,NOW,GILD,SBUX,ADBE,AXP,LOW,REGN,MRNA,COP,XOM,AVGO
+# 30-symbol options allowlist: top 30 by 2-year net P&L across 100-symbol MasterUniverse (COIN excluded)
+options.symbol.allowlist=SPY,NOC,NVDA,MSFT,COST,VRTX,AMGN,CRWD,RTX,GD,GS,AVGO,LRCX,XOM,ADBE,WMT,TGT,DE,ORCL,AMZN,PG,LLY,PANW,BLK,NOW,MA,REGN,META,MS,AMAT
 options.calls.disabled=
 options.puts.disabled=
+stock.trading.enabled=false

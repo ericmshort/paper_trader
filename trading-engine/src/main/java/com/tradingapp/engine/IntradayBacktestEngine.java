@@ -33,10 +33,17 @@ public class IntradayBacktestEngine {
 
     private final IndicatorEngine indicators;
     private final FeeCalculator fees;
+    // When false the full event log is not accumulated (saves ~1-2 GB per run in multi-config comparisons).
+    private boolean collectEventLog = true;
 
     public IntradayBacktestEngine(IndicatorEngine indicators, FeeCalculator fees) {
         this.indicators = indicators;
         this.fees = fees;
+    }
+
+    public IntradayBacktestEngine setCollectEventLog(boolean collect) {
+        this.collectEventLog = collect;
+        return this;
     }
 
     public IntradayBacktestResult run(
@@ -66,6 +73,24 @@ public class IntradayBacktestEngine {
             Consumer<String> progressCallback,
             Set<String> inverseEtfSymbols,
             java.util.function.Consumer<TradingLoop> loopConfig) throws Exception {
+        return run(watchlist, barsBySymbol, startingBalance, optEval, progressCallback,
+                inverseEtfSymbols, loopConfig, null);
+    }
+
+    /**
+     * Dynamic-watchlist overload: {@code dailyWatchlistProvider} is called before each trading day
+     * and returns the symbols to activate that day. Only those symbols' bars are loaded into the
+     * replay provider, so TradingLoop naturally ignores the rest.
+     */
+    public IntradayBacktestResult run(
+            List<String> watchlist,
+            Map<String, List<IntradayBar>> barsBySymbol,
+            double startingBalance,
+            OptionsEvaluator optEval,
+            Consumer<String> progressCallback,
+            Set<String> inverseEtfSymbols,
+            java.util.function.Consumer<TradingLoop> loopConfig,
+            java.util.function.Function<LocalDate, Set<String>> dailyWatchlistProvider) throws Exception {
 
         File tmpDb = File.createTempFile("backtest", ".db");
         tmpDb.deleteOnExit();
@@ -91,9 +116,9 @@ public class IntradayBacktestEngine {
 
         QuoteProvider replayProvider = new ReplayQuoteProvider(currentBars);
 
-        List<String> eventLog = new ArrayList<>();
+        List<String> eventLog = collectEventLog ? new ArrayList<>() : List.of();
         Consumer<String> logCollector = msg -> {
-            eventLog.add(msg);
+            if (collectEventLog) ((java.util.ArrayList<String>) eventLog).add(msg);
             if (progressCallback != null) progressCallback.accept(msg);
         };
 
@@ -120,9 +145,15 @@ public class IntradayBacktestEngine {
             if (progressCallback != null) progressCallback.accept("Day " + dayNum + "/" + tradingDays.size() + ": " + date);
 
             trailingStop.resetAll();
+            currentBars.clear();  // drop prior day's quotes so rotated-out symbols get no quote
 
             CandleHistory candleHistory = new CandleHistory();
             loop.setCandleHistory(candleHistory);
+
+            // Determine which symbols are active today (null provider = use full watchlist)
+            Set<String> activeSymbols = dailyWatchlistProvider != null
+                    ? dailyWatchlistProvider.apply(date)
+                    : new java.util.HashSet<>(watchlist);
 
             if (optEval != null) {
                 optEval.resetForDay(date);
@@ -135,8 +166,10 @@ public class IntradayBacktestEngine {
                 List<IntradayBar> bars = entry.getValue();
 
                 for (IntradayBar bar : bars) {
-                    currentBars.put(bar.symbol(), bar);
-                    candleHistory.recordTick(bar.symbol(), bar.close(), bar.volume(), ts.toInstant());
+                    if (activeSymbols.contains(bar.symbol())) {
+                        currentBars.put(bar.symbol(), bar);
+                        candleHistory.recordTick(bar.symbol(), bar.close(), bar.volume(), ts.toInstant());
+                    }
                 }
 
                 virtualClock.set(ts);

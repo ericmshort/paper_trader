@@ -61,7 +61,7 @@ public class IntradayBacktestRunner {
         while (endDate.getDayOfWeek() == DayOfWeek.SATURDAY || endDate.getDayOfWeek() == DayOfWeek.SUNDAY) {
             endDate = endDate.minusDays(1);
         }
-        LocalDate startDate = endDate.minusDays(140);
+        LocalDate startDate = endDate.minusDays(800);
 
         // Empty = confirmation run; populate for swap-testing candidates against the final 30
         List<String> newCandidates = List.of();
@@ -96,12 +96,11 @@ public class IntradayBacktestRunner {
         double maxExposure = cfg.getMaxPortfolioExposurePct() / 100.0;
         IntradayBacktestEngine engine = new IntradayBacktestEngine(new IndicatorEngine(), new FeeCalculator());
 
-        // Final 30-symbol options allowlist — QQQ and TSLA excluded (options not beneficial)
-        Set<String> BASE_OPTS      = Set.of("SPY","AAPL","MSFT","NVDA","META","AMZN","PLTR",
-                                             "LLY","HD","ORCL","RTX","GS","TSM","TGT",
-                                             "MA","CVX","UNH","NOW","GILD","SBUX","ADBE",
-                                             "AXP","LOW","REGN","MRNA","COP","XOM","AVGO");
-        Set<String> CALLS_DISABLED = Set.of("MSFT");
+        // Pull allowlist and filters directly from the live config (day-trader/app.properties).
+        // Current allowlist is 25 symbols — watchlist minus QQQ/TSLA (no options benefit)
+        // and AXP/GILD/MRNA (removed after 2-yr backtest showed -$29K net drag, Config D).
+        Set<String> BASE_OPTS      = cfg.getOptionsSymbolAllowlist();
+        Set<String> CALLS_DISABLED = cfg.getOptionsCallsDisabled();
 
         record RunCfg(String label, List<String> watchlist, Set<String> optAllowlist) {}
         record RunResult(String label, IntradayBacktestResult result) {}
@@ -138,36 +137,52 @@ public class IntradayBacktestRunner {
             OptionsSignalRouter router = new OptionsSignalRouter(
                     new BlackScholesEngine(), optExec, new Account(), new PriceHistory(), msg -> {}, null);
             router.setMaxPortfolioExposure(maxExposure);
-            router.setEnabledStrategies(Set.of("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM"));
+            router.setEnabledStrategies(Set.of("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM", "LONG_CALL"));
+            router.setStopLossFrac(cfg.getOptionsStopLossFrac());
+            router.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
+            if (cfg.getOptionsEntryCutoff() != null) router.setEntryCutoff(cfg.getOptionsEntryCutoff());
             router.setOptionsAllowlist(cfg2.optAllowlist());
             router.setCallsDisabledSymbols(CALLS_DISABLED);
-            router.setPutsDisabledSymbols(Set.of("NVDA"));
+            router.setPutsDisabledSymbols(cfg.getOptionsPutsDisabled());
 
             long t0 = System.currentTimeMillis();
             IntradayBacktestResult r = engine.run(cfg2.watchlist(), barsBySymbol, 100_000.0, router, msg -> {},
-                    Set.of(), loop -> router.setUptrendSupplier(loop::isUptrend));
+                    Set.of(), loop -> {
+                        router.setUptrendSupplier(loop::isUptrend);
+                        loop.setStockTradingEnabled(false);
+                        loop.setMaxConcurrentStockPositions(10);
+                        loop.setAvoidOvernightHolds(false);
+                    });
             System.out.printf("Done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
                     (System.currentTimeMillis() - t0) / 1000.0,
                     r.getTotalReturnPct(), r.getMaxDrawdownPct(),
                     r.getTotalTrades(), r.getWins(), r.getLosses());
             results.add(new RunResult(cfg2.label(), r));
 
-            // ── +LONG_PUT variant (downtrendMin=3) ────────────────────────────
-            String bearLabel = cfg2.label() + " +LONG_PUT(min=3)";
+            // ── +LONG_PUT variant (production config) ────────────────────────
+            String bearLabel = cfg2.label() + " +LONG_PUT(min=" + cfg.getDowntrendPutMinSignals() + ")";
             System.out.println("\n=== " + bearLabel + " ===");
             OptionsOrderExecutor optExec2 = new OptionsOrderExecutor(new Account(), null);
             OptionsSignalRouter router2 = new OptionsSignalRouter(
                     new BlackScholesEngine(), optExec2, new Account(), new PriceHistory(), msg -> {}, null);
             router2.setMaxPortfolioExposure(maxExposure);
-            router2.setEnabledStrategies(Set.of("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM", "LONG_PUT"));
+            router2.setEnabledStrategies(Set.of("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM", "LONG_CALL", "LONG_PUT"));
+            router2.setStopLossFrac(cfg.getOptionsStopLossFrac());
+            router2.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
+            if (cfg.getOptionsEntryCutoff() != null) router2.setEntryCutoff(cfg.getOptionsEntryCutoff());
             router2.setOptionsAllowlist(cfg2.optAllowlist());
             router2.setCallsDisabledSymbols(CALLS_DISABLED);
-            router2.setPutsDisabledSymbols(Set.of("NVDA"));
-            router2.setDowntrendPutMinSignals(3);
+            router2.setPutsDisabledSymbols(cfg.getOptionsPutsDisabled());
+            router2.setDowntrendPutMinSignals(cfg.getDowntrendPutMinSignals());
 
             long t1 = System.currentTimeMillis();
             IntradayBacktestResult r2 = engine.run(cfg2.watchlist(), barsBySymbol, 100_000.0, router2, msg -> {},
-                    Set.of(), loop -> router2.setUptrendSupplier(loop::isUptrend));
+                    Set.of(), loop -> {
+                        router2.setUptrendSupplier(loop::isUptrend);
+                        loop.setStockTradingEnabled(false);
+                        loop.setMaxConcurrentStockPositions(10);
+                        loop.setAvoidOvernightHolds(false);
+                    });
             System.out.printf("Done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
                     (System.currentTimeMillis() - t1) / 1000.0,
                     r2.getTotalReturnPct(), r2.getMaxDrawdownPct(),
