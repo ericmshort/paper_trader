@@ -304,6 +304,8 @@ public class DashboardController implements Initializable {
         optionsRouter.setUptrendSupplier(tradingLoop::isUptrend);
         optionsRouter.setStopLossFrac(appConfig.getOptionsStopLossFrac());
         optionsRouter.setEntryCutoff(appConfig.getOptionsEntryCutoff());
+        optionsRouter.setClosePositionsOnHalt(true);
+        tradingLoop.setAccurateOptionsValuation(true);
         tradingLoop.setStockTradingEnabled(appConfig.isStockTradingEnabled());
 
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {

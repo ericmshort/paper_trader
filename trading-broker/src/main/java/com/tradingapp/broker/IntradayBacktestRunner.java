@@ -152,6 +152,9 @@ public class IntradayBacktestRunner {
                         loop.setStockTradingEnabled(false);
                         loop.setMaxConcurrentStockPositions(10);
                         loop.setAvoidOvernightHolds(false);
+                        loop.setDailyLossLimitPct(cfg.getDailyLossLimitPct() / 100.0);
+                        loop.setAccurateOptionsValuation(true);
+                        router.setClosePositionsOnHalt(true);
                     });
             System.out.printf("Done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
                     (System.currentTimeMillis() - t0) / 1000.0,

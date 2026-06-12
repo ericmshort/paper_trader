@@ -66,6 +66,9 @@ public class TradingLoop implements Runnable {
     private LocalDate lastTrainingDate;
     private LocalDate lastMarketClosedLoggedDate;
     private double dailyLossLimitPct = 0.05;
+    // When true, short options are valued at current market price (not ignored) in the daily loss check.
+    // Requires OptionsSignalRouter to update currentMarketPrice each tick. Backtest-only by default.
+    private boolean accurateOptionsValuation = false;
     private double dayStartValue = -1;
     private LocalDate lastDayTrackingDate;
     private TransactionLog transactionLog;
@@ -165,6 +168,7 @@ public class TradingLoop implements Runnable {
     }
 
     public void setDailyLossLimitPct(double pct) { this.dailyLossLimitPct = pct; }
+    public void setAccurateOptionsValuation(boolean v) { this.accurateOptionsValuation = v; }
     public void setMaxPortfolioExposure(double fraction) { this.maxPortfolioExposure = fraction; }
     public void setTransactionLog(TransactionLog log) { this.transactionLog = log; }
     public void setAvoidOvernightHolds(boolean v) { this.avoidOvernightHolds = v; }
@@ -261,16 +265,32 @@ public class TradingLoop implements Runnable {
                 }
                 account.updatePositionPrice(symbol, price);
                 if (!account.isDailyLossHalted() && dailyLossLimitPct > 0 && dayStartValue > 0) {
-                    double optionsCostBasis = account.getOptionsPositions().values().stream()
-                            .filter(p -> p.getContracts() > 0)
-                            .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
-                            .sum();
+                    double optionsValue;
+                    if (accurateOptionsValuation) {
+                        // Mark-to-market: cash already includes premiums received for short positions,
+                        // so subtract current buyback cost for shorts (contracts < 0) and add current
+                        // value for longs (contracts > 0). Falls back to premiumPaid for unpriced longs
+                        // and 0 for unpriced shorts (conservative — understates loss until first tick).
+                        optionsValue = account.getOptionsPositions().values().stream()
+                                .mapToDouble(p -> {
+                                    double mktPrice = p.getCurrentMarketPrice();
+                                    double prem = (mktPrice > 0) ? mktPrice
+                                            : (p.getContracts() > 0 ? p.getPremiumPaid() : 0.0);
+                                    return prem * 100 * p.getContracts();
+                                })
+                                .sum();
+                    } else {
+                        optionsValue = account.getOptionsPositions().values().stream()
+                                .filter(p -> p.getContracts() > 0)
+                                .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
+                                .sum();
+                    }
                     // Use market value (not just unrealized PnL) so that open stock positions
                     // don't appear as losses: buying $14k of stock reduces cash by $14k but
                     // adds $14k of market value — net portfolio value is unchanged.
                     double stockValue = account.getPositions().values().stream()
                             .mapToDouble(Position::getMarketValue).sum();
-                    double currentValue = account.getBalance() + stockValue + optionsCostBasis;
+                    double currentValue = account.getBalance() + stockValue + optionsValue;
                     if (currentValue < dayStartValue * (1 - dailyLossLimitPct)) {
                         account.setDailyLossHalted(true);
                         researchCallback.accept(String.format(

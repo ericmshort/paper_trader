@@ -92,6 +92,9 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private LocalTime normalEntryCutoff       = null;
     // When false, the half-day early-close guard is disabled (for A/B comparison only).
     private boolean holidayGuardEnabled       = true;
+    // When true, all open positions for a symbol are closed immediately when the daily loss limit fires.
+    // Intended for backtest use only — live trading leaves this false.
+    private boolean closePositionsOnHalt      = false;
     // When set, called at the start of each day to update the options allowlist dynamically.
     private java.util.function.Function<java.time.LocalDate, Set<String>> dailyAllowlistProvider = null;
 
@@ -116,6 +119,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     public void setCallsDisabledSymbols(Set<String> symbols) { this.callsDisabledSymbols = new HashSet<>(symbols); }
     public void setPutsDisabledSymbols(Set<String> symbols)  { this.putsDisabledSymbols  = new HashSet<>(symbols); }
     public void setDowntrendPutMinSignals(int n)              { this.downtrendPutMinSignals = n; }
+    public void setClosePositionsOnHalt(boolean v)            { this.closePositionsOnHalt = v; }
     private boolean isStrategyEnabled(String name) { return enabledStrategies.isEmpty() || enabledStrategies.contains(name); }
 
     public OptionsSignalRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
@@ -298,6 +302,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (prices.size() < 2) return;
 
         if (account.isDailyLossHalted()) {
+            if (closePositionsOnHalt) forceCloseAllForSymbol(symbol, price);
             researchCallback.accept(symbol + " options skip: daily loss limit active");
             return;
         }
@@ -608,6 +613,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         // If sigma is unavailable but the option hasn't expired, skip evaluation —
         // a dry quote feed does not mean the position is worthless.
         if (!canPrice && T > 0) return;
+
+        if (canPrice) pos.setCurrentMarketPrice(currentPremium);
 
         boolean premiumStop      = canPrice && currentPremium <= pos.getPremiumPaid() * stopLossFrac;
         boolean hitProfitTarget  = currentPremium >= pos.getPremiumPaid() * profitTarget;
