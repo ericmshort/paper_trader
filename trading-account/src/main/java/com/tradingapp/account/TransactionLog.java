@@ -375,6 +375,39 @@ public class TransactionLog {
         }
     }
 
+    /** Returns today's options close records (CALL_SELL / PUT_SELL) in chronological order. */
+    public List<TransactionRecord> findTodaysCloseActions(java.time.ZoneId tz) {
+        long todayStartMs = java.time.LocalDate.now(tz)
+                .atStartOfDay(tz).toInstant().toEpochMilli();
+        String sql = "SELECT * FROM transactions"
+                + " WHERE action IN ('CALL_SELL','PUT_SELL')"
+                + " AND timestamp >= ?"
+                + " ORDER BY timestamp ASC";
+        List<TransactionRecord> records = new ArrayList<>();
+        try (Connection conn = connect();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, todayStartMs);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    TransactionRecord r = new TransactionRecord();
+                    r.setId(rs.getLong("id"));
+                    r.setTimestamp(rs.getLong("timestamp"));
+                    r.setSymbol(rs.getString("symbol"));
+                    r.setAction(TransactionRecord.TransactionAction.valueOf(rs.getString("action")));
+                    r.setQuantity(rs.getInt("quantity"));
+                    r.setPricePerUnit(rs.getDouble("price_per_unit"));
+                    r.setFeeCharged(rs.getDouble("fee_charged"));
+                    r.setBalanceAfter(rs.getDouble("balance_after"));
+                    r.setReason(rs.getString("reason"));
+                    records.add(r);
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to query today's close actions", e);
+        }
+        return records;
+    }
+
     public void clearAll() {
         try (Connection conn = connect(); Statement stmt = conn.createStatement()) {
             stmt.execute("DELETE FROM transactions");

@@ -178,6 +178,53 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         }
     }
 
+    /**
+     * Restores per-symbol cooldowns and session stop-loss set from today's transaction log.
+     * Call once on startup after syncAccount() so that re-entry guards survive app restarts.
+     * Only options close records (CALL_SELL / PUT_SELL) from today are considered.
+     */
+    public void restoreSessionState(TransactionLog txLog) {
+        List<com.tradingapp.account.TransactionRecord> closes = txLog.findTodaysCloseActions(ET);
+        if (closes.isEmpty()) return;
+
+        for (com.tradingapp.account.TransactionRecord r : closes) {
+            String sym = r.getSymbol();
+            String action = r.getAction().name();
+            boolean isCall = "CALL_SELL".equals(action);
+            boolean isPut  = "PUT_SELL".equals(action);
+            if (!isCall && !isPut) continue;
+
+            ZonedDateTime closeTime = java.time.Instant.ofEpochMilli(r.getTimestamp()).atZone(ET);
+            String type = isCall ? "CALL" : "PUT";
+
+            // lastAnyCloseTime: keep the most recent close per symbol
+            lastAnyCloseTime.merge(sym, closeTime, (a, b) -> a.isAfter(b) ? a : b);
+
+            // Restore directional cooldown for all strategy key variants
+            for (String key : new String[]{
+                    sym + "_" + type,
+                    sym + "_HIGHDELTA_" + type,
+                    sym + "_NEARTERM_" + type }) {
+                lastDirectionalCloseTime.merge(key, closeTime, (a, b) -> a.isAfter(b) ? a : b);
+            }
+
+            // Restore sessionStopLossed for positions closed by stop-loss
+            String reason = r.getReason() != null ? r.getReason().toLowerCase() : "";
+            if (reason.contains("stop") || reason.contains("loss") || reason.contains("worthless")) {
+                for (String key : new String[]{
+                        sym + "_" + type,
+                        sym + "_HIGHDELTA_" + type,
+                        sym + "_NEARTERM_" + type }) {
+                    sessionStopLossed.add(key);
+                }
+            }
+        }
+
+        long stopCount = sessionStopLossed.size();
+        researchCallback.accept("[Startup] Restored session state from " + closes.size()
+                + " today's close(s) — " + stopCount + " stop-loss cooldown(s) active.");
+    }
+
     // ── Main evaluation ───────────────────────────────────────────────────────
 
     @Override

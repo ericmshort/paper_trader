@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.logging.Logger;
 
 public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
@@ -34,6 +35,7 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
     private final Account account;
     private final TransactionLog log;
     private final HttpClient http;
+    private Consumer<String> logCallback = msg -> {};
 
     public AlpacaBroker(AppConfig config, Account account, TransactionLog log) {
         this.config = config;
@@ -43,6 +45,10 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                 .connectTimeout(Duration.ofSeconds(10))
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
+    }
+
+    public void setLogCallback(Consumer<String> callback) {
+        this.logCallback = callback != null ? callback : msg -> {};
     }
 
     @Override
@@ -553,11 +559,17 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                 staleOptions.forEach(account::removeOptionsPosition);
 
                 account.setBrokerSyncComplete(true);
-                LOG.info("[BrokerSync] Verified " + account.getPositions().size()
-                        + " stock(s) and " + account.getOptionsPositions().size() + " option(s) against broker.");
+                String syncMsg = "[BrokerSync] Restored " + account.getOptionsPositions().size()
+                        + " option position(s) and " + account.getPositions().size()
+                        + " stock position(s) from Alpaca.";
+                LOG.info(syncMsg);
+                logCallback.accept(syncMsg);
             }
         } catch (Exception e) {
-            System.err.println("Alpaca account sync failed: " + e.getMessage());
+            String errMsg = "[BrokerSync] WARNING: sync failed (" + e.getMessage()
+                    + ") — open position state may be incomplete, re-entries not blocked.";
+            System.err.println(errMsg);
+            logCallback.accept(errMsg);
         }
 
         if (log != null) syncOrderHistory();

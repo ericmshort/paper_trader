@@ -208,6 +208,7 @@ public class DashboardController implements Initializable {
         BrokerClient brokerClient;
         if (appConfig.isAlpacaBroker()) {
             AlpacaBroker alpaca = new AlpacaBroker(appConfig, account, transactionLog);
+            alpaca.setLogCallback(tradingLogger::log);
             alpaca.syncAccount(account);
             alpaca.reconcileTransactionLog();
             brokerClient = alpaca;
@@ -246,6 +247,9 @@ public class DashboardController implements Initializable {
         optionsRouter.setOptionsAllowlist(appConfig.getOptionsSymbolAllowlist());
         optionsRouter.setCallsDisabledSymbols(appConfig.getOptionsCallsDisabled());
         optionsRouter.setPutsDisabledSymbols(appConfig.getOptionsPutsDisabled());
+        if (appConfig.isAlpacaBroker()) {
+            optionsRouter.restoreSessionState(transactionLog);
+        }
 
         Path weightsPath = AppConfig.getDataDir().resolve("signal-weights.json");
         SignalWeights initialWeights;
