@@ -79,6 +79,7 @@ public class TradingLoop implements Runnable {
     private final int lossCooldownMinutes = 60;
     private final Map<String, Double> lastKnownPrices = new HashMap<>();
     private final Map<String, LocalDate> dailyBarLastRecorded = new HashMap<>();
+    private final Map<String, Double> dailyOpenPrices = new HashMap<>();
     private final Map<String, ZonedDateTime> entryTimes = new HashMap<>();
     private final Map<String, Double> entryPrices = new HashMap<>();
     private final Map<String, ZonedDateTime> lossCooldowns = new HashMap<>();
@@ -254,6 +255,7 @@ public class TradingLoop implements Runnable {
                 priceHistory.record(symbol, price, volume);
                 // Gap 6: one daily bar per symbol per trading day — keeps indicators on daily cadence
                 if (!today.equals(dailyBarLastRecorded.get(symbol))) {
+                    dailyOpenPrices.put(symbol, price);
                     priceHistory.recordDaily(symbol, price, volume);
                     dailyBarLastRecorded.put(symbol, today);
                 }
@@ -298,6 +300,22 @@ public class TradingLoop implements Runnable {
                         SignalResult.Direction dir = sentiment.direction() == SentimentDirection.BULLISH
                                 ? SignalResult.Direction.BUY : SignalResult.Direction.SELL;
                         signals.add(new SignalResult("NEWS_SENTIMENT", dir, sentiment.weight()));
+                    }
+                }
+                // Relative strength vs SPY: stock out/underperforming SPY by 1.5%+ intraday
+                // signals institutional flow independent of broad market direction.
+                if (!"SPY".equals(symbol)) {
+                    Double symOpen = dailyOpenPrices.get(symbol);
+                    Double spyOpen = dailyOpenPrices.get("SPY");
+                    double spyPrice = lastKnownPrices.getOrDefault("SPY", 0.0);
+                    if (symOpen != null && spyOpen != null && symOpen > 0 && spyOpen > 0 && spyPrice > 0) {
+                        double symPct = (price - symOpen) / symOpen;
+                        double spyPct = (spyPrice - spyOpen) / spyOpen;
+                        double divergence = symPct - spyPct;
+                        if (divergence >= 0.015)
+                            signals.add(SignalResult.buy("RELATIVE_STRENGTH", divergence));
+                        else if (divergence <= -0.015)
+                            signals.add(SignalResult.sell("RELATIVE_STRENGTH", divergence));
                     }
                 }
                 // Candlestick is useful for confirming entries but too noisy as an exit trigger —
@@ -415,7 +433,7 @@ public class TradingLoop implements Runnable {
                         s -> "ORB".equals(s.getIndicatorName())
                                 && s.getDirection() == SignalResult.Direction.BUY));
                 if (optionsEvaluator != null) {
-                    optionsEvaluator.evaluate(symbol, price, buys, sells, signalStr, featureCsv);
+                    optionsEvaluator.evaluateWithSignals(symbol, price, buys, sells, signalStr, featureCsv, signals);
                 }
                 researchCallback.accept(time + " | " + symbol + " $" + String.format("%.2f", price)
                         + " | " + signalStr + " | BUY=" + buys + " SELL=" + sells);

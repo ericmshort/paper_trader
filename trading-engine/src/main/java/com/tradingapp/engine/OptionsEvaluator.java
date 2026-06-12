@@ -8,9 +8,24 @@ import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.util.function.Supplier;
 
-@FunctionalInterface
 public interface OptionsEvaluator {
-    void evaluate(String symbol, double price, int buySignals, int sellSignals, String signalStr, String featureCsv);
+
+    /**
+     * Simple entry point — kept for backward compat. Override {@link #evaluateWithSignals} instead
+     * when you need access to the raw signal list (required for name-based signal checks).
+     */
+    default void evaluate(String symbol, double price, int buySignals, int sellSignals,
+                          String signalStr, String featureCsv) {}
+
+    /**
+     * Primary entry point. Default delegates to {@link #evaluate} so legacy implementations
+     * continue to work unchanged. Override this when you need per-indicator signal details.
+     */
+    default void evaluateWithSignals(String symbol, double price, int buySignals, int sellSignals,
+                                     String signalStr, String featureCsv,
+                                     java.util.List<SignalResult> rawSignals) {
+        evaluate(symbol, price, buySignals, sellSignals, signalStr, featureCsv);
+    }
 
     /**
      * Called once at backtest startup to wire the shared transaction log, account,

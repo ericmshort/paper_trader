@@ -204,7 +204,11 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             for (String key : new String[]{
                     sym + "_" + type,
                     sym + "_HIGHDELTA_" + type,
-                    sym + "_NEARTERM_" + type }) {
+                    sym + "_NEARTERM_" + type,
+                    sym + "_BREAKOUT_" + type,
+                    sym + "_STOCH_" + type,
+                    sym + "_RS_" + type,
+                    sym + "_MACD_" + type }) {
                 lastDirectionalCloseTime.merge(key, closeTime, (a, b) -> a.isAfter(b) ? a : b);
             }
 
@@ -214,7 +218,11 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                 for (String key : new String[]{
                         sym + "_" + type,
                         sym + "_HIGHDELTA_" + type,
-                        sym + "_NEARTERM_" + type }) {
+                        sym + "_NEARTERM_" + type,
+                        sym + "_BREAKOUT_" + type,
+                        sym + "_STOCH_" + type,
+                        sym + "_RS_" + type,
+                        sym + "_MACD_" + type }) {
                     sessionStopLossed.add(key);
                 }
             }
@@ -230,6 +238,13 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     @Override
     public void evaluate(String symbol, double price, int buySignals, int sellSignals,
                          String signalStr, String featureCsv) {
+        evaluateWithSignals(symbol, price, buySignals, sellSignals, signalStr, featureCsv, List.of());
+    }
+
+    @Override
+    public void evaluateWithSignals(String symbol, double price, int buySignals, int sellSignals,
+                                    String signalStr, String featureCsv,
+                                    List<com.tradingapp.engine.SignalResult> rawSignals) {
         resetIfNewDay();
 
         // ── Pre-close: force-close all open options for this symbol ───────────
@@ -239,14 +254,22 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             return;
         }
 
-        String callKey          = symbol + "_CALL";
-        String putKey           = symbol + "_PUT";
-        String highDeltaCallKey = symbol + "_HIGHDELTA_CALL";
-        String highDeltaPutKey  = symbol + "_HIGHDELTA_PUT";
-        String nearTermCallKey  = symbol + "_NEARTERM_CALL";
-        String nearTermPutKey   = symbol + "_NEARTERM_PUT";
-        String zeroDteCallKey   = symbol + "_ZEROTE_CALL";
-        String zeroDtePutKey    = symbol + "_ZEROTE_PUT";
+        String callKey            = symbol + "_CALL";
+        String putKey             = symbol + "_PUT";
+        String highDeltaCallKey   = symbol + "_HIGHDELTA_CALL";
+        String highDeltaPutKey    = symbol + "_HIGHDELTA_PUT";
+        String nearTermCallKey    = symbol + "_NEARTERM_CALL";
+        String nearTermPutKey     = symbol + "_NEARTERM_PUT";
+        String zeroDteCallKey     = symbol + "_ZEROTE_CALL";
+        String zeroDtePutKey      = symbol + "_ZEROTE_PUT";
+        String breakoutCallKey    = symbol + "_BREAKOUT_CALL";
+        String breakoutPutKey     = symbol + "_BREAKOUT_PUT";
+        String stochCallKey       = symbol + "_STOCH_CALL";
+        String stochPutKey        = symbol + "_STOCH_PUT";
+        String rsCallKey          = symbol + "_RS_CALL";
+        String rsPutKey           = symbol + "_RS_PUT";
+        String macdCallKey        = symbol + "_MACD_CALL";
+        String macdPutKey         = symbol + "_MACD_PUT";
 
         Map<String, OptionsPosition> opts = account.getOptionsPositions();
 
@@ -257,6 +280,14 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         closeDirectionalLeg(opts, highDeltaPutKey,  false, symbol, price, buySignals,  signalStr);
         closeDirectionalLeg(opts, nearTermCallKey,  true,  symbol, price, sellSignals, signalStr);
         closeDirectionalLeg(opts, nearTermPutKey,   false, symbol, price, buySignals,  signalStr);
+        closeDirectionalLeg(opts, breakoutCallKey,  true,  symbol, price, sellSignals, signalStr);
+        closeDirectionalLeg(opts, breakoutPutKey,   false, symbol, price, buySignals,  signalStr);
+        closeDirectionalLeg(opts, stochCallKey,     true,  symbol, price, sellSignals, signalStr);
+        closeDirectionalLeg(opts, stochPutKey,      false, symbol, price, buySignals,  signalStr);
+        closeDirectionalLeg(opts, rsCallKey,        true,  symbol, price, sellSignals, signalStr);
+        closeDirectionalLeg(opts, rsPutKey,         false, symbol, price, buySignals,  signalStr);
+        closeDirectionalLeg(opts, macdCallKey,      true,  symbol, price, sellSignals, signalStr);
+        closeDirectionalLeg(opts, macdPutKey,       false, symbol, price, buySignals,  signalStr);
         closeMultiLegIfNeeded(opts, zeroDteCallKey, zeroDtePutKey, symbol, price, "ZEROTE", signalStr);
 
         opts = account.getOptionsPositions();
@@ -318,7 +349,11 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         boolean hasDirectional = opts.containsKey(callKey)          || opts.containsKey(putKey)
                               || opts.containsKey(highDeltaCallKey)  || opts.containsKey(highDeltaPutKey)
-                              || opts.containsKey(nearTermCallKey)   || opts.containsKey(nearTermPutKey);
+                              || opts.containsKey(nearTermCallKey)   || opts.containsKey(nearTermPutKey)
+                              || opts.containsKey(breakoutCallKey)   || opts.containsKey(breakoutPutKey)
+                              || opts.containsKey(stochCallKey)      || opts.containsKey(stochPutKey)
+                              || opts.containsKey(rsCallKey)         || opts.containsKey(rsPutKey)
+                              || opts.containsKey(macdCallKey)       || opts.containsKey(macdPutKey);
         boolean hasMultiLeg   = opts.containsKey(zeroDteCallKey)    || opts.containsKey(zeroDtePutKey);
 
         // ── 5. Cooldown check ─────────────────────────────────────────────────
@@ -400,16 +435,134 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             if (callsAllowed && putsAllowed && isZeroDteDay() && isStrategyEnabled("ZERO_DTE"))
                 tryOpenZeroDTE(symbol, price, K, sigma, signalStr, featureCsv);
         }
+
+        // ── 8. New independent strategy entries ──────────────────────────────
+        // These check named signals in rawSignals and use separate position keys,
+        // so they don't conflict with signal-count thresholds above.
+
+        // Re-read opts after any changes above.
+        opts = account.getOptionsPositions();
+        hasDirectional = opts.containsKey(callKey)          || opts.containsKey(putKey)
+                      || opts.containsKey(highDeltaCallKey)  || opts.containsKey(highDeltaPutKey)
+                      || opts.containsKey(nearTermCallKey)   || opts.containsKey(nearTermPutKey)
+                      || opts.containsKey(breakoutCallKey)   || opts.containsKey(breakoutPutKey)
+                      || opts.containsKey(stochCallKey)      || opts.containsKey(stochPutKey)
+                      || opts.containsKey(rsCallKey)         || opts.containsKey(rsPutKey)
+                      || opts.containsKey(macdCallKey)       || opts.containsKey(macdPutKey);
+
+        // OPENING_BREAKOUT: ORB confirms breakout, strong early-session momentum
+        boolean inFirstHour = !time.isBefore(LocalTime.of(9, 35)) && time.isBefore(LocalTime.of(10, 30));
+        if (inFirstHour && !hasDirectional && !hasMultiLeg && isStrategyEnabled("OPENING_BREAKOUT")) {
+            boolean orbBuy  = rawSignals.stream().anyMatch(
+                    s -> "ORB".equals(s.getIndicatorName()) && s.getDirection() == com.tradingapp.engine.SignalResult.Direction.BUY);
+            boolean orbSell = rawSignals.stream().anyMatch(
+                    s -> "ORB".equals(s.getIndicatorName()) && s.getDirection() == com.tradingapp.engine.SignalResult.Direction.SELL);
+            LocalDate breakoutExpiry = bsEngine.selectNearTermExpiry();
+            double breakoutT = bsEngine.timeToExpiry(breakoutExpiry);
+            if (breakoutT <= 0) breakoutT = 5.0 / 365.0;
+            if (orbBuy && buySignals >= 2 && callsAllowed && !inDowntrend) {
+                tryOpenDirectional(symbol, price, true, breakoutCallKey, "OPENING-BREAKOUT",
+                        breakoutExpiry, breakoutT, K, sigma, 0.05, 5, signalStr, featureCsv);
+            } else if (orbSell && sellSignals >= 2 && putsAllowed && sellSignals >= putMin) {
+                tryOpenDirectional(symbol, price, false, breakoutPutKey, "OPENING-BREAKOUT",
+                        breakoutExpiry, breakoutT, K, sigma, 0.05, 5, signalStr, featureCsv);
+            }
+        }
+
+        // Re-read opts in case OPENING_BREAKOUT opened
+        opts = account.getOptionsPositions();
+        hasDirectional = opts.containsKey(callKey)          || opts.containsKey(putKey)
+                      || opts.containsKey(highDeltaCallKey)  || opts.containsKey(highDeltaPutKey)
+                      || opts.containsKey(nearTermCallKey)   || opts.containsKey(nearTermPutKey)
+                      || opts.containsKey(breakoutCallKey)   || opts.containsKey(breakoutPutKey)
+                      || opts.containsKey(stochCallKey)      || opts.containsKey(stochPutKey)
+                      || opts.containsKey(rsCallKey)         || opts.containsKey(rsPutKey)
+                      || opts.containsKey(macdCallKey)       || opts.containsKey(macdPutKey);
+
+        // STOCHASTIC_REVERSAL: %K at extreme, at least 1 confirming signal
+        if (!hasDirectional && !hasMultiLeg && isStrategyEnabled("STOCHASTIC_REVERSAL")) {
+            boolean stochBuy  = rawSignals.stream().anyMatch(
+                    s -> "STOCHASTIC".equals(s.getIndicatorName()) && s.getDirection() == com.tradingapp.engine.SignalResult.Direction.BUY);
+            boolean stochSell = rawSignals.stream().anyMatch(
+                    s -> "STOCHASTIC".equals(s.getIndicatorName()) && s.getDirection() == com.tradingapp.engine.SignalResult.Direction.SELL);
+            LocalDate stochExpiry = bsEngine.selectNearTermExpiry();
+            double stochT = bsEngine.timeToExpiry(stochExpiry);
+            if (stochT <= 0) stochT = 5.0 / 365.0;
+            if (stochBuy && buySignals >= 1 && callsAllowed && !inDowntrend) {
+                tryOpenDirectional(symbol, price, true, stochCallKey, "STOCH-REVERSAL",
+                        stochExpiry, stochT, K, sigma, 0.05, 5, signalStr, featureCsv);
+            } else if (stochSell && sellSignals >= 1 && putsAllowed && sellSignals >= putMin) {
+                tryOpenDirectional(symbol, price, false, stochPutKey, "STOCH-REVERSAL",
+                        stochExpiry, stochT, K, sigma, 0.05, 5, signalStr, featureCsv);
+            }
+        }
+
+        // Re-read opts in case STOCHASTIC_REVERSAL opened
+        opts = account.getOptionsPositions();
+        hasDirectional = opts.containsKey(callKey)          || opts.containsKey(putKey)
+                      || opts.containsKey(highDeltaCallKey)  || opts.containsKey(highDeltaPutKey)
+                      || opts.containsKey(nearTermCallKey)   || opts.containsKey(nearTermPutKey)
+                      || opts.containsKey(breakoutCallKey)   || opts.containsKey(breakoutPutKey)
+                      || opts.containsKey(stochCallKey)      || opts.containsKey(stochPutKey)
+                      || opts.containsKey(rsCallKey)         || opts.containsKey(rsPutKey)
+                      || opts.containsKey(macdCallKey)       || opts.containsKey(macdPutKey);
+
+        // RELATIVE_STRENGTH_DIVERGENCE: stock clearly out/underperforming SPY with confirmation
+        if (!hasDirectional && !hasMultiLeg && isStrategyEnabled("RELATIVE_STRENGTH_DIVERGENCE")) {
+            boolean rsBuy  = rawSignals.stream().anyMatch(
+                    s -> "RELATIVE_STRENGTH".equals(s.getIndicatorName()) && s.getDirection() == com.tradingapp.engine.SignalResult.Direction.BUY);
+            boolean rsSell = rawSignals.stream().anyMatch(
+                    s -> "RELATIVE_STRENGTH".equals(s.getIndicatorName()) && s.getDirection() == com.tradingapp.engine.SignalResult.Direction.SELL);
+            if (rsBuy && buySignals >= 2 && callsAllowed && !inDowntrend) {
+                tryOpenDirectional(symbol, price, true, rsCallKey, "RS-DIVERGENCE",
+                        expiry, T, K, sigma, 0.05, 5, signalStr, featureCsv);
+            } else if (rsSell && sellSignals >= 2 && putsAllowed && sellSignals >= putMin) {
+                tryOpenDirectional(symbol, price, false, rsPutKey, "RS-DIVERGENCE",
+                        expiry, T, K, sigma, 0.05, 5, signalStr, featureCsv);
+            }
+        }
+
+        // Re-read opts in case RS opened
+        opts = account.getOptionsPositions();
+        hasDirectional = opts.containsKey(callKey)          || opts.containsKey(putKey)
+                      || opts.containsKey(highDeltaCallKey)  || opts.containsKey(highDeltaPutKey)
+                      || opts.containsKey(nearTermCallKey)   || opts.containsKey(nearTermPutKey)
+                      || opts.containsKey(breakoutCallKey)   || opts.containsKey(breakoutPutKey)
+                      || opts.containsKey(stochCallKey)      || opts.containsKey(stochPutKey)
+                      || opts.containsKey(rsCallKey)         || opts.containsKey(rsPutKey)
+                      || opts.containsKey(macdCallKey)       || opts.containsKey(macdPutKey);
+
+        // MACD_CROSSOVER: MACD line crosses its signal line with at least 1 confirming signal
+        if (!hasDirectional && !hasMultiLeg && isStrategyEnabled("MACD_CROSSOVER")) {
+            boolean macdBuy  = rawSignals.stream().anyMatch(
+                    s -> "MACD".equals(s.getIndicatorName()) && s.getDirection() == com.tradingapp.engine.SignalResult.Direction.BUY);
+            boolean macdSell = rawSignals.stream().anyMatch(
+                    s -> "MACD".equals(s.getIndicatorName()) && s.getDirection() == com.tradingapp.engine.SignalResult.Direction.SELL);
+            LocalDate macdExpiry = bsEngine.selectNearTermExpiry();
+            double macdT = bsEngine.timeToExpiry(macdExpiry);
+            if (macdT <= 0) macdT = 7.0 / 365.0;
+            if (macdBuy && buySignals >= 1 && callsAllowed && !inDowntrend) {
+                tryOpenDirectional(symbol, price, true, macdCallKey, "MACD-CROSSOVER",
+                        macdExpiry, macdT, K, sigma, 0.05, 5, signalStr, featureCsv);
+            } else if (macdSell && sellSignals >= 1 && putsAllowed && sellSignals >= putMin) {
+                tryOpenDirectional(symbol, price, false, macdPutKey, "MACD-CROSSOVER",
+                        macdExpiry, macdT, K, sigma, 0.05, 5, signalStr, featureCsv);
+            }
+        }
     }
 
     // ── Pre-close force-exit ──────────────────────────────────────────────────
 
     private void forceCloseAllForSymbol(String symbol, double stockPrice) {
         String[] keys = {
-            symbol + "_CALL",          symbol + "_PUT",
-            symbol + "_HIGHDELTA_CALL", symbol + "_HIGHDELTA_PUT",
-            symbol + "_NEARTERM_CALL",  symbol + "_NEARTERM_PUT",
-            symbol + "_ZEROTE_CALL",    symbol + "_ZEROTE_PUT"
+            symbol + "_CALL",            symbol + "_PUT",
+            symbol + "_HIGHDELTA_CALL",  symbol + "_HIGHDELTA_PUT",
+            symbol + "_NEARTERM_CALL",   symbol + "_NEARTERM_PUT",
+            symbol + "_ZEROTE_CALL",     symbol + "_ZEROTE_PUT",
+            symbol + "_BREAKOUT_CALL",   symbol + "_BREAKOUT_PUT",
+            symbol + "_STOCH_CALL",      symbol + "_STOCH_PUT",
+            symbol + "_RS_CALL",         symbol + "_RS_PUT",
+            symbol + "_MACD_CALL",       symbol + "_MACD_PUT"
         };
         LocalDate virtualDate = clock.get().toLocalDate();
         for (String key : keys) {
@@ -757,6 +910,43 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         GreeksResult pg = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, false);
         researchCallback.accept(String.format("%s ZERO-DTE K=%.0f x%d combined=%.2f | call: %s | put: %s",
                 symbol, K, contracts, combinedPremium, cg, pg));
+    }
+
+    // ── Generic directional entry (used by new strategies) ───────────────────
+
+    private void tryOpenDirectional(String symbol, double price, boolean isCall,
+                                    String posKey, String labelName,
+                                    LocalDate expiry, double T, double K, double sigma,
+                                    double budgetFrac, int maxContracts,
+                                    String signalStr, String featureCsv) {
+        if (sessionStopLossed.contains(posKey)) {
+            researchCallback.accept(symbol + " " + labelName + " skip: stop-loss cooldown");
+            return;
+        }
+        ZonedDateTime epoch = ZonedDateTime.of(2000, 1, 1, 0, 0, 0, 0, ET);
+        if (Duration.between(lastDirectionalCloseTime.getOrDefault(posKey, epoch),
+                clock.get()).toMinutes() < cooldownMinutes) {
+            researchCallback.accept(symbol + " " + labelName + " skip: re-entry cooldown");
+            return;
+        }
+        if (!isCall && uptrendSupplier != null && uptrendSupplier.getAsBoolean()) {
+            researchCallback.accept(symbol + " " + labelName + " PUT skip: SPY uptrend");
+            return;
+        }
+        double premium = resolvePremium(symbol, K, expiry, isCall, T, sigma, price);
+        if (premium < MIN_PREMIUM) {
+            researchCallback.accept(symbol + " " + labelName + " skip: premium too low");
+            return;
+        }
+        int contracts = Math.min(maxContracts, (int) (account.getBalance() * budgetFrac / (premium * 100)));
+        if (contracts < 1) return;
+        if (isCall) optExec.buyCallAs(posKey, symbol, K, expiry, contracts, premium, signalStr, featureCsv);
+        else        optExec.buyPutAs (posKey, symbol, K, expiry, contracts, premium, signalStr, featureCsv);
+        if (!account.getOptionsPositions().containsKey(posKey)) return;
+        lastAnyCloseTime.put(symbol, clock.get());
+        GreeksResult g = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, isCall);
+        researchCallback.accept(String.format("%s %s %s K=%.0f exp=%s x%d prem=%.2f | %s",
+                symbol, labelName, isCall ? "CALL" : "PUT", K, expiry, contracts, premium, g));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

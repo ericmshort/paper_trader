@@ -293,7 +293,67 @@ public class IndicatorEngine {
         results.add(computeVwap(oneMinBars, currentPrice));
         results.add(computeOrb(fiveMinBars, currentPrice));
         results.add(computeCandlestickPatterns(fiveMinBars));
+        results.add(computeStochastic(fiveMinBars));
+        results.add(computeMACD(prices));
         return results;
+    }
+
+    // ── Stochastic Oscillator (%K, 14-period) ─────────────────────────────────
+    // Uses high/low range of last 14 five-min bars — different from RSI which
+    // only uses closes. %K < 15 → oversold (BUY); %K > 85 → overbought (SELL).
+
+    public SignalResult computeStochastic(List<CandleBar> fiveMinBars) {
+        int period = 14;
+        if (fiveMinBars.size() < period) return SignalResult.neutral("STOCHASTIC", 50);
+        List<CandleBar> window = fiveMinBars.subList(fiveMinBars.size() - period, fiveMinBars.size());
+        double highestHigh = window.stream().mapToDouble(CandleBar::getHigh).max().orElse(0);
+        double lowestLow   = window.stream().mapToDouble(CandleBar::getLow).min().orElse(0);
+        double lastClose   = fiveMinBars.get(fiveMinBars.size() - 1).getClose();
+        double range = highestHigh - lowestLow;
+        if (range == 0) return SignalResult.neutral("STOCHASTIC", 50);
+        double kPct = 100.0 * (lastClose - lowestLow) / range;
+        if (kPct <= 15) return SignalResult.buy("STOCHASTIC", kPct);
+        if (kPct >= 85) return SignalResult.sell("STOCHASTIC", kPct);
+        return SignalResult.neutral("STOCHASTIC", kPct);
+    }
+
+    // ── MACD (12/26/9) ────────────────────────────────────────────────────────
+    // Classic EMA-12 minus EMA-26, with 9-period signal line.
+    // BUY on bullish crossover (MACD crosses above signal); SELL on bearish.
+
+    public SignalResult computeMACD(List<Double> prices) {
+        if (prices.size() < 35) return SignalResult.neutral("MACD", 0);
+        double[] ema12 = buildEMAArray(prices, 12);
+        double[] ema26 = buildEMAArray(prices, 26);
+        // MACD line starts at index 25 (first valid EMA-26 value)
+        List<Double> macdLine = new ArrayList<>();
+        for (int i = 25; i < prices.size(); i++) {
+            macdLine.add(ema12[i] - ema26[i]);
+        }
+        if (macdLine.size() < 10) return SignalResult.neutral("MACD", 0);
+        double[] signalLine = buildEMAArray(macdLine, 9);
+        int n = macdLine.size();
+        double macdNow  = macdLine.get(n - 1);
+        double macdPrev = macdLine.get(n - 2);
+        double sigNow   = signalLine[n - 1];
+        double sigPrev  = signalLine[n - 2];
+        if (sigNow == 0 || sigPrev == 0) return SignalResult.neutral("MACD", macdNow);
+        if (macdPrev < sigPrev && macdNow >= sigNow) return SignalResult.buy("MACD", macdNow);
+        if (macdPrev > sigPrev && macdNow <= sigNow) return SignalResult.sell("MACD", macdNow);
+        return SignalResult.neutral("MACD", macdNow);
+    }
+
+    private double[] buildEMAArray(List<Double> values, int period) {
+        double[] ema = new double[values.size()];
+        if (values.size() < period) return ema;
+        double sum = 0;
+        for (int i = 0; i < period; i++) sum += values.get(i);
+        ema[period - 1] = sum / period;
+        double multiplier = 2.0 / (period + 1);
+        for (int i = period; i < values.size(); i++) {
+            ema[i] = (values.get(i) - ema[i - 1]) * multiplier + ema[i - 1];
+        }
+        return ema;
     }
 
     public int countBuySignals(List<SignalResult> signals) {
