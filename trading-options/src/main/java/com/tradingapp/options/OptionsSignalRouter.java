@@ -95,6 +95,9 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     // When true, all open positions for a symbol are closed immediately when the daily loss limit fires.
     // Intended for backtest use only — live trading leaves this false.
     private boolean closePositionsOnHalt      = false;
+    // Tracks the date on which we've already issued the broker-side EOD close-all, so we
+    // don't repeat the Alpaca call on every subsequent price tick after pre-close time.
+    private LocalDate brokerCloseAllDate      = null;
     // When set, called at the start of each day to update the options allowlist dynamically.
     private java.util.function.Function<java.time.LocalDate, Set<String>> dailyAllowlistProvider = null;
 
@@ -251,10 +254,21 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                                     List<com.tradingapp.engine.SignalResult> rawSignals) {
         resetIfNewDay();
 
-        // ── Pre-close: force-close all open options for this symbol ───────────
+        // ── Pre-close: force-close all open options ───────────────────────────
         LocalTime time = clock.get().toLocalTime();
         if (avoidOvernightHolds && !time.isBefore(effectiveForceCloseTime)) {
-            forceCloseAllForSymbol(symbol, price);
+            LocalDate today = clock.get().toLocalDate();
+            if (today.equals(brokerCloseAllDate)) {
+                return; // broker close-all already issued today
+            }
+            if (optExec.closeAllFromBroker()) {
+                // Live broker: fetch Alpaca positions and DELETE each OCC symbol once per day
+                brokerCloseAllDate = today;
+                researchCallback.accept("EOD: issued close-all to broker for all open options positions");
+            } else {
+                // Paper trading: close this symbol's positions using local state + BS pricing
+                forceCloseAllForSymbol(symbol, price);
+            }
             return;
         }
 

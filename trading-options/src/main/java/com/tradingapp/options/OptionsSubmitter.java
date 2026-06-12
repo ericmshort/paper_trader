@@ -52,4 +52,13 @@ public interface OptionsSubmitter {
     default String sellStock(String symbol, int shares) {
         return null;
     }
+
+    /**
+     * Close every open options position held at the broker by fetching the live position list
+     * and issuing a DELETE for each OCC symbol. Returns true if the broker was contacted
+     * (regardless of individual close outcomes), false if not supported (paper trading).
+     */
+    default boolean closeAllOptionsPositions() {
+        return false;
+    }
 }

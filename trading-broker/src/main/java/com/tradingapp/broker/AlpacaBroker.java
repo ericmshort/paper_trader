@@ -729,6 +729,31 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
         return config.getBrokerType() == AppConfig.BrokerType.ALPACA_LIVE ? "Alpaca Live" : "Alpaca Paper";
     }
 
+    @Override
+    public boolean closeAllOptionsPositions() {
+        try {
+            JSONArray positions = getJsonArray("/positions");
+            if (positions == null) return true;
+            for (int i = 0; i < positions.length(); i++) {
+                String symbol = positions.getJSONObject(i).optString("symbol");
+                if (!isOccSymbol(symbol)) continue;
+                LOG.info("EOD force-close: " + symbol);
+                try {
+                    HttpResponse<String> resp = deletePosition(symbol);
+                    if (resp.statusCode() != 200 && resp.statusCode() != 201) {
+                        LOG.warning("EOD close failed for " + symbol + " (" + resp.statusCode() + "): " + resp.body());
+                    }
+                } catch (Exception e) {
+                    LOG.warning("EOD close error for " + symbol + ": " + e.getMessage());
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            LOG.warning("EOD close-all failed: " + e.getMessage());
+            return false;
+        }
+    }
+
     private void tryInsertLog(TransactionRecord r) {
         if (log == null) return;
         try {
