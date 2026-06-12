@@ -571,6 +571,12 @@ public class DashboardController implements Initializable {
     }
 
     private double computeOptionCurrentPremium(OptionsPosition pos) {
+        // Prefer the Alpaca-reported market price (set during broker sync) over Black-Scholes.
+        // This eliminates the historical-vol vs implied-vol gap that causes portfolio overvaluation.
+        double marketPrice = pos.getCurrentMarketPrice();
+        if (marketPrice > 0) return marketPrice;
+
+        // Fall back to Black-Scholes for paper trading or before the first sync tick.
         // Use the most recent intraday tick for the spot price, falling back to daily
         List<Double> intradayPrices = priceHistory.getPrices(pos.getSymbol());
         List<Double> dailyPrices    = priceHistory.getDailyPrices(pos.getSymbol());
@@ -674,7 +680,10 @@ public class DashboardController implements Initializable {
         double winRate    = total > 0 ? (wins * 100.0 / total) : 0.0;
         double realizedPnl = closedTrades.stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
 
-        double totalPortfolio = Account.STARTING_BALANCE + realizedPnl + optTotalUnrealized + stkTotalUnrealized;
+        // Use actual broker cash as the base rather than reconstructing from STARTING_BALANCE +
+        // realizedPnl — the reconstruction drifts when syncOrderHistory() corrects fill prices
+        // in the log after the balance has already been set by syncAccount().
+        double totalPortfolio = availableCash + stockHoldings + optionHoldings;
 
         return new UiSnapshot(history, availableCash, stockHoldings, optionHoldings, totalPortfolio,
                 optionsCashDeployed, optionRows, optTotalUnrealized, stockRows, stkTotalUnrealized,
@@ -718,7 +727,7 @@ public class DashboardController implements Initializable {
         double optionHoldings = computeOptionHoldings();
         double unrealizedPnl = computeStockUnrealizedPnL() + computeOptionsUnrealizedPnL();
         double realizedPnl = computeClosedTrades().stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
-        double totalPortfolio = Account.STARTING_BALANCE + realizedPnl + unrealizedPnl;
+        double totalPortfolio = availableCash + stockHoldings + optionHoldings;
 
         totalPortfolioLabel.setText(String.format("Total Portfolio: $%,.2f", totalPortfolio));
         stockHoldingsLabel.setText(String.format("Stocks: $%,.2f", stockHoldings));

@@ -433,8 +433,9 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                             // positions that appeared in Alpaca but weren't locally tracked.
                             com.tradingapp.account.OptionsPosition existing = posByFingerprint.get(fp);
                             if (existingKey != null && existing != null) {
-                                // Matched: update broker OCC symbol and re-verify
+                                // Matched: update broker OCC symbol, market price, and re-verify
                                 existing.setBrokerOccSymbol(symbol);
+                                if (currentPrice > 0) existing.setCurrentMarketPrice(currentPrice);
                                 account.addOptionsPosition(existingKey, existing);
                                 account.markOptionVerified(existingKey);
                             } else {
@@ -445,6 +446,7 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                                                 occ.underlying, occ.type, occ.strike, occ.expiry, signedQty, avgCost);
                                 // Pin the exact Alpaca OCC symbol so close orders bypass re-lookup.
                                 optPos.setBrokerOccSymbol(symbol);
+                                if (currentPrice > 0) optPos.setCurrentMarketPrice(currentPrice);
                                 newBrokerOptions.add(new Object[]{occ, optPos});
                             }
                         }
