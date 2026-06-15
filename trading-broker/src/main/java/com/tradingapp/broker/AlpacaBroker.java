@@ -327,8 +327,12 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
             String type = optionType.equalsIgnoreCase("CALL") ? "call" : "put";
             LocalDate expiryFrom = targetExpiry.minusDays(14);
             LocalDate expiryTo   = targetExpiry.plusDays(14);
-            double strikeFrom = targetStrike * 0.85;
-            double strikeTo   = targetStrike * 1.15;
+
+            // Tight ±3% range first. For densely-listed underlyings (e.g. SPY at $1 intervals)
+            // the old ±15% window returned 200+ contracts but limit=50 cut it off before
+            // reaching the target strike, causing a far-off contract to win the distance sort.
+            double tightFrom = targetStrike * 0.97;
+            double tightTo   = targetStrike * 1.03;
 
             String path = "/options/contracts"
                     + "?underlying_symbols=" + symbol
@@ -336,14 +340,30 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                     + "&status=active"
                     + "&expiration_date_gte=" + expiryFrom
                     + "&expiration_date_lte=" + expiryTo
-                    + "&strike_price_gte=" + String.format("%.2f", strikeFrom)
-                    + "&strike_price_lte=" + String.format("%.2f", strikeTo)
+                    + "&strike_price_gte=" + String.format("%.2f", tightFrom)
+                    + "&strike_price_lte=" + String.format("%.2f", tightTo)
                     + "&limit=50";
 
             JSONObject resp = getJson(path);
             JSONArray contracts = resp != null ? resp.optJSONArray("option_contracts") : null;
             if (contracts == null || contracts.length() == 0) {
-                // Widen to full strike range in case price has moved significantly
+                // Widen to ±15% — covers cases where the underlying moved significantly
+                // between signal generation and order submission.
+                double wideFrom = targetStrike * 0.85;
+                double wideTo   = targetStrike * 1.15;
+                path = "/options/contracts"
+                        + "?underlying_symbols=" + symbol
+                        + "&type=" + type + "&status=active"
+                        + "&expiration_date_gte=" + expiryFrom
+                        + "&expiration_date_lte=" + expiryTo
+                        + "&strike_price_gte=" + String.format("%.2f", wideFrom)
+                        + "&strike_price_lte=" + String.format("%.2f", wideTo)
+                        + "&limit=50";
+                resp = getJson(path);
+                contracts = resp != null ? resp.optJSONArray("option_contracts") : null;
+            }
+            if (contracts == null || contracts.length() == 0) {
+                // Final fallback: no strike filter
                 path = "/options/contracts?underlying_symbols=" + symbol
                         + "&type=" + type + "&status=active"
                         + "&expiration_date_gte=" + expiryFrom
@@ -359,6 +379,7 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
             // near-expiry contract (e.g. same-day expiry) over the intended one when
             // multiple expirations share the same strike in the ±14-day search window.
             String bestSymbol = null;
+            double bestStrike = Double.MAX_VALUE;
             double bestStrikeDist = Double.MAX_VALUE;
             long bestExpiryDist = Long.MAX_VALUE;
             for (int i = 0; i < contracts.length(); i++) {
@@ -374,9 +395,26 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                         || (strikeDist == bestStrikeDist && expiryDist < bestExpiryDist)) {
                     bestStrikeDist = strikeDist;
                     bestExpiryDist = expiryDist;
+                    bestStrike = k;
                     bestSymbol = c.optString("symbol");
                 }
             }
+
+            // Reject if the closest contract is still more than 5% away from the target.
+            // A mismatch this large means the local position's recorded strike diverges from
+            // Alpaca's actual fill, causing broker-sync fingerprint mismatches that remove
+            // the local position and trigger false daily-loss-limit halts.
+            double maxAcceptableDist = targetStrike * 0.05;
+            if (bestStrikeDist > maxAcceptableDist) {
+                LOG.warning(String.format(
+                        "lookupBestContract: best strike %.2f is %.2f away from target %.2f (>5%%) — rejecting to avoid fingerprint mismatch [%s %s exp=%s]",
+                        bestStrike, bestStrikeDist, targetStrike, symbol, optionType, targetExpiry));
+                return null;
+            }
+
+            LOG.info(String.format(
+                    "lookupBestContract: selected %s (K=%.2f, exp+%dd) for target K=%.2f exp=%s",
+                    bestSymbol, bestStrike, bestExpiryDist, targetStrike, targetExpiry));
             return bestSymbol;
         } catch (Exception e) {
             LOG.warning("lookupBestContract failed: " + e.getMessage());
