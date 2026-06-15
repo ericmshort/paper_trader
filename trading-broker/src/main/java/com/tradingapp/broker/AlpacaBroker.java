@@ -450,6 +450,9 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                 account.setBuyingPower(bp);
                 double lastEquity = alpacaAccount.optDouble("last_equity", 0.0);
                 if (lastEquity > 0) account.setLastEquity(lastEquity);
+                double portfolioValue = alpacaAccount.optDouble("portfolio_value",
+                        alpacaAccount.optDouble("equity", -1.0));
+                if (portfolioValue > 0) account.setBrokerPortfolioValue(portfolioValue);
             }
 
             JSONArray positions = getJsonArray("/positions");
@@ -503,7 +506,7 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                             if (existingKey != null && existing != null) {
                                 // Matched: update broker OCC symbol, market price, and re-verify
                                 existing.setBrokerOccSymbol(symbol);
-                                if (currentPrice > 0) existing.setCurrentMarketPrice(currentPrice);
+                                existing.setCurrentMarketPrice(currentPrice);
                                 account.addOptionsPosition(existingKey, existing);
                                 account.markOptionVerified(existingKey);
                             } else {
@@ -514,7 +517,7 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                                                 occ.underlying, occ.type, occ.strike, occ.expiry, signedQty, avgCost);
                                 // Pin the exact Alpaca OCC symbol so close orders bypass re-lookup.
                                 optPos.setBrokerOccSymbol(symbol);
-                                if (currentPrice > 0) optPos.setCurrentMarketPrice(currentPrice);
+                                optPos.setCurrentMarketPrice(currentPrice);
                                 newBrokerOptions.add(new Object[]{occ, optPos});
                             }
                         }

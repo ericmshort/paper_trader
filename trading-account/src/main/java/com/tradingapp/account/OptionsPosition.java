@@ -14,8 +14,8 @@ public class OptionsPosition {
     // Set during broker sync to the exact OCC symbol held in the account.
     // Used for close orders to skip re-lookup and avoid position_intent mismatch.
     private volatile String brokerOccSymbol;
-    // Set during broker sync from Alpaca's current_price field. 0.0 = not yet set.
-    private volatile double currentMarketPrice;
+    // Set during broker sync from Alpaca's current_price field. -1.0 = not yet set.
+    private volatile double currentMarketPrice = -1.0;
 
     public OptionsPosition(String symbol, String type, double strike, LocalDate expiry, int contracts, double premiumPaid) {
         this.symbol = symbol;

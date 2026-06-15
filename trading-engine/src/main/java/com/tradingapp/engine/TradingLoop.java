@@ -274,7 +274,7 @@ public class TradingLoop implements Runnable {
                         optionsValue = account.getOptionsPositions().values().stream()
                                 .mapToDouble(p -> {
                                     double mktPrice = p.getCurrentMarketPrice();
-                                    double prem = (mktPrice > 0) ? mktPrice
+                                    double prem = (mktPrice >= 0) ? mktPrice
                                             : (p.getContracts() > 0 ? p.getPremiumPaid() : 0.0);
                                     return prem * 100 * p.getContracts();
                                 })

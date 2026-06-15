@@ -569,9 +569,7 @@ public class DashboardController implements Initializable {
     private double computeStockHoldings() {
         double total = 0.0;
         for (var entry : account.getPositions().entrySet()) {
-            List<Double> prices = priceHistory.getPrices(entry.getKey());
-            double price = prices.isEmpty() ? entry.getValue().getAverageCost() : prices.get(prices.size() - 1);
-            total += entry.getValue().getQuantity() * price;
+            total += entry.getValue().getMarketValue();
         }
         return total;
     }
@@ -579,8 +577,10 @@ public class DashboardController implements Initializable {
     private double computeOptionCurrentPremium(OptionsPosition pos) {
         // Prefer the Alpaca-reported market price (set during broker sync) over Black-Scholes.
         // This eliminates the historical-vol vs implied-vol gap that causes portfolio overvaluation.
+        // -1.0 means Alpaca has never reported a price for this position; use Black-Scholes as a fallback.
+        // 0.0 means Alpaca explicitly returned no quote — honour it rather than overvaluing with BS.
         double marketPrice = pos.getCurrentMarketPrice();
-        if (marketPrice > 0) return marketPrice;
+        if (marketPrice >= 0) return marketPrice;
 
         // Fall back to Black-Scholes for paper trading or before the first sync tick.
         // Use the most recent intraday tick for the spot price, falling back to daily
@@ -686,10 +686,11 @@ public class DashboardController implements Initializable {
         double winRate    = total > 0 ? (wins * 100.0 / total) : 0.0;
         double realizedPnl = closedTrades.stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
 
-        // Use actual broker cash as the base rather than reconstructing from STARTING_BALANCE +
-        // realizedPnl — the reconstruction drifts when syncOrderHistory() corrects fill prices
-        // in the log after the balance has already been set by syncAccount().
-        double totalPortfolio = availableCash + stockHoldings + optionHoldings;
+        // Prefer Alpaca's own portfolio_value from /account — it's the authoritative number
+        // that matches their UI display and eliminates local pricing discrepancies.
+        // Fall back to local computation before the first sync tick completes.
+        double brokerPv = account.getBrokerPortfolioValue();
+        double totalPortfolio = brokerPv > 0 ? brokerPv : availableCash + stockHoldings + optionHoldings;
 
         return new UiSnapshot(history, availableCash, stockHoldings, optionHoldings, totalPortfolio,
                 optionsCashDeployed, optionRows, optTotalUnrealized, stockRows, stkTotalUnrealized,
@@ -733,7 +734,8 @@ public class DashboardController implements Initializable {
         double optionHoldings = computeOptionHoldings();
         double unrealizedPnl = computeStockUnrealizedPnL() + computeOptionsUnrealizedPnL();
         double realizedPnl = computeClosedTrades().stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
-        double totalPortfolio = availableCash + stockHoldings + optionHoldings;
+        double brokerPv = account.getBrokerPortfolioValue();
+        double totalPortfolio = brokerPv > 0 ? brokerPv : availableCash + stockHoldings + optionHoldings;
 
         totalPortfolioLabel.setText(String.format("Total Portfolio: $%,.2f", totalPortfolio));
         stockHoldingsLabel.setText(String.format("Stocks: $%,.2f", stockHoldings));
