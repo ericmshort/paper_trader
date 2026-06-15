@@ -27,6 +27,7 @@
                     <excludes>
                         <exclude>**/AlpacaIntegrationTest.java</exclude>
                         <exclude>**/AlpacaOptionsIntegrationTest.java</exclude>
+                        <exclude>**/AlpacaStrategyIntegrationTest.java</exclude>
                     </excludes>
                 </configuration>
             </plugin>

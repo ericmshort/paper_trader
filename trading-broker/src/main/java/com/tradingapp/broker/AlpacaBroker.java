@@ -322,62 +322,48 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
      * whose strike is closest to {@code targetStrike} and whose expiry is within 14 days of
      * {@code targetExpiry}. Returns null if no contract is found.
      */
-    private String lookupBestContract(String symbol, String optionType, double targetStrike, LocalDate targetExpiry) {
+    String lookupBestContract(String symbol, String optionType, double targetStrike, LocalDate targetExpiry) {
         try {
             String type = optionType.equalsIgnoreCase("CALL") ? "call" : "put";
-            LocalDate expiryFrom = targetExpiry.minusDays(14);
-            LocalDate expiryTo   = targetExpiry.plusDays(14);
 
-            // Tight ±3% range first. For densely-listed underlyings (e.g. SPY at $1 intervals)
-            // the old ±15% window returned 200+ contracts but limit=50 cut it off before
-            // reaching the target strike, causing a far-off contract to win the distance sort.
+            // Query strategy: always start from the exact target expiry and widen outward.
+            // SPY has $1-wide strikes, so a ±14-day window returns 14+ expirations × ~45
+            // in-range strikes = 600+ contracts. With limit=50 the nearest expiry fills
+            // the result set entirely and the target expiry never appears.
+            // By fixing the expiry window first we ensure the 50-result page contains
+            // the contracts we actually want.
             double tightFrom = targetStrike * 0.97;
             double tightTo   = targetStrike * 1.03;
+            double wideFrom  = targetStrike * 0.85;
+            double wideTo    = targetStrike * 1.15;
 
-            String path = "/options/contracts"
-                    + "?underlying_symbols=" + symbol
-                    + "&type=" + type
-                    + "&status=active"
-                    + "&expiration_date_gte=" + expiryFrom
-                    + "&expiration_date_lte=" + expiryTo
-                    + "&strike_price_gte=" + String.format("%.2f", tightFrom)
-                    + "&strike_price_lte=" + String.format("%.2f", tightTo)
-                    + "&limit=50";
+            // Pass 1: exact expiry ± 2 days, tight strike (covers almost all cases)
+            JSONArray contracts = queryContracts(symbol, type,
+                    targetExpiry.minusDays(2), targetExpiry.plusDays(2),
+                    tightFrom, tightTo);
 
-            JSONObject resp = getJson(path);
-            JSONArray contracts = resp != null ? resp.optJSONArray("option_contracts") : null;
-            if (contracts == null || contracts.length() == 0) {
-                // Widen to ±15% — covers cases where the underlying moved significantly
-                // between signal generation and order submission.
-                double wideFrom = targetStrike * 0.85;
-                double wideTo   = targetStrike * 1.15;
-                path = "/options/contracts"
-                        + "?underlying_symbols=" + symbol
-                        + "&type=" + type + "&status=active"
-                        + "&expiration_date_gte=" + expiryFrom
-                        + "&expiration_date_lte=" + expiryTo
-                        + "&strike_price_gte=" + String.format("%.2f", wideFrom)
-                        + "&strike_price_lte=" + String.format("%.2f", wideTo)
-                        + "&limit=50";
-                resp = getJson(path);
-                contracts = resp != null ? resp.optJSONArray("option_contracts") : null;
-            }
-            if (contracts == null || contracts.length() == 0) {
-                // Final fallback: no strike filter
-                path = "/options/contracts?underlying_symbols=" + symbol
-                        + "&type=" + type + "&status=active"
-                        + "&expiration_date_gte=" + expiryFrom
-                        + "&expiration_date_lte=" + expiryTo
-                        + "&limit=50";
-                resp = getJson(path);
-                contracts = resp != null ? resp.optJSONArray("option_contracts") : null;
-            }
-            if (contracts == null || contracts.length() == 0) return null;
+            // Pass 2: exact expiry ± 7 days, tight strike (nearby weekly alternative)
+            if (empty(contracts))
+                contracts = queryContracts(symbol, type,
+                        targetExpiry.minusDays(7), targetExpiry.plusDays(7),
+                        tightFrom, tightTo);
+
+            // Pass 3: exact expiry ± 14 days, wide strike (price moved far from target)
+            if (empty(contracts))
+                contracts = queryContracts(symbol, type,
+                        targetExpiry.minusDays(14), targetExpiry.plusDays(14),
+                        wideFrom, wideTo);
+
+            // Pass 4: exact expiry ± 14 days, no strike filter (last resort)
+            if (empty(contracts))
+                contracts = queryContracts(symbol, type,
+                        targetExpiry.minusDays(14), targetExpiry.plusDays(14),
+                        Double.NaN, Double.NaN);
+
+            if (empty(contracts)) return null;
 
             // Pick the contract with the closest strike to targetStrike.
-            // Break ties by expiry closest to targetExpiry — prevents selecting a
-            // near-expiry contract (e.g. same-day expiry) over the intended one when
-            // multiple expirations share the same strike in the ±14-day search window.
+            // Break ties by expiry closest to targetExpiry.
             String bestSymbol = null;
             double bestStrike = Double.MAX_VALUE;
             double bestStrikeDist = Double.MAX_VALUE;
@@ -400,14 +386,14 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                 }
             }
 
-            // Reject if the closest contract is still more than 5% away from the target.
-            // A mismatch this large means the local position's recorded strike diverges from
-            // Alpaca's actual fill, causing broker-sync fingerprint mismatches that remove
-            // the local position and trigger false daily-loss-limit halts.
+            // Reject if the closest contract is still more than 5% away from target.
+            // A mismatch this large means the local position's recorded strike diverges
+            // from Alpaca's actual fill, causing broker-sync fingerprint mismatches that
+            // remove the local position and trigger false daily-loss-limit halts.
             double maxAcceptableDist = targetStrike * 0.05;
             if (bestStrikeDist > maxAcceptableDist) {
                 LOG.warning(String.format(
-                        "lookupBestContract: best strike %.2f is %.2f away from target %.2f (>5%%) — rejecting to avoid fingerprint mismatch [%s %s exp=%s]",
+                        "lookupBestContract: best strike %.2f is %.2f away from target %.2f (>5%%) — rejecting [%s %s exp=%s]",
                         bestStrike, bestStrikeDist, targetStrike, symbol, optionType, targetExpiry));
                 return null;
             }
@@ -420,6 +406,32 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
             LOG.warning("lookupBestContract failed: " + e.getMessage());
             return null;
         }
+    }
+
+    private JSONArray queryContracts(String symbol, String type,
+                                     LocalDate expiryFrom, LocalDate expiryTo,
+                                     double strikeFrom, double strikeTo) {
+        try {
+            String path = "/options/contracts"
+                    + "?underlying_symbols=" + symbol
+                    + "&type=" + type
+                    + "&status=active"
+                    + "&expiration_date_gte=" + expiryFrom
+                    + "&expiration_date_lte=" + expiryTo;
+            if (!Double.isNaN(strikeFrom)) {
+                path += "&strike_price_gte=" + String.format("%.2f", strikeFrom)
+                      + "&strike_price_lte=" + String.format("%.2f", strikeTo);
+            }
+            path += "&limit=50";
+            JSONObject resp = getJson(path);
+            return resp != null ? resp.optJSONArray("option_contracts") : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean empty(JSONArray arr) {
+        return arr == null || arr.length() == 0;
     }
 
     @Override
