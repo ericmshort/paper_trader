@@ -41,6 +41,10 @@ public class SettingsController implements Initializable {
     @FXML private CheckBox strategyLongCall;
     @FXML private CheckBox strategyLongPut;
     @FXML private CheckBox strategyZeroDte;
+    @FXML private CheckBox strategyOpeningBreakout;
+    @FXML private CheckBox strategyStochasticReversal;
+    @FXML private CheckBox strategyRelativeStrengthDivergence;
+    @FXML private CheckBox strategyMacdCrossover;
     @FXML private CheckBox avoidOvernightHoldsCheck;
     @FXML private CheckBox stockTradingDisabledCheck;
     @FXML private TextField optionsStopLossField;
@@ -107,6 +111,10 @@ public class SettingsController implements Initializable {
         strategyLongCall.setSelected(enabled.contains("LONG_CALL"));
         strategyLongPut.setSelected(enabled.contains("LONG_PUT"));
         strategyZeroDte.setSelected(enabled.contains("ZERO_DTE"));
+        strategyOpeningBreakout.setSelected(enabled.contains("OPENING_BREAKOUT"));
+        strategyStochasticReversal.setSelected(enabled.contains("STOCHASTIC_REVERSAL"));
+        strategyRelativeStrengthDivergence.setSelected(enabled.contains("RELATIVE_STRENGTH_DIVERGENCE"));
+        strategyMacdCrossover.setSelected(enabled.contains("MACD_CROSSOVER"));
         avoidOvernightHoldsCheck.setSelected(cfg.isAvoidOvernightHolds());
         stockTradingDisabledCheck.setSelected(!cfg.isStockTradingEnabled());
         optionsStopLossField.setText(String.valueOf((int) Math.round(cfg.getOptionsStopLossFrac() * 100)));
@@ -326,11 +334,15 @@ public class SettingsController implements Initializable {
             cfg.setEarningsBlackoutDays(Math.max(0, days));
         } catch (NumberFormatException ignored) {}
         Set<String> strategies = new LinkedHashSet<>();
-        if (strategyHighDeltaScalp.isSelected())   strategies.add("HIGH_DELTA_SCALP");
-        if (strategyMomentumNearTerm.isSelected())  strategies.add("MOMENTUM_NEAR_TERM");
-        if (strategyLongCall.isSelected())          strategies.add("LONG_CALL");
-        if (strategyLongPut.isSelected())           strategies.add("LONG_PUT");
-        if (strategyZeroDte.isSelected())           strategies.add("ZERO_DTE");
+        if (strategyHighDeltaScalp.isSelected())               strategies.add("HIGH_DELTA_SCALP");
+        if (strategyMomentumNearTerm.isSelected())              strategies.add("MOMENTUM_NEAR_TERM");
+        if (strategyLongCall.isSelected())                      strategies.add("LONG_CALL");
+        if (strategyLongPut.isSelected())                       strategies.add("LONG_PUT");
+        if (strategyZeroDte.isSelected())                       strategies.add("ZERO_DTE");
+        if (strategyOpeningBreakout.isSelected())               strategies.add("OPENING_BREAKOUT");
+        if (strategyStochasticReversal.isSelected())            strategies.add("STOCHASTIC_REVERSAL");
+        if (strategyRelativeStrengthDivergence.isSelected())    strategies.add("RELATIVE_STRENGTH_DIVERGENCE");
+        if (strategyMacdCrossover.isSelected())                 strategies.add("MACD_CROSSOVER");
         cfg.setEnabledStrategies(strategies);
         cfg.setStockTradingEnabled(!stockTradingDisabledCheck.isSelected());
         try {

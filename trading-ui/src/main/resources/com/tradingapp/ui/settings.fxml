@@ -149,6 +149,12 @@
         <CheckBox fx:id="strategyLongPut" text="Long Put" style="-fx-text-fill: #e0e0e0;"/>
         <CheckBox fx:id="strategyZeroDte" text="Zero-DTE (Fridays)" style="-fx-text-fill: #e0e0e0;"/>
     </HBox>
+    <HBox spacing="20" alignment="CENTER_LEFT">
+        <CheckBox fx:id="strategyOpeningBreakout" text="Opening Breakout" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyStochasticReversal" text="Stochastic Reversal" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyRelativeStrengthDivergence" text="Relative Strength Divergence" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyMacdCrossover" text="MACD Crossover" style="-fx-text-fill: #e0e0e0;"/>
+    </HBox>
 
     <Separator/>
 
