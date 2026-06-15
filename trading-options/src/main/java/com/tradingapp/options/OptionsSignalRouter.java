@@ -67,11 +67,14 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     // If set, no new options entries are opened before this time (e.g. skip first 30 min).
     private LocalTime entryStartTime = null;
 
+    private static final double TRAILING_STOP_FROM_PEAK = 0.25; // exit when premium drops 25% below its session high
+
     private final Set<String> sessionStopLossed = new HashSet<>();
     private final Map<String, ZonedDateTime> lastMultiLegCloseTime    = new HashMap<>();
     private final Map<String, ZonedDateTime> lastDirectionalCloseTime = new HashMap<>();
     private final Map<String, ZonedDateTime> lastAnyCloseTime         = new HashMap<>();
     private final Map<String, Integer> reversalConsecutive = new HashMap<>();
+    private final Map<String, Double>  peakPremium         = new HashMap<>();
 
     private LocalDate stopLossResetDate;
     private BooleanSupplier uptrendSupplier;
@@ -597,16 +600,17 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             if (pos == null) continue;
             boolean isCall = "CALL".equals(pos.getType());
             double T = bsEngine.timeToExpiry(pos.getExpiry());
-            double premium;
+            double bsPrice;
             if (sigma > 0 && T > 0) {
-                premium = isCall
+                bsPrice = isCall
                     ? bsEngine.callPrice(stockPrice, pos.getStrike(), RISK_FREE_RATE, T, sigma)
                     : bsEngine.putPrice(stockPrice, pos.getStrike(), RISK_FREE_RATE, T, sigma);
             } else {
-                premium = isCall
+                bsPrice = isCall
                     ? Math.max(0, stockPrice - pos.getStrike())
                     : Math.max(0, pos.getStrike() - stockPrice);
             }
+            double premium = resolveClosePremium(symbol, pos.getStrike(), pos.getExpiry(), isCall, bsPrice);
             optExec.closePosition(key, premium, "Pre-close: avoid overnight hold");
             lastAnyCloseTime.put(symbol, clock.get());
             researchCallback.accept(symbol + (isCall ? " CALL" : " PUT")
@@ -626,44 +630,52 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         double T     = bsEngine.timeToExpiry(pos.getExpiry());
         double sigma = computeVol(symbol);
         boolean canPrice = sigma > 0 && T > 0;
-        double currentPremium = canPrice
+        double bsPrice = canPrice
                 ? (isCall ? bsEngine.callPrice(price, pos.getStrike(), RISK_FREE_RATE, T, sigma)
                           : bsEngine.putPrice(price, pos.getStrike(), RISK_FREE_RATE, T, sigma))
                 : 0.0;
+        double currentPremium = resolveClosePremium(symbol, pos.getStrike(), pos.getExpiry(), isCall, bsPrice);
 
         // If sigma is unavailable but the option hasn't expired, skip evaluation —
         // a dry quote feed does not mean the position is worthless.
         if (!canPrice && T > 0) return;
 
-        boolean premiumStop      = canPrice && currentPremium <= pos.getPremiumPaid() * stopLossFrac;
-        boolean hitProfitTarget  = currentPremium >= pos.getPremiumPaid() * profitTarget;
-        boolean nearExpiry       = pos.daysToExpiry(virtualDate) < 3;
+        boolean premiumStop     = canPrice && currentPremium <= pos.getPremiumPaid() * stopLossFrac;
+        boolean hitProfitTarget = currentPremium >= pos.getPremiumPaid() * profitTarget;
+        boolean nearExpiry      = pos.daysToExpiry(virtualDate) < 3;
 
-        // Require 4+ opposing signals for 3 consecutive ticks before exiting on reversal —
-        // same entry-strength bar to trigger exit, prevents churn on intraday noise.
+        // Trailing stop: update session peak and exit if premium drops 25% below that peak.
+        double peak = peakPremium.merge(posKey, canPrice ? currentPremium : 0.0, Math::max);
+        boolean trailingStop = canPrice && peak > pos.getPremiumPaid()
+                && currentPremium < peak * (1 - TRAILING_STOP_FROM_PEAK);
+
+        // Require 3+ opposing signals for 2 consecutive ticks before exiting on reversal.
         int consecutive;
-        if (reversalSignals >= 4) {
+        if (reversalSignals >= 3) {
             consecutive = reversalConsecutive.merge(posKey, 1, Integer::sum);
         } else {
             reversalConsecutive.remove(posKey);
             consecutive = 0;
         }
-        boolean reversal = consecutive >= 3;
+        boolean reversal = consecutive >= 2;
 
         // Close as worthless only when the option has actually expired (T <= 0).
         boolean worthless = !canPrice && pos.getPremiumPaid() > 0;
 
-        if (!premiumStop && !hitProfitTarget && !reversal && !nearExpiry && !worthless) return;
+        if (!premiumStop && !trailingStop && !hitProfitTarget && !reversal && !nearExpiry && !worthless) return;
 
         reversalConsecutive.remove(posKey);
+        peakPremium.remove(posKey);
         String reason;
         if (nearExpiry)             reason = "Expiry <3 days";
         else if (hitProfitTarget)   reason = String.format("Profit target: %.2f >= %.1fx of %.2f",
                                             currentPremium, profitTarget, pos.getPremiumPaid());
-        else if (premiumStop)  reason = String.format("Premium stop-loss: %.2f <= %.0f%% of %.2f",
-                                        currentPremium, stopLossFrac * 100, pos.getPremiumPaid());
-        else if (worthless)    reason = "Premium collapsed to zero";
-        else                   reason = "Signal reversal (3 bars): " + (isCall ? "SELL" : "BUY");
+        else if (premiumStop)       reason = String.format("Premium stop-loss: %.2f <= %.0f%% of %.2f",
+                                            currentPremium, stopLossFrac * 100, pos.getPremiumPaid());
+        else if (trailingStop)      reason = String.format("Trailing stop: %.2f < 75%% of peak %.2f",
+                                            currentPremium, peak);
+        else if (worthless)         reason = "Premium collapsed to zero";
+        else                        reason = "Signal reversal (2 bars): " + (isCall ? "SELL" : "BUY");
 
         if (premiumStop || worthless) sessionStopLossed.add(posKey);
         lastDirectionalCloseTime.put(posKey, clock.get());
@@ -687,12 +699,14 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         double sigma = computeVol(symbol);
         double T = strategyName.equals("ZEROTE") ? 0.5 / 365.0 : bsEngine.timeToExpiry(callPos.getExpiry());
 
-        double callPrem = (sigma > 0 && T > 0)
+        double callBs = (sigma > 0 && T > 0)
                 ? bsEngine.callPrice(price, callPos.getStrike(), RISK_FREE_RATE, T, sigma)
                 : Math.max(0, price - callPos.getStrike());
-        double putPrem = (sigma > 0 && T > 0)
+        double putBs = (sigma > 0 && T > 0)
                 ? bsEngine.putPrice(price, putPos.getStrike(), RISK_FREE_RATE, T, sigma)
                 : Math.max(0, putPos.getStrike() - price);
+        double callPrem = resolveClosePremium(symbol, callPos.getStrike(), callPos.getExpiry(), true, callBs);
+        double putPrem  = resolveClosePremium(symbol, putPos.getStrike(),  putPos.getExpiry(),  false, putBs);
 
         double totalPaid    = callPos.getPremiumPaid() * 100 * callPos.getContracts()
                             + putPos.getPremiumPaid()  * 100 * putPos.getContracts();
@@ -996,6 +1010,17 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             return 0.0;
         }
         return quote.getAsk();
+    }
+
+    // Returns the current market bid for an existing position, falling back to Black-Scholes.
+    // Use this for close-decision pricing (we're selling, so bid is the relevant price).
+    private double resolveClosePremium(String symbol, double strike, LocalDate expiry,
+                                       boolean isCall, double bsFallback) {
+        if (dataClient == null) return bsFallback;
+        OptionsChain chain = dataClient.getOptionsChain(symbol, expiry);
+        OptionsQuote quote = isCall ? chain.getCall(strike) : chain.getPut(strike);
+        if (quote == null || !quote.isValid() || quote.getBid() <= 0) return bsFallback;
+        return quote.getBid();
     }
 
     private boolean isZeroDteDay() {
