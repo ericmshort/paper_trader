@@ -635,8 +635,6 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         // a dry quote feed does not mean the position is worthless.
         if (!canPrice && T > 0) return;
 
-        if (canPrice) pos.setCurrentMarketPrice(currentPremium);
-
         boolean premiumStop      = canPrice && currentPremium <= pos.getPremiumPaid() * stopLossFrac;
         boolean hitProfitTarget  = currentPremium >= pos.getPremiumPaid() * profitTarget;
         boolean nearExpiry       = pos.daysToExpiry(virtualDate) < 3;
