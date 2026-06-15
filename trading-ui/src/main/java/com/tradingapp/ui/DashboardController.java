@@ -39,6 +39,7 @@ import javafx.scene.control.*;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 
 import java.io.IOException;
@@ -456,6 +457,19 @@ public class DashboardController implements Initializable {
         optColCost.setCellValueFactory(new PropertyValueFactory<>("cost"));
         optColCurrentValue.setCellValueFactory(new PropertyValueFactory<>("currentValue"));
         optColPnl.setCellValueFactory(new PropertyValueFactory<>("pnl"));
+        optColPnl.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String value, boolean empty) {
+                super.updateItem(value, empty);
+                if (empty || value == null) {
+                    setText(null);
+                    setTextFill(Color.BLACK);
+                } else {
+                    setText(value);
+                    setTextFill(value.startsWith("-") ? Color.RED : Color.GREEN);
+                }
+            }
+        });
     }
 
     private void setupStockTableColumns() {
