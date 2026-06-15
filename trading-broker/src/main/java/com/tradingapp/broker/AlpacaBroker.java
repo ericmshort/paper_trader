@@ -17,6 +17,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -353,15 +354,26 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
             }
             if (contracts == null || contracts.length() == 0) return null;
 
-            // Pick the contract with the closest strike to targetStrike
+            // Pick the contract with the closest strike to targetStrike.
+            // Break ties by expiry closest to targetExpiry — prevents selecting a
+            // near-expiry contract (e.g. same-day expiry) over the intended one when
+            // multiple expirations share the same strike in the ±14-day search window.
             String bestSymbol = null;
-            double bestDist = Double.MAX_VALUE;
+            double bestStrikeDist = Double.MAX_VALUE;
+            long bestExpiryDist = Long.MAX_VALUE;
             for (int i = 0; i < contracts.length(); i++) {
                 JSONObject c = contracts.getJSONObject(i);
                 double k = c.optDouble("strike_price", Double.MAX_VALUE);
-                double dist = Math.abs(k - targetStrike);
-                if (dist < bestDist) {
-                    bestDist = dist;
+                double strikeDist = Math.abs(k - targetStrike);
+                long expiryDist = Long.MAX_VALUE;
+                try {
+                    expiryDist = Math.abs(ChronoUnit.DAYS.between(
+                            LocalDate.parse(c.optString("expiration_date")), targetExpiry));
+                } catch (Exception ignored) {}
+                if (strikeDist < bestStrikeDist
+                        || (strikeDist == bestStrikeDist && expiryDist < bestExpiryDist)) {
+                    bestStrikeDist = strikeDist;
+                    bestExpiryDist = expiryDist;
                     bestSymbol = c.optString("symbol");
                 }
             }
