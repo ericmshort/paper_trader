@@ -299,6 +299,7 @@ public class DashboardController implements Initializable {
         optionsRouter.setEnabledStrategies(appConfig.getEnabledStrategies());
         optionsRouter.setDowntrendPutMinSignals(appConfig.getDowntrendPutMinSignals());
         optionsRouter.setReversalMinSignals(appConfig.getReversalMinSignals());
+        optionsRouter.setProfitTarget(appConfig.getProfitTarget());
         tradingLoop.setAvoidOvernightHolds(appConfig.isAvoidOvernightHolds());
         tradingLoop.setMarketRegimeFilterEnabled(appConfig.isMarketRegimeFilterEnabled());
         tradingLoop.setEarningsCalendar(earningsCalendar);

@@ -130,9 +130,15 @@ public class IntradayBacktestRunner {
 
         double defaultLossLimitPct = cfg.getDailyLossLimitPct();
         record RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies,
-                      double dailyLossLimitPct, int reversalMinSignals, int reversalMinConsecutive) {
+                      double dailyLossLimitPct, int reversalMinSignals, int reversalMinConsecutive, double profitTarget) {
+            // reversal-compare: explicit reversal settings, default profit target
+            RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies,
+                   double dailyLossLimitPct, int reversalMinSignals, int reversalMinConsecutive) {
+                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, reversalMinSignals, reversalMinConsecutive, 2.5);
+            }
+            // most modes: optimal reversal settings + default profit target
             RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies, double dailyLossLimitPct) {
-                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, 5, 2);
+                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, 5, 2, 2.5);
             }
         }
 
@@ -189,6 +195,27 @@ public class IntradayBacktestRunner {
                 runs.add(new RunCfg(label, baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(),
                         defaultLossLimitPct, rc.minSig(), rc.minCons()));
             }
+        } else if ("profit-target-compare".equals(mode)) {
+            // Test profit target sensitivity: vary the multiple at which we close a winner.
+            // Current default is 2.0x (100% gain). Lower values fire more often; higher values let winners run.
+            double currentPt = cfg.getProfitTarget();
+            for (double pt : new double[]{1.25, 1.50, 1.75, 2.00, 2.50}) {
+                String label = String.format("%-40s", String.format("profit target %.2fx (current: %.2fx)", pt, currentPt));
+                runs.add(new RunCfg(label, baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(),
+                        defaultLossLimitPct, 5, 2, pt));
+            }
+            runs.add(new RunCfg(String.format("%-40s", "profit target DISABLED            "),
+                    baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct, 5, 2, 99.0));
+        } else if ("profit-target-high".equals(mode)) {
+            // Continuation of profit-target-compare for the high-value cases (run separately to avoid OOM).
+            double currentPt = cfg.getProfitTarget();
+            for (double pt : new double[]{2.50}) {
+                String label = String.format("%-40s", String.format("profit target %.2fx (current: %.2fx)", pt, currentPt));
+                runs.add(new RunCfg(label, baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(),
+                        defaultLossLimitPct, 5, 2, pt));
+            }
+            runs.add(new RunCfg(String.format("%-40s", "profit target DISABLED            "),
+                    baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct, 5, 2, 99.0));
         } else if ("today-compare".equals(mode)) {
             runs.add(new RunCfg("TODAY " + endDate + ": current config", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct));
         } else if (newCandidates.isEmpty()) {
@@ -231,6 +258,7 @@ public class IntradayBacktestRunner {
             router.setDowntrendPutMinSignals(cfg.getDowntrendPutMinSignals());
             router.setReversalMinSignals(cfg2.reversalMinSignals());
             router.setReversalMinConsecutive(cfg2.reversalMinConsecutive());
+            router.setProfitTarget(cfg2.profitTarget());
 
             long t0 = System.currentTimeMillis();
             IntradayBacktestResult r = engine.run(cfg2.watchlist(), barsBySymbol, 100_000.0, router, msg -> {},
@@ -277,6 +305,19 @@ public class IntradayBacktestRunner {
 
         if ("reversal-compare".equals(mode)) {
             System.out.printf("%n%-42s  %8s  %8s  %7s  %7s%n", "Reversal Config", "Return", "MaxDD", "Trades", "WinRate");
+            System.out.println("-".repeat(85));
+            for (RunSummary s : summaries) {
+                double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
+                System.out.printf("%-42s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
+                        s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
+            }
+            appendHistorySummaries(cfg, summaries, startDate, endDate);
+            System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
+            return;
+        }
+
+        if ("profit-target-compare".equals(mode) || "profit-target-high".equals(mode)) {
+            System.out.printf("%n%-42s  %8s  %8s  %7s  %7s%n", "Profit Target Config", "Return", "MaxDD", "Trades", "WinRate");
             System.out.println("-".repeat(85));
             for (RunSummary s : summaries) {
                 double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
