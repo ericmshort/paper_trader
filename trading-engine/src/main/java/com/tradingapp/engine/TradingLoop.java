@@ -452,7 +452,7 @@ public class TradingLoop implements Runnable {
                 prevOrbBuy.put(symbol, signals.stream().anyMatch(
                         s -> "ORB".equals(s.getIndicatorName())
                                 && s.getDirection() == SignalResult.Direction.BUY));
-                if (optionsEvaluator != null) {
+                if (optionsEvaluator != null && !account.isDailyLossHalted()) {
                     optionsEvaluator.evaluateWithSignals(symbol, price, buys, sells, signalStr, featureCsv, signals);
                 }
                 researchCallback.accept(time + " | " + symbol + " $" + String.format("%.2f", price)
