@@ -191,6 +191,36 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
         }
     }
 
+    /** Fetches the mid price (bid+ask)/2 for an OCC symbol; returns 0 if unavailable. */
+    private double fetchMidPrice(String occSymbol) {
+        try {
+            String url = config.getAlpacaDataUrl()
+                    + "/v1beta1/options/snapshots/" + java.net.URLEncoder.encode(occSymbol, java.nio.charset.StandardCharsets.UTF_8)
+                    + "?feed=indicative";
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("APCA-API-KEY-ID", config.getAlpacaApiKey())
+                    .header("APCA-API-SECRET-KEY", config.getAlpacaApiSecret())
+                    .GET()
+                    .timeout(Duration.ofSeconds(10))
+                    .build();
+            HttpResponse<String> resp = http.send(request, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) return 0;
+            JSONObject body = new JSONObject(resp.body());
+            JSONObject snapshots = body.optJSONObject("snapshots");
+            if (snapshots == null || !snapshots.has(occSymbol)) return 0;
+            JSONObject quote = snapshots.getJSONObject(occSymbol).optJSONObject("latestQuote");
+            if (quote == null) return 0;
+            double bid = quote.optDouble("bp", 0.0);
+            double ask = quote.optDouble("ap", 0.0);
+            if (bid > 0 && ask > 0) return (bid + ask) / 2.0;
+            return Math.max(bid, ask);
+        } catch (Exception e) {
+            LOG.warning("Could not fetch mid price for " + occSymbol + ": " + e.getMessage());
+            return 0;
+        }
+    }
+
     /** Fetches the current bid (for sells) or ask (for buys) for an OCC symbol from the snapshot API. */
     private double fetchLimitPriceForClose(String occSymbol, String side) {
         try {
@@ -297,8 +327,21 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                     .put("symbol", occSymbol)
                     .put("qty", contracts)
                     .put("side", side)
-                    .put("type", "market")
                     .put("time_in_force", "day");
+            // Use limit orders on entry buys to avoid overpaying on the ask.
+            // Closes still use DELETE /positions which routes as market.
+            if ("buy".equals(side)) {
+                double mid = fetchMidPrice(occSymbol);
+                if (mid > 0) {
+                    body.put("type", "limit").put("limit_price", String.format("%.2f", mid));
+                    LOG.info("Alpaca options buy limit: " + occSymbol + " mid=" + String.format("%.2f", mid));
+                } else {
+                    body.put("type", "market");
+                    LOG.info("Alpaca options buy market (no mid quote): " + occSymbol);
+                }
+            } else {
+                body.put("type", "market");
+            }
             if (positionIntent != null) {
                 body.put("position_intent", positionIntent);
             }

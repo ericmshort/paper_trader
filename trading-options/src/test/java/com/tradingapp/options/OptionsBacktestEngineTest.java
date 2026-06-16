@@ -62,7 +62,10 @@ public class OptionsBacktestEngineTest {
         LocalDate expiry = LocalDate.now().plusDays(35);
         var pos = engine.buildPosition(OptionsStrategy.LONG_CALL, SYM, PRICE, K, expiry, T, SIGMA, 100_000);
         assertNotNull(pos);
-        double expected = bs.callPrice(PRICE, K, OptionsBacktestEngine.RISK_FREE_RATE, T, SIGMA) * 100 * pos.contracts;
+        double theoreticalPrem = bs.callPrice(PRICE, K, OptionsBacktestEngine.RISK_FREE_RATE, T, SIGMA);
+        double slippedPrem = theoreticalPrem * (1 + OptionsBacktestEngine.SLIPPAGE_IV_PREMIUM)
+                + OptionsBacktestEngine.SLIPPAGE_HALF_SPREAD;
+        double expected = slippedPrem * 100 * pos.contracts;
         assertEquals(expected, pos.totalCostBasis, 0.01);
         assertEquals(1, pos.legs.size());
         assertTrue(pos.legs.get(0).isCall());
@@ -75,7 +78,10 @@ public class OptionsBacktestEngineTest {
         LocalDate expiry = LocalDate.now().plusDays(35);
         var pos = engine.buildPosition(OptionsStrategy.LONG_PUT, SYM, PRICE, K, expiry, T, SIGMA, 100_000);
         assertNotNull(pos);
-        double expected = bs.putPrice(PRICE, K, OptionsBacktestEngine.RISK_FREE_RATE, T, SIGMA) * 100 * pos.contracts;
+        double theoreticalPrem = bs.putPrice(PRICE, K, OptionsBacktestEngine.RISK_FREE_RATE, T, SIGMA);
+        double slippedPrem = theoreticalPrem * (1 + OptionsBacktestEngine.SLIPPAGE_IV_PREMIUM)
+                + OptionsBacktestEngine.SLIPPAGE_HALF_SPREAD;
+        double expected = slippedPrem * 100 * pos.contracts;
         assertEquals(expected, pos.totalCostBasis, 0.01);
         assertFalse(pos.legs.get(0).isCall());
         assertTrue(pos.legs.get(0).isLong());

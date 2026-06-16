@@ -17,6 +17,7 @@ import com.tradingapp.options.OptionsSignalRouter;
 import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -41,6 +42,11 @@ public class IntradayBacktestRunner {
 
     private static final ZoneId ET = ZoneId.of("America/New_York");
     private static final DateTimeFormatter DT_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ET);
+
+    record RunResult(String label, IntradayBacktestResult result, Set<String> strategies) {}
+
+    // Lightweight summary kept between runs in strategy-compare mode (avoids holding full result in memory)
+    record RunSummary(String label, Set<String> strategies, double returnPct, double maxDd, int trades, int wins, int losses) {}
 
     public static void main(String[] args) throws Exception {
         AppConfig cfg = AppConfig.load();
@@ -96,39 +102,48 @@ public class IntradayBacktestRunner {
         double maxExposure = cfg.getMaxPortfolioExposurePct() / 100.0;
         IntradayBacktestEngine engine = new IntradayBacktestEngine(new IndicatorEngine(), new FeeCalculator());
 
-        // Pull allowlist and filters directly from the live config (day-trader/app.properties).
-        // Current allowlist is 25 symbols — watchlist minus QQQ/TSLA (no options benefit)
-        // and AXP/GILD/MRNA (removed after 2-yr backtest showed -$29K net drag, Config D).
         Set<String> BASE_OPTS      = cfg.getOptionsSymbolAllowlist();
         Set<String> CALLS_DISABLED = cfg.getOptionsCallsDisabled();
 
-        record RunCfg(String label, List<String> watchlist, Set<String> optAllowlist) {}
-        record RunResult(String label, IntradayBacktestResult result) {}
+        record RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies) {}
 
         java.util.List<RunCfg> runs = new java.util.ArrayList<>();
 
-        if (newCandidates.isEmpty()) {
+        String mode = System.getProperty("backtest.mode", "");
+        if ("strategy-compare".equals(mode)) {
+            // Run each strategy individually, then the current config as the combined baseline
+            List<String> ALL_STRATEGIES = List.of(
+                    "HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM", "LONG_CALL", "LONG_PUT",
+                    "ZERO_DTE", "OPENING_BREAKOUT", "STOCHASTIC_REVERSAL",
+                    "RELATIVE_STRENGTH_DIVERGENCE", "MACD_CROSSOVER");
+            for (String s : ALL_STRATEGIES) {
+                runs.add(new RunCfg(String.format("%-35s", s), baseWatchlist, BASE_OPTS, Set.of(s)));
+            }
+            // Add the current live config as the combined baseline at the end
+            runs.add(new RunCfg("CURRENT CONFIG (combined)", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies()));
+        } else if (newCandidates.isEmpty()) {
             // Watchlist is at capacity — single confirmation run with all 30 symbols
-            runs.add(new RunCfg("FINAL: all 30 symbols (capacity confirmation)", baseWatchlist, BASE_OPTS));
+            runs.add(new RunCfg("FINAL: all 30 symbols (capacity confirmation)", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies()));
         } else {
             // Screening mode — baseline + one run per candidate + combined
-            runs.add(new RunCfg("A: Baseline", baseWatchlist, BASE_OPTS));
+            runs.add(new RunCfg("A: Baseline", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies()));
             for (String sym : newCandidates) {
                 List<String> wl = new ArrayList<>(baseWatchlist);
                 if (barsBySymbol.containsKey(sym)) wl.add(sym);
                 java.util.HashSet<String> opts = new java.util.HashSet<>(BASE_OPTS);
                 opts.add(sym);
-                runs.add(new RunCfg(String.format("%-6s", sym) + ": baseline + " + sym, wl, Set.copyOf(opts)));
+                runs.add(new RunCfg(String.format("%-6s", sym) + ": baseline + " + sym, wl, Set.copyOf(opts), cfg.getEnabledStrategies()));
             }
             List<String> allWl = new ArrayList<>(baseWatchlist);
             java.util.HashSet<String> allOpts = new java.util.HashSet<>(BASE_OPTS);
             for (String sym : newCandidates) {
                 if (barsBySymbol.containsKey(sym)) { allWl.add(sym); allOpts.add(sym); }
             }
-            runs.add(new RunCfg("ALL: baseline + all candidates", allWl, Set.copyOf(allOpts)));
+            runs.add(new RunCfg("ALL: baseline + all candidates", allWl, Set.copyOf(allOpts), cfg.getEnabledStrategies()));
         }
 
         java.util.List<RunResult> results = new java.util.ArrayList<>();
+        java.util.List<RunSummary> summaries = new java.util.ArrayList<>();
 
         for (RunCfg cfg2 : runs) {
             System.out.println("\n=== " + cfg2.label() + " ===");
@@ -136,7 +151,7 @@ public class IntradayBacktestRunner {
             OptionsSignalRouter router = new OptionsSignalRouter(
                     new BlackScholesEngine(), optExec, new Account(), new PriceHistory(), msg -> {}, null);
             router.setMaxPortfolioExposure(maxExposure);
-            router.setEnabledStrategies(cfg.getEnabledStrategies());
+            router.setEnabledStrategies(cfg2.strategies());
             router.setStopLossFrac(cfg.getOptionsStopLossFrac());
             router.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
             if (cfg.getOptionsEntryCutoff() != null) router.setEntryCutoff(cfg.getOptionsEntryCutoff());
@@ -160,7 +175,29 @@ public class IntradayBacktestRunner {
                     (System.currentTimeMillis() - t0) / 1000.0,
                     r.getTotalReturnPct(), r.getMaxDrawdownPct(),
                     r.getTotalTrades(), r.getWins(), r.getLosses());
-            results.add(new RunResult(cfg2.label(), r));
+
+            if ("strategy-compare".equals(mode)) {
+                // Discard full result immediately to free memory; keep only summary numbers
+                summaries.add(new RunSummary(cfg2.label().trim(), cfg2.strategies(),
+                        r.getTotalReturnPct(), r.getMaxDrawdownPct(),
+                        r.getTotalTrades(), r.getWins(), r.getLosses()));
+            } else {
+                results.add(new RunResult(cfg2.label(), r, cfg2.strategies()));
+            }
+        }
+
+        if ("strategy-compare".equals(mode)) {
+            summaries.sort(Comparator.comparingDouble(RunSummary::returnPct).reversed());
+            System.out.printf("%n%-37s  %8s  %8s  %7s  %7s%n", "Strategy", "Return", "MaxDD", "Trades", "WinRate");
+            System.out.println("-".repeat(80));
+            for (RunSummary s : summaries) {
+                double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
+                System.out.printf("%-37s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
+                        s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
+            }
+            appendHistorySummaries(cfg, summaries, startDate, endDate);
+            System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
+            return;
         }
 
         System.out.printf("%-40s  %8s  %8s  %7s  %7s%n", "Config", "Return", "MaxDD", "Trades", "WinRate");
@@ -181,6 +218,68 @@ public class IntradayBacktestRunner {
             writeReport(out, best.result(), startDate, endDate);
         }
         System.out.println("\nReport written for best run (" + best.label() + "): " + reportPath);
+
+        // Append a one-line summary to the persistent history log so every run is traceable.
+        appendHistory(cfg, results, startDate, endDate);
+    }
+
+    private static void appendHistorySummaries(AppConfig cfg, java.util.List<RunSummary> summaries,
+                                               LocalDate startDate, LocalDate endDate) {
+        try {
+            Path histPath = Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv");
+            boolean isNew = !Files.exists(histPath);
+            try (PrintWriter h = new PrintWriter(Files.newBufferedWriter(histPath,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND))) {
+                if (isNew) {
+                    h.println("timestamp\tperiod\tstrategies\tstop_loss\tentry_cutoff\tallowlist_count\tlabel\treturn_pct\tmax_drawdown\ttrades\twin_rate");
+                }
+                String ts = ZonedDateTime.now(ET).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+                String period = startDate + " to " + endDate;
+                String stopLoss = String.valueOf(cfg.getOptionsStopLossFrac());
+                String cutoff = cfg.getOptionsEntryCutoff() != null ? cfg.getOptionsEntryCutoff().toString() : "";
+                int allowlistCount = cfg.getOptionsSymbolAllowlist().size();
+                for (RunSummary s : summaries) {
+                    double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
+                    h.printf("%s\t%s\t%s\t%s\t%s\t%d\t%s\t%.2f\t%.2f\t%d\t%.1f%n",
+                            ts, period, String.join("|", s.strategies()),
+                            stopLoss, cutoff, allowlistCount,
+                            s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Warning: could not write backtest history: " + e.getMessage());
+        }
+    }
+
+    private static void appendHistory(AppConfig cfg, java.util.List<RunResult> results,
+                                       LocalDate startDate, LocalDate endDate) {
+        try {
+            Path histPath = Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv");
+            boolean isNew = !Files.exists(histPath);
+            try (PrintWriter h = new PrintWriter(Files.newBufferedWriter(histPath,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND))) {
+                if (isNew) {
+                    h.println("timestamp\tperiod\tstrategies\tstop_loss\tentry_cutoff\tallowlist_count\tlabel\treturn_pct\tmax_drawdown\ttrades\twin_rate");
+                }
+                String ts = ZonedDateTime.now(ET).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+                String period = startDate + " to " + endDate;
+                String stopLoss = String.valueOf(cfg.getOptionsStopLossFrac());
+                String cutoff = cfg.getOptionsEntryCutoff() != null ? cfg.getOptionsEntryCutoff().toString() : "";
+                int allowlistCount = cfg.getOptionsSymbolAllowlist().size();
+                for (RunResult rr : results) {
+                    IntradayBacktestResult r = rr.result();
+                    double wr = r.getTotalTrades() > 0 ? 100.0 * r.getWins() / r.getTotalTrades() : 0.0;
+                    String strategies = String.join("|", rr.strategies());
+                    h.printf("%s\t%s\t%s\t%s\t%s\t%d\t%s\t%.2f\t%.2f\t%d\t%.1f%n",
+                            ts, period, strategies, stopLoss, cutoff, allowlistCount,
+                            rr.label().trim(), r.getTotalReturnPct(), r.getMaxDrawdownPct(),
+                            r.getTotalTrades(), wr);
+                }
+            }
+            System.out.println("History appended to: " + histPath);
+        } catch (Exception e) {
+            System.err.println("Warning: could not write backtest history: " + e.getMessage());
+        }
     }
 
     private static void writeReport(PrintWriter out, IntradayBacktestResult result,

@@ -67,14 +67,11 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     // If set, no new options entries are opened before this time (e.g. skip first 30 min).
     private LocalTime entryStartTime = null;
 
-    private static final double TRAILING_STOP_FROM_PEAK = 0.25; // exit when premium drops 25% below its session high
-
     private final Set<String> sessionStopLossed = new HashSet<>();
     private final Map<String, ZonedDateTime> lastMultiLegCloseTime    = new HashMap<>();
     private final Map<String, ZonedDateTime> lastDirectionalCloseTime = new HashMap<>();
     private final Map<String, ZonedDateTime> lastAnyCloseTime         = new HashMap<>();
     private final Map<String, Integer> reversalConsecutive = new HashMap<>();
-    private final Map<String, Double>  peakPremium         = new HashMap<>();
 
     private LocalDate stopLossResetDate;
     private BooleanSupplier uptrendSupplier;
@@ -636,6 +633,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                 : 0.0;
         double currentPremium = resolveClosePremium(symbol, pos.getStrike(), pos.getExpiry(), isCall, bsPrice);
 
+        // Keep mark-to-market current so TradingLoop's daily-loss check sees live option value
+        // (accurateOptionsValuation mode). In backtest, currentPremium is the BS price.
+        if (canPrice) pos.setCurrentMarketPrice(currentPremium);
+
         // If sigma is unavailable but the option hasn't expired, skip evaluation —
         // a dry quote feed does not mean the position is worthless.
         if (!canPrice && T > 0) return;
@@ -643,11 +644,6 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         boolean premiumStop     = canPrice && currentPremium <= pos.getPremiumPaid() * stopLossFrac;
         boolean hitProfitTarget = currentPremium >= pos.getPremiumPaid() * profitTarget;
         boolean nearExpiry      = pos.daysToExpiry(virtualDate) < 3;
-
-        // Trailing stop: update session peak and exit if premium drops 25% below that peak.
-        double peak = peakPremium.merge(posKey, canPrice ? currentPremium : 0.0, Math::max);
-        boolean trailingStop = canPrice && peak > pos.getPremiumPaid()
-                && currentPremium < peak * (1 - TRAILING_STOP_FROM_PEAK);
 
         // Require 3+ opposing signals for 2 consecutive ticks before exiting on reversal.
         int consecutive;
@@ -662,18 +658,15 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         // Close as worthless only when the option has actually expired (T <= 0).
         boolean worthless = !canPrice && pos.getPremiumPaid() > 0;
 
-        if (!premiumStop && !trailingStop && !hitProfitTarget && !reversal && !nearExpiry && !worthless) return;
+        if (!premiumStop && !hitProfitTarget && !reversal && !nearExpiry && !worthless) return;
 
         reversalConsecutive.remove(posKey);
-        peakPremium.remove(posKey);
         String reason;
         if (nearExpiry)             reason = "Expiry <3 days";
         else if (hitProfitTarget)   reason = String.format("Profit target: %.2f >= %.1fx of %.2f",
                                             currentPremium, profitTarget, pos.getPremiumPaid());
         else if (premiumStop)       reason = String.format("Premium stop-loss: %.2f <= %.0f%% of %.2f",
                                             currentPremium, stopLossFrac * 100, pos.getPremiumPaid());
-        else if (trailingStop)      reason = String.format("Trailing stop: %.2f < 75%% of peak %.2f",
-                                            currentPremium, peak);
         else if (worthless)         reason = "Premium collapsed to zero";
         else                        reason = "Signal reversal (2 bars): " + (isCall ? "SELL" : "BUY");
 

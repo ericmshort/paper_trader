@@ -1,5 +1,6 @@
 package com.tradingapp.options;
 
+import com.tradingapp.data.DayTraderWatchList;
 import com.tradingapp.data.HistoricalBar;
 import com.tradingapp.data.HistoricalBarFetcher;
 import com.tradingapp.engine.*;
@@ -9,12 +10,13 @@ import java.time.LocalDate;
 import java.util.*;
 
 /**
- * Runs all options strategies + equity baseline over the last year and prints
- * a sorted comparison table. Not a pass/fail test — just a reporting runner.
+ * Runs all enabled options strategies over the last 2 years across the live watchlist
+ * and prints a sorted comparison table with implied slippage applied.
+ * Not a pass/fail test — just a reporting runner.
  */
 public class StrategyComparisonRunner {
 
-    private static final List<String> SYMBOLS = List.of("AAPL", "MSFT", "NVDA", "SPY", "QQQ");
+    private static final List<String> SYMBOLS = DayTraderWatchList.SYMBOLS;
     private static final double       STARTING_BALANCE = 100_000.0;
 
     record Row(String name, double returnPct, double maxDrawdown, double winRate, int trades) {
@@ -24,9 +26,9 @@ public class StrategyComparisonRunner {
     @Test
     void compareAllStrategies() throws Exception {
         LocalDate end   = LocalDate.now().minusDays(1);
-        LocalDate start = end.minusYears(1);
+        LocalDate start = end.minusYears(2);
 
-        System.out.println("\n=== Fetching 1-year bars for: " + SYMBOLS + " ===");
+        System.out.println("\n=== Fetching 2-year bars (with implied slippage) for: " + SYMBOLS + " ===");
         HistoricalBarFetcher fetcher = new HistoricalBarFetcher();
         Map<String, List<HistoricalBar>> bars = new LinkedHashMap<>();
         for (String sym : SYMBOLS) {

@@ -23,6 +23,10 @@ public class OptionsBacktestEngine {
     static final double PROFIT_TARGET_MULTIPLIER = 2.0;
     static final double SPREAD_PROFIT_TARGET_FRACTION = 0.75;
     static final double CONTRACT_FEE = 0.65;
+    // Slippage model: half the typical bid-ask spread paid on each side of a round trip,
+    // plus a markup for implied vol trading above historical vol at entry.
+    static final double SLIPPAGE_HALF_SPREAD = 0.08; // $0.08/share per leg per trade (half of ~$0.15 spread)
+    static final double SLIPPAGE_IV_PREMIUM  = 0.10; // 10% IV > HV premium on long entries
 
     private final IndicatorEngine indicatorEngine;
     private final BlackScholesEngine bsEngine;
@@ -128,7 +132,7 @@ public class OptionsBacktestEngine {
 
                     if (shouldExit(pos, currentValue, buys, sells, date, strategy, close)) {
                         double pnl = currentValue - pos.totalCostBasis;
-                        cash += currentValue - CONTRACT_FEE * pos.totalOptionContracts();
+                        cash += currentValue - exitSlippage(pos) - CONTRACT_FEE * pos.totalOptionContracts();
                         totalTrades++;
                         if (pnl > 0) wins++; else losses++;
                         openPositions.remove(symbol);
@@ -181,7 +185,7 @@ public class OptionsBacktestEngine {
                 List<Double> prices = priceHistoryMap.getOrDefault(e.getKey(), Collections.emptyList());
                 double sigma = effectiveSigma(pos, prices);
                 double currentValue = computeCurrentValue(pos, price, 0.0, sigma);
-                cash += currentValue - CONTRACT_FEE * pos.totalOptionContracts();
+                cash += currentValue - exitSlippage(pos) - CONTRACT_FEE * pos.totalOptionContracts();
             }
         }
 
@@ -268,17 +272,19 @@ public class OptionsBacktestEngine {
             case LONG_CALL -> {
                 double prem = bsEngine.callPrice(price, K, RISK_FREE_RATE, T, sigma);
                 if (prem <= 0) yield null;
-                int c = contracts(cash, prem);
+                double slipped = prem * (1 + SLIPPAGE_IV_PREMIUM) + SLIPPAGE_HALF_SPREAD;
+                int c = contracts(cash, slipped);
                 if (c < 1) yield null;
-                yield new OpenPosition(symbol, expiry, c, sigma, prem * 100 * c, 0,
+                yield new OpenPosition(symbol, expiry, c, sigma, slipped * 100 * c, 0,
                         List.of(new Leg(K, true, true, 1)), 0, 0);
             }
             case LONG_PUT -> {
                 double prem = bsEngine.putPrice(price, K, RISK_FREE_RATE, T, sigma);
                 if (prem <= 0) yield null;
-                int c = contracts(cash, prem);
+                double slipped = prem * (1 + SLIPPAGE_IV_PREMIUM) + SLIPPAGE_HALF_SPREAD;
+                int c = contracts(cash, slipped);
                 if (c < 1) yield null;
-                yield new OpenPosition(symbol, expiry, c, sigma, prem * 100 * c, 0,
+                yield new OpenPosition(symbol, expiry, c, sigma, slipped * 100 * c, 0,
                         List.of(new Leg(K, false, true, 1)), 0, 0);
             }
             case HIGH_DELTA_SCALP -> {
@@ -286,25 +292,29 @@ public class OptionsBacktestEngine {
                 double deepK = Math.max(1.0, K - SPREAD_WIDTH * 2);
                 double prem = bsEngine.callPrice(price, deepK, RISK_FREE_RATE, T, sigma);
                 if (prem <= 0) yield null;
-                int c = contracts(cash, prem);
+                double slipped = prem * (1 + SLIPPAGE_IV_PREMIUM) + SLIPPAGE_HALF_SPREAD;
+                int c = contracts(cash, slipped);
                 if (c < 1) yield null;
-                yield new OpenPosition(symbol, expiry, c, sigma, prem * 100 * c, 0,
+                yield new OpenPosition(symbol, expiry, c, sigma, slipped * 100 * c, 0,
                         List.of(new Leg(deepK, true, true, 1)), 0, 0);
             }
             case MOMENTUM_NEAR_TERM -> {
                 // ATM call with near-term expiry
                 double prem = bsEngine.callPrice(price, K, RISK_FREE_RATE, T, sigma);
                 if (prem <= 0) yield null;
-                int c = contracts(cash, prem);
+                double slipped = prem * (1 + SLIPPAGE_IV_PREMIUM) + SLIPPAGE_HALF_SPREAD;
+                int c = contracts(cash, slipped);
                 if (c < 1) yield null;
-                yield new OpenPosition(symbol, expiry, c, sigma, prem * 100 * c, 0,
+                yield new OpenPosition(symbol, expiry, c, sigma, slipped * 100 * c, 0,
                         List.of(new Leg(K, true, true, 1)), 0, 0);
             }
             case ZERO_DTE -> {
                 // Same-day straddle; T is already set to 7/365 (1 week) in the backtest for simplicity
                 double callPrem = bsEngine.callPrice(price, K, RISK_FREE_RATE, T, sigma);
                 double putPrem  = bsEngine.putPrice(price, K, RISK_FREE_RATE, T, sigma);
-                double netDebit = callPrem + putPrem;
+                double slippedCall = callPrem * (1 + SLIPPAGE_IV_PREMIUM) + SLIPPAGE_HALF_SPREAD;
+                double slippedPut  = putPrem  * (1 + SLIPPAGE_IV_PREMIUM) + SLIPPAGE_HALF_SPREAD;
+                double netDebit = slippedCall + slippedPut;
                 if (netDebit <= 0) yield null;
                 int c = contracts(cash, netDebit);
                 if (c < 1) yield null;
@@ -313,6 +323,11 @@ public class OptionsBacktestEngine {
             }
         };
 
+    }
+
+    // Spread cost paid when closing: sell at bid (mid minus half-spread) per leg per contract.
+    private double exitSlippage(OpenPosition pos) {
+        return SLIPPAGE_HALF_SPREAD * 100.0 * pos.totalOptionContracts();
     }
 
     private double effectiveSigma(OpenPosition pos, List<Double> prices) {

@@ -21,7 +21,7 @@ risk.market_regime_filter=true
 risk.max_portfolio_exposure_pct=70.0
 
 # --- Strategies ---
-strategy.enabled=HIGH_DELTA_SCALP,MOMENTUM_NEAR_TERM,LONG_CALL,LONG_PUT,OPENING_BREAKOUT
+strategy.enabled=HIGH_DELTA_SCALP,MOMENTUM_NEAR_TERM,LONG_CALL,LONG_PUT,OPENING_BREAKOUT,MACD_CROSSOVER
 options.stop_loss_frac=0.30
 options.downtrend_put_min_signals=3
 options.entry_cutoff=14:45

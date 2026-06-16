@@ -3,9 +3,14 @@ package com.tradingapp.broker;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -156,9 +161,34 @@ public class AppConfig {
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
             }
+            appendConfigHistory();
         } catch (IOException e) {
             throw new RuntimeException("Failed to save app config", e);
         }
+    }
+
+    private void appendConfigHistory() {
+        try {
+            Path histPath = CONFIG_PATH.getParent().resolve("config-history.tsv");
+            boolean isNew = !Files.exists(histPath);
+            try (PrintWriter w = new PrintWriter(Files.newBufferedWriter(histPath,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND))) {
+                if (isNew) {
+                    w.println("timestamp\tstrategies\tstop_loss\tentry_cutoff\tdaily_loss_limit\tmax_exposure\tallowlist_count\tdowntrend_put_min");
+                }
+                String ts = ZonedDateTime.now(ZoneId.of("America/New_York"))
+                        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+                w.printf("%s\t%s\t%.2f\t%s\t%.1f\t%.1f\t%d\t%d%n",
+                        ts,
+                        String.join("|", enabledStrategies),
+                        optionsStopLossFrac,
+                        optionsEntryCutoff != null ? optionsEntryCutoff.toString() : "",
+                        dailyLossLimitPct,
+                        maxPortfolioExposurePct,
+                        optionsSymbolAllowlist.size(),
+                        downtrendPutMinSignals);
+            }
+        } catch (Exception ignored) {}
     }
 
     public BrokerType getBrokerType() { return brokerType; }
