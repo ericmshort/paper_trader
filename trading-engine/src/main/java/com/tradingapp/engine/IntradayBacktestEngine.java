@@ -178,7 +178,14 @@ public class IntradayBacktestEngine {
 
             double stockMV = account.getPositions().values().stream()
                     .mapToDouble(Position::getMarketValue).sum();
-            double eodValue = account.getBalance() + stockMV;
+            double optsMV = account.getOptionsPositions().values().stream()
+                    .filter(p -> p.getContracts() > 0)
+                    .mapToDouble(p -> {
+                        double mkt = p.getCurrentMarketPrice();
+                        return (mkt >= 0 ? mkt : p.getPremiumPaid()) * 100 * p.getContracts();
+                    })
+                    .sum();
+            double eodValue = account.getBalance() + stockMV + optsMV;
             equityCurve.add(new BacktestDataPoint(date, eodValue));
         }
 
