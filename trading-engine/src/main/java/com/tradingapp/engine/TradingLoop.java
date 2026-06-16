@@ -251,53 +251,70 @@ public class TradingLoop implements Runnable {
                 prevOrbBuy.clear();
             }
             List<QuoteModel> quotes = dataClient.getQuotes(watchList);
+
+            // Pass 1: update all stock prices and mark all options to market before the loss
+            // check runs. Without this, the loss limit sees last tick's option prices for most
+            // symbols, so per-position stop-losses can drain well beyond 5% before the halt
+            // fires — the halt only catches it mid-loop when enough positions have been closed.
             for (QuoteModel quote : quotes) {
                 String symbol = quote.getSymbol();
                 double price = quote.getPrice();
                 double volume = quote.getVolume();
                 lastKnownPrices.put(symbol, price);
                 priceHistory.record(symbol, price, volume);
-                // Gap 6: one daily bar per symbol per trading day — keeps indicators on daily cadence
                 if (!today.equals(dailyBarLastRecorded.get(symbol))) {
                     dailyOpenPrices.put(symbol, price);
                     priceHistory.recordDaily(symbol, price, volume);
                     dailyBarLastRecorded.put(symbol, today);
                 }
                 account.updatePositionPrice(symbol, price);
-                if (!account.isDailyLossHalted() && dailyLossLimitPct > 0 && dayStartValue > 0) {
-                    double optionsValue;
-                    if (accurateOptionsValuation) {
-                        // Mark-to-market: cash already includes premiums received for short positions,
-                        // so subtract current buyback cost for shorts (contracts < 0) and add current
-                        // value for longs (contracts > 0). Falls back to premiumPaid for unpriced longs
-                        // and 0 for unpriced shorts (conservative — understates loss until first tick).
-                        optionsValue = account.getOptionsPositions().values().stream()
-                                .mapToDouble(p -> {
-                                    double mktPrice = p.getCurrentMarketPrice();
-                                    double prem = (mktPrice >= 0) ? mktPrice
-                                            : (p.getContracts() > 0 ? p.getPremiumPaid() : 0.0);
-                                    return prem * 100 * p.getContracts();
-                                })
-                                .sum();
-                    } else {
-                        optionsValue = account.getOptionsPositions().values().stream()
-                                .filter(p -> p.getContracts() > 0)
-                                .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
-                                .sum();
-                    }
-                    // Use market value (not just unrealized PnL) so that open stock positions
-                    // don't appear as losses: buying $14k of stock reduces cash by $14k but
-                    // adds $14k of market value — net portfolio value is unchanged.
-                    double stockValue = account.getPositions().values().stream()
-                            .mapToDouble(Position::getMarketValue).sum();
-                    double currentValue = account.getBalance() + stockValue + optionsValue;
-                    if (currentValue < dayStartValue * (1 - dailyLossLimitPct)) {
-                        account.setDailyLossHalted(true);
-                        researchCallback.accept(String.format(
-                                "DAILY LOSS LIMIT (%.0f%%) reached — no new positions for the rest of the session",
-                                dailyLossLimitPct * 100));
-                    }
+                if (optionsEvaluator != null && !account.isDailyLossHalted()) {
+                    optionsEvaluator.markPositionsToMarket(symbol, price);
                 }
+            }
+
+            // Single aggregate loss check with all symbols' fresh prices.
+            if (!account.isDailyLossHalted() && dailyLossLimitPct > 0 && dayStartValue > 0) {
+                double optionsValue;
+                if (accurateOptionsValuation) {
+                    // Mark-to-market: cash already includes premiums received for short positions,
+                    // so subtract current buyback cost for shorts (contracts < 0) and add current
+                    // value for longs (contracts > 0). Falls back to premiumPaid for unpriced longs
+                    // and 0 for unpriced shorts (conservative — understates loss until first tick).
+                    optionsValue = account.getOptionsPositions().values().stream()
+                            .mapToDouble(p -> {
+                                double mktPrice = p.getCurrentMarketPrice();
+                                double prem = (mktPrice >= 0) ? mktPrice
+                                        : (p.getContracts() > 0 ? p.getPremiumPaid() : 0.0);
+                                return prem * 100 * p.getContracts();
+                            })
+                            .sum();
+                } else {
+                    optionsValue = account.getOptionsPositions().values().stream()
+                            .filter(p -> p.getContracts() > 0)
+                            .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
+                            .sum();
+                }
+                // Use market value (not just unrealized PnL) so that open stock positions
+                // don't appear as losses: buying $14k of stock reduces cash by $14k but
+                // adds $14k of market value — net portfolio value is unchanged.
+                double stockValue = account.getPositions().values().stream()
+                        .mapToDouble(Position::getMarketValue).sum();
+                double currentValue = account.getBalance() + stockValue + optionsValue;
+                if (currentValue < dayStartValue * (1 - dailyLossLimitPct)) {
+                    account.setDailyLossHalted(true);
+                    researchCallback.accept(String.format(
+                            "DAILY LOSS LIMIT (%.0f%%) reached — no new positions for the rest of the session",
+                            dailyLossLimitPct * 100));
+                }
+            }
+
+            // Pass 2: run per-symbol signal evaluation, entries/exits, and router logic.
+            // Price history and mark-to-market were already updated in Pass 1.
+            for (QuoteModel quote : quotes) {
+                String symbol = quote.getSymbol();
+                double price = quote.getPrice();
+                double volume = quote.getVolume();
                 // Gap 6: use daily-resolution prices for indicators; fall back to intraday if not yet seeded
                 List<Double> dailyPs = priceHistory.getDailyPrices(symbol);
                 List<Double> dailyVs = priceHistory.getDailyVolumes(symbol);
@@ -452,7 +469,9 @@ public class TradingLoop implements Runnable {
                 prevOrbBuy.put(symbol, signals.stream().anyMatch(
                         s -> "ORB".equals(s.getIndicatorName())
                                 && s.getDirection() == SignalResult.Direction.BUY));
-                if (optionsEvaluator != null && !account.isDailyLossHalted()) {
+                // Always call the router even when halted — the router's halt handler is what
+                // calls forceCloseAllForSymbol to close open positions on the halt tick itself.
+                if (optionsEvaluator != null) {
                     optionsEvaluator.evaluateWithSignals(symbol, price, buys, sells, signalStr, featureCsv, signals);
                 }
                 researchCallback.accept(time + " | " + symbol + " $" + String.format("%.2f", price)

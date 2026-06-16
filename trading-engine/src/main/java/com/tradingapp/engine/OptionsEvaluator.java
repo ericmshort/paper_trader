@@ -36,4 +36,11 @@ public interface OptionsEvaluator {
 
     /** Called at the start of each simulated trading day to reset intraday state. */
     default void resetForDay(LocalDate date) {}
+
+    /**
+     * Mark all open options positions for this symbol to their current Black-Scholes value.
+     * Called by TradingLoop before the daily loss limit check so the check uses fresh option
+     * prices rather than values from the previous tick.
+     */
+    default void markPositionsToMarket(String symbol, double price) {}
 }

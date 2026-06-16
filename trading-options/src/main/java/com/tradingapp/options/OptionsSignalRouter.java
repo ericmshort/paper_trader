@@ -1026,6 +1026,25 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         return prices.size() < 2 ? 0.0 : bsEngine.historicalVol(prices);
     }
 
+    @Override
+    public void markPositionsToMarket(String symbol, double price) {
+        double sigma = computeVol(symbol);
+        if (sigma <= 0) return;
+        String prefix = symbol + "_";
+        for (Map.Entry<String, OptionsPosition> e : account.getOptionsPositions().entrySet()) {
+            if (!e.getKey().startsWith(prefix)) continue;
+            OptionsPosition pos = e.getValue();
+            if (pos.getContracts() <= 0) continue;
+            double T = bsEngine.timeToExpiry(pos.getExpiry());
+            if (T <= 0) continue;
+            boolean isCall = e.getKey().contains("CALL");
+            double bsPrice = isCall
+                    ? bsEngine.callPrice(price, pos.getStrike(), RISK_FREE_RATE, T, sigma)
+                    : bsEngine.putPrice(price, pos.getStrike(), RISK_FREE_RATE, T, sigma);
+            pos.setCurrentMarketPrice(resolveClosePremium(symbol, pos.getStrike(), pos.getExpiry(), isCall, bsPrice));
+        }
+    }
+
     private void resetIfNewDay() {
         LocalDate today = clock.get().toLocalDate();
         if (!today.equals(stopLossResetDate)) {
