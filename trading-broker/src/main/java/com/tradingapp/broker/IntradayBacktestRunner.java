@@ -65,13 +65,17 @@ public class IntradayBacktestRunner {
 
         // --- Fetch bars ---
         AlpacaHistoricalClient client = new AlpacaHistoricalClient(cfg);
-        LocalDate endDate = LocalDate.now(ET).minusDays(1);
-        while (endDate.getDayOfWeek() == DayOfWeek.SATURDAY || endDate.getDayOfWeek() == DayOfWeek.SUNDAY) {
+        String mode = System.getProperty("backtest.mode", "");
+
+        // today-compare extends endDate to today so today's bars are fetched and simulated
+        LocalDate endDate = LocalDate.now(ET);
+        if (!"today-compare".equals(mode)) {
             endDate = endDate.minusDays(1);
+            while (endDate.getDayOfWeek() == DayOfWeek.SATURDAY || endDate.getDayOfWeek() == DayOfWeek.SUNDAY) {
+                endDate = endDate.minusDays(1);
+            }
         }
         LocalDate startDate = endDate.minusDays(800);
-
-        String mode = System.getProperty("backtest.mode", "");
 
         // Empty = confirmation run; populate for swap-testing candidates against the final 30
         List<String> newCandidates = List.of();
@@ -161,6 +165,8 @@ public class IntradayBacktestRunner {
             scanAllowlist.addAll(scanCandidates);
             runs.add(new RunCfg("SYMBOL SCAN: " + scanCandidates.size() + " candidates",
                     scanWatchlist, Set.copyOf(scanAllowlist), cfg.getEnabledStrategies(), defaultLossLimitPct));
+        } else if ("today-compare".equals(mode)) {
+            runs.add(new RunCfg("TODAY " + endDate + ": current config", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct));
         } else if (newCandidates.isEmpty()) {
             // Watchlist is at capacity — single confirmation run with all current symbols
             runs.add(new RunCfg("FINAL: all " + baseWatchlist.size() + " symbols (capacity confirmation)", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct));
@@ -218,7 +224,8 @@ public class IntradayBacktestRunner {
 
             // Keep full results for single-run and small 2-run compares; use summaries for large multi-run modes.
             boolean keepFull = newCandidates.isEmpty() || cfg2.label().startsWith("ALL:")
-                    || "loss-limit-compare".equals(mode) || "add-candidates".equals(mode);
+                    || "loss-limit-compare".equals(mode) || "add-candidates".equals(mode)
+                    || "today-compare".equals(mode);
             if (!keepFull || "strategy-compare".equals(mode)) {
                 summaries.add(new RunSummary(cfg2.label().trim(), cfg2.strategies(),
                         r.getTotalReturnPct(), r.getMaxDrawdownPct(),
@@ -278,6 +285,180 @@ public class IntradayBacktestRunner {
             appendHistorySummaries(cfg, summaries, startDate, endDate);
             System.out.println("History appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
         }
+
+        if ("today-compare".equals(mode) && !results.isEmpty()) {
+            printTodayComparison(results.get(0).result(), endDate);
+        }
+    }
+
+    private static void printTodayComparison(IntradayBacktestResult result, LocalDate today) {
+        System.out.println("\n=== TODAY vs LIVE COMPARISON: " + today + " ===");
+
+        // --- Backtest: extract today's single-day P&L from equity curve ---
+        List<BacktestDataPoint> curve = result.getEquityCurve();
+        double simDayPct = Double.NaN;
+        for (int i = 0; i < curve.size(); i++) {
+            if (curve.get(i).getDate().equals(today)) {
+                double prev = i > 0 ? curve.get(i - 1).getPortfolioValue() : 100_000.0;
+                simDayPct = (curve.get(i).getPortfolioValue() - prev) / prev * 100.0;
+                break;
+            }
+        }
+
+        // Count today's simulated round-trips
+        long dayStart = today.atStartOfDay(ET).toInstant().toEpochMilli();
+        long dayEnd   = today.plusDays(1).atStartOfDay(ET).toInstant().toEpochMilli();
+        Map<String, List<TransactionRecord>> simBuyStack = new HashMap<>();
+        int simRoundTrips = 0, simRoundWins = 0;
+        List<String> simTxLines = new ArrayList<>();
+        List<TransactionRecord> sorted = new ArrayList<>(result.getTrades());
+        sorted.sort(Comparator.comparingLong(TransactionRecord::getTimestamp));
+        for (TransactionRecord r : sorted) {
+            if (r.getTimestamp() < dayStart || r.getTimestamp() >= dayEnd) continue;
+            String sym = r.getSymbol();
+            String action = r.getAction().name();
+            boolean isBuy  = action.equals("BUY")  || action.equals("CALL_BUY")  || action.equals("PUT_BUY");
+            boolean isSell = action.equals("SELL") || action.equals("CALL_SELL") || action.equals("PUT_SELL");
+            if (isBuy) {
+                simBuyStack.computeIfAbsent(sym, k -> new ArrayList<>()).add(r);
+            } else if (isSell) {
+                List<TransactionRecord> buys = simBuyStack.get(sym);
+                if (buys != null && !buys.isEmpty()) {
+                    TransactionRecord buy = buys.remove(0);
+                    boolean isOpts = action.startsWith("CALL_") || action.startsWith("PUT_");
+                    double pnl = (r.getPricePerUnit() - buy.getPricePerUnit()) * r.getQuantity() * (isOpts ? 100.0 : 1.0)
+                            - buy.getFeeCharged() - r.getFeeCharged();
+                    simRoundTrips++;
+                    if (pnl >= 0) simRoundWins++;
+                    String type = action.contains("CALL") ? "CALL" : action.contains("PUT") ? "PUT" : "STK";
+                    simTxLines.add(String.format("  SIM   %-6s %-4s  entry=$%7.2f exit=$%7.2f x%d  P&L=$%8.2f  %s",
+                            sym, type, buy.getPricePerUnit(), r.getPricePerUnit(), r.getQuantity(), pnl,
+                            r.getReason() != null ? r.getReason() : ""));
+                }
+            }
+        }
+        int simOpenAtEnd = simBuyStack.values().stream().mapToInt(List::size).sum();
+        int simTotalOpened = simRoundTrips + simOpenAtEnd;
+
+        // --- Live log: parse actual trade entries and closes ---
+        Path logPath = Path.of(System.getProperty("user.home"), ".tradingapp", "day-trader",
+                "events-" + today + ".log");
+        int liveOpened = 0, liveClosed = 0;
+        double livePnlKnown = 0;
+        boolean liveHalted = false;
+        String haltTime = null;
+        List<String> liveTxLines = new ArrayList<>();
+        record LiveEntry(String sym, int qty, double prem) {}
+        java.util.Deque<Object> unused = new java.util.ArrayDeque<>(); // keep compiler happy
+        Map<String, java.util.Deque<LiveEntry>> liveBuyStack = new HashMap<>();
+
+        try {
+            java.util.regex.Pattern entryPat = java.util.regex.Pattern.compile(
+                    "^\\[([\\d: -]+)\\]\\s+(\\S+).*(?:CALL|PUT) K=.*x(\\d+)\\s+prem=([\\d.]+)");
+            java.util.regex.Pattern closePat = java.util.regex.Pattern.compile(
+                    "^\\[([\\d: -]+)\\]\\s+(\\S+).*closed:.*SELL prem=([\\d.]+)");
+            java.util.regex.Pattern haltPat  = java.util.regex.Pattern.compile(
+                    "^\\[([\\d: -]+)\\]\\s+DAILY LOSS LIMIT");
+
+            for (String line : Files.readAllLines(logPath)) {
+                java.util.regex.Matcher m;
+                m = entryPat.matcher(line);
+                if (m.find() && !line.contains("closed")) {
+                    liveOpened++;
+                    String sym = m.group(2).split("\\s+")[0];
+                    int qty    = Integer.parseInt(m.group(3));
+                    double pr  = Double.parseDouble(m.group(4));
+                    liveBuyStack.computeIfAbsent(sym, k -> new java.util.ArrayDeque<>())
+                            .add(new LiveEntry(sym, qty, pr));
+                    continue;
+                }
+                m = closePat.matcher(line);
+                if (m.find()) {
+                    liveClosed++;
+                    String sym    = m.group(2);
+                    double exitPr = Double.parseDouble(m.group(3));
+                    java.util.Deque<LiveEntry> stack = liveBuyStack.get(sym);
+                    if (stack != null && !stack.isEmpty()) {
+                        LiveEntry e = stack.poll();
+                        double pnl = (exitPr - e.prem()) * e.qty() * 100.0;
+                        livePnlKnown += pnl;
+                        String reason = line.substring(line.indexOf("closed:") + 8).trim();
+                        liveTxLines.add(String.format("  LIVE  %-6s CALL  entry=$%7.2f exit=$%7.2f x%d  P&L=$%8.2f  %s",
+                                sym, e.prem(), exitPr, e.qty(), pnl, reason));
+                    }
+                    continue;
+                }
+                m = haltPat.matcher(line);
+                if (m.find() && !line.contains("active")) {
+                    liveHalted = true;
+                    haltTime = m.group(1).trim();
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("  (could not read live log: " + e.getMessage() + ")");
+        }
+        int liveHaltClosed = liveOpened - liveClosed;
+
+        // --- Print side-by-side table ---
+        System.out.printf("%n  %-32s  %-18s  %-18s%n", "", "BACKTEST (sim)", "LIVE APP (actual)");
+        System.out.println("  " + "-".repeat(72));
+        System.out.printf("  %-32s  %-18s  %-18s%n", "Today's day P&L",
+                Double.isNaN(simDayPct) ? "n/a (no bars)" : String.format("%+.2f%%", simDayPct),
+                liveHalted ? "≥ -5.00% (halted)" : "n/a");
+        System.out.printf("  %-32s  %-18s  %-18s%n", "Positions opened",
+                String.valueOf(simTotalOpened), String.valueOf(liveOpened));
+        System.out.printf("  %-32s  %-18s  %-18s%n", "Closed before halt/EOD",
+                String.valueOf(simRoundTrips), String.valueOf(liveClosed));
+        System.out.printf("  %-32s  %-18s  %-18s%n", "Closed at halt/forced",
+                String.valueOf(simOpenAtEnd),
+                liveHalted ? String.valueOf(liveHaltClosed) : "0");
+        if (simRoundTrips > 0) {
+            System.out.printf("  %-32s  %-18s  %-18s%n", "Win rate (pre-halt closes)",
+                    String.format("%.0f%%", 100.0 * simRoundWins / simRoundTrips),
+                    liveClosed > 0 ? "0%" : "n/a");
+        }
+        if (livePnlKnown != 0 || !liveTxLines.isEmpty()) {
+            System.out.printf("  %-32s  %-18s  %-18s%n", "Known pre-halt P&L",
+                    "n/a", String.format("$%.2f", livePnlKnown));
+        }
+        if (haltTime != null) {
+            System.out.printf("  %-32s  %-18s  %-18s%n", "Halt time", "n/a", haltTime);
+        }
+
+        System.out.println("\n  Round-trip detail:");
+        if (simTxLines.isEmpty() && liveTxLines.isEmpty()) {
+            System.out.println("  (no closed round-trips found for today)");
+        }
+        simTxLines.forEach(System.out::println);
+        liveTxLines.forEach(System.out::println);
+
+        if (!Double.isNaN(simDayPct) && liveHalted) {
+            double gap = simDayPct - (-5.0);
+            System.out.printf("%n  Backtest vs live gap (today): %+.2f pp%n", gap);
+            System.out.println("  (positive = backtest was more optimistic than the live -5% result)");
+        }
+
+        // --- Historical daily P&L distribution ---
+        int neg5More = 0, neg5to2 = 0, neg2to0 = 0, flat0to2 = 0, pos2to5 = 0, pos5More = 0;
+        double prev = 100_000.0;
+        for (BacktestDataPoint pt : curve) {
+            double pct = (pt.getPortfolioValue() - prev) / prev * 100.0;
+            prev = pt.getPortfolioValue();
+            if      (pct < -5) neg5More++;
+            else if (pct < -2) neg5to2++;
+            else if (pct <  0) neg2to0++;
+            else if (pct <  2) flat0to2++;
+            else if (pct <  5) pos2to5++;
+            else               pos5More++;
+        }
+        int total = curve.size();
+        System.out.println("\n  Historical daily P&L distribution (" + total + " trading days in backtest):");
+        System.out.printf("    < -5%%        : %3d days (%4.1f%%)%n", neg5More, 100.0 * neg5More / total);
+        System.out.printf("    -5%% to -2%%  : %3d days (%4.1f%%)%n", neg5to2,  100.0 * neg5to2  / total);
+        System.out.printf("    -2%% to  0%%  : %3d days (%4.1f%%)%n", neg2to0,  100.0 * neg2to0  / total);
+        System.out.printf("     0%% to  2%%  : %3d days (%4.1f%%)%n", flat0to2, 100.0 * flat0to2 / total);
+        System.out.printf("     2%% to  5%%  : %3d days (%4.1f%%)%n", pos2to5,  100.0 * pos2to5  / total);
+        System.out.printf("    > 5%%         : %3d days (%4.1f%%)%n", pos5More, 100.0 * pos5More / total);
     }
 
     private static void printCandidateRanking(IntradayBacktestResult result, Set<String> candidates) {
