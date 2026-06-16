@@ -3,6 +3,7 @@ package com.tradingapp.broker;
 import com.tradingapp.account.Account;
 import com.tradingapp.account.TransactionRecord;
 import com.tradingapp.data.DayTraderWatchList;
+import com.tradingapp.data.MasterUniverse;
 import com.tradingapp.data.PriceHistory;
 import com.tradingapp.engine.BacktestDataPoint;
 import com.tradingapp.engine.FeeCalculator;
@@ -32,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
 
 /**
  * Standalone CLI runner: fetches ~100 trading days of 1-min bars, replays them through
@@ -69,12 +71,22 @@ public class IntradayBacktestRunner {
         }
         LocalDate startDate = endDate.minusDays(800);
 
+        String mode = System.getProperty("backtest.mode", "");
+
         // Empty = confirmation run; populate for swap-testing candidates against the final 30
         List<String> newCandidates = List.of();
 
         List<String> baseWatchlist = new ArrayList<>(DayTraderWatchList.SYMBOLS);
         List<String> allSymbols = new ArrayList<>(baseWatchlist);
         allSymbols.addAll(newCandidates);
+
+        // For symbol-scan mode, also fetch all MasterUniverse symbols not already covered
+        Set<String> SCAN_EXCLUDED = Set.of("QQQ", "TSLA", "COIN", "GD", "ADBE", "TGT", "AMZN", "PANW");
+        if ("symbol-scan".equals(mode)) {
+            for (String s : MasterUniverse.SYMBOLS) {
+                if (!allSymbols.contains(s) && !SCAN_EXCLUDED.contains(s)) allSymbols.add(s);
+            }
+        }
 
         Map<String, List<IntradayBar>> barsBySymbol = new LinkedHashMap<>();
 
@@ -105,11 +117,18 @@ public class IntradayBacktestRunner {
         Set<String> BASE_OPTS      = cfg.getOptionsSymbolAllowlist();
         Set<String> CALLS_DISABLED = cfg.getOptionsCallsDisabled();
 
-        record RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies) {}
+        // Candidates for symbol-scan mode: MasterUniverse symbols not in current allowlist, with cached bars
+        List<String> scanCandidates = "symbol-scan".equals(mode)
+                ? MasterUniverse.SYMBOLS.stream()
+                        .filter(s -> !BASE_OPTS.contains(s) && !SCAN_EXCLUDED.contains(s) && barsBySymbol.containsKey(s))
+                        .collect(Collectors.toList())
+                : List.of();
+
+        double defaultLossLimitPct = cfg.getDailyLossLimitPct();
+        record RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies, double dailyLossLimitPct) {}
 
         java.util.List<RunCfg> runs = new java.util.ArrayList<>();
 
-        String mode = System.getProperty("backtest.mode", "");
         if ("strategy-compare".equals(mode)) {
             // Run each strategy individually, then the current config as the combined baseline
             List<String> ALL_STRATEGIES = List.of(
@@ -117,29 +136,41 @@ public class IntradayBacktestRunner {
                     "ZERO_DTE", "OPENING_BREAKOUT", "STOCHASTIC_REVERSAL",
                     "RELATIVE_STRENGTH_DIVERGENCE", "MACD_CROSSOVER");
             for (String s : ALL_STRATEGIES) {
-                runs.add(new RunCfg(String.format("%-35s", s), baseWatchlist, BASE_OPTS, Set.of(s)));
+                runs.add(new RunCfg(String.format("%-35s", s), baseWatchlist, BASE_OPTS, Set.of(s), defaultLossLimitPct));
             }
             // Add the current live config as the combined baseline at the end
-            runs.add(new RunCfg("CURRENT CONFIG (combined)", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies()));
+            runs.add(new RunCfg("CURRENT CONFIG (combined)", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct));
+        } else if ("loss-limit-compare".equals(mode)) {
+            runs.add(new RunCfg("Daily loss limit  5% (baseline)", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), 5.0));
+            runs.add(new RunCfg("Daily loss limit 10%",            baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), 10.0));
+        } else if ("symbol-scan".equals(mode)) {
+            // Run base watchlist + all candidate symbols to rank which to add next
+            System.out.println("Symbol scan: testing " + scanCandidates.size() + " candidates: " + scanCandidates);
+            List<String> scanWatchlist = new ArrayList<>(baseWatchlist);
+            scanWatchlist.addAll(scanCandidates);
+            Set<String> scanAllowlist = new java.util.HashSet<>(BASE_OPTS);
+            scanAllowlist.addAll(scanCandidates);
+            runs.add(new RunCfg("SYMBOL SCAN: " + scanCandidates.size() + " candidates",
+                    scanWatchlist, Set.copyOf(scanAllowlist), cfg.getEnabledStrategies(), defaultLossLimitPct));
         } else if (newCandidates.isEmpty()) {
-            // Watchlist is at capacity — single confirmation run with all 30 symbols
-            runs.add(new RunCfg("FINAL: all 30 symbols (capacity confirmation)", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies()));
+            // Watchlist is at capacity — single confirmation run with all current symbols
+            runs.add(new RunCfg("FINAL: all " + baseWatchlist.size() + " symbols (capacity confirmation)", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct));
         } else {
             // Screening mode — baseline + one run per candidate + combined
-            runs.add(new RunCfg("A: Baseline", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies()));
+            runs.add(new RunCfg("A: Baseline", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct));
             for (String sym : newCandidates) {
                 List<String> wl = new ArrayList<>(baseWatchlist);
                 if (barsBySymbol.containsKey(sym)) wl.add(sym);
                 java.util.HashSet<String> opts = new java.util.HashSet<>(BASE_OPTS);
                 opts.add(sym);
-                runs.add(new RunCfg(String.format("%-6s", sym) + ": baseline + " + sym, wl, Set.copyOf(opts), cfg.getEnabledStrategies()));
+                runs.add(new RunCfg(String.format("%-6s", sym) + ": baseline + " + sym, wl, Set.copyOf(opts), cfg.getEnabledStrategies(), defaultLossLimitPct));
             }
             List<String> allWl = new ArrayList<>(baseWatchlist);
             java.util.HashSet<String> allOpts = new java.util.HashSet<>(BASE_OPTS);
             for (String sym : newCandidates) {
                 if (barsBySymbol.containsKey(sym)) { allWl.add(sym); allOpts.add(sym); }
             }
-            runs.add(new RunCfg("ALL: baseline + all candidates", allWl, Set.copyOf(allOpts), cfg.getEnabledStrategies()));
+            runs.add(new RunCfg("ALL: baseline + all candidates", allWl, Set.copyOf(allOpts), cfg.getEnabledStrategies(), defaultLossLimitPct));
         }
 
         java.util.List<RunResult> results = new java.util.ArrayList<>();
@@ -167,7 +198,7 @@ public class IntradayBacktestRunner {
                         loop.setStockTradingEnabled(false);
                         loop.setMaxConcurrentStockPositions(10);
                         loop.setAvoidOvernightHolds(false);
-                        loop.setDailyLossLimitPct(cfg.getDailyLossLimitPct() / 100.0);
+                        loop.setDailyLossLimitPct(cfg2.dailyLossLimitPct() / 100.0);
                         loop.setAccurateOptionsValuation(true);
                         router.setClosePositionsOnHalt(true);
                     });
@@ -176,8 +207,10 @@ public class IntradayBacktestRunner {
                     r.getTotalReturnPct(), r.getMaxDrawdownPct(),
                     r.getTotalTrades(), r.getWins(), r.getLosses());
 
-            if ("strategy-compare".equals(mode)) {
-                // Discard full result immediately to free memory; keep only summary numbers
+            // Keep full results for single-run and small 2-run compares; use summaries for large multi-run modes.
+            boolean keepFull = newCandidates.isEmpty() || cfg2.label().startsWith("ALL:")
+                    || "loss-limit-compare".equals(mode);
+            if (!keepFull || "strategy-compare".equals(mode)) {
                 summaries.add(new RunSummary(cfg2.label().trim(), cfg2.strategies(),
                         r.getTotalReturnPct(), r.getMaxDrawdownPct(),
                         r.getTotalTrades(), r.getWins(), r.getLosses()));
@@ -200,8 +233,14 @@ public class IntradayBacktestRunner {
             return;
         }
 
+        // Print summary table — summaries first (intermediate runs), then full results
         System.out.printf("%-40s  %8s  %8s  %7s  %7s%n", "Config", "Return", "MaxDD", "Trades", "WinRate");
         System.out.println("-".repeat(80));
+        for (RunSummary s : summaries) {
+            double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
+            System.out.printf("%-40s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
+                    s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
+        }
         for (RunResult rr : results) {
             IntradayBacktestResult r = rr.result();
             double wr = r.getTotalTrades() > 0 ? 100.0 * r.getWins() / r.getTotalTrades() : 0.0;
@@ -210,17 +249,69 @@ public class IntradayBacktestRunner {
                     r.getTotalTrades(), wr);
         }
 
-        // Write report for the highest-return run
-        RunResult best = results.stream()
-                .max(Comparator.comparingDouble(rr -> rr.result().getTotalReturnPct()))
-                .orElseThrow();
-        try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(reportPath))) {
-            writeReport(out, best.result(), startDate, endDate);
-        }
-        System.out.println("\nReport written for best run (" + best.label() + "): " + reportPath);
+        // Write report for the highest-return full result (or the only result if single-run)
+        if (!results.isEmpty()) {
+            RunResult best = results.stream()
+                    .max(Comparator.comparingDouble(rr -> rr.result().getTotalReturnPct()))
+                    .orElseThrow();
+            try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(reportPath))) {
+                writeReport(out, best.result(), startDate, endDate);
+            }
+            System.out.println("\nReport written for best run (" + best.label() + "): " + reportPath);
 
-        // Append a one-line summary to the persistent history log so every run is traceable.
-        appendHistory(cfg, results, startDate, endDate);
+            if ("symbol-scan".equals(mode) && !scanCandidates.isEmpty()) {
+                printCandidateRanking(best.result(), new java.util.HashSet<>(scanCandidates));
+            }
+
+            appendHistory(cfg, results, startDate, endDate);
+        }
+        if (!summaries.isEmpty()) {
+            appendHistorySummaries(cfg, summaries, startDate, endDate);
+            System.out.println("History appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
+        }
+    }
+
+    private static void printCandidateRanking(IntradayBacktestResult result, Set<String> candidates) {
+        Map<String, double[]> bySymbol = new TreeMap<>(); // [pnl, trades, wins]
+        Map<String, List<TransactionRecord>> buyStack = new HashMap<>();
+        List<TransactionRecord> sorted = new ArrayList<>(result.getTrades());
+        sorted.sort(Comparator.comparingLong(TransactionRecord::getTimestamp));
+        for (TransactionRecord r : sorted) {
+            String sym = r.getSymbol();
+            if (!candidates.contains(sym)) continue;
+            String action = r.getAction().name();
+            boolean isBuy  = action.equals("BUY")  || action.equals("CALL_BUY")  || action.equals("PUT_BUY");
+            boolean isSell = action.equals("SELL") || action.equals("CALL_SELL") || action.equals("PUT_SELL");
+            if (isBuy) {
+                buyStack.computeIfAbsent(sym, k -> new ArrayList<>()).add(r);
+            } else if (isSell) {
+                List<TransactionRecord> buys = buyStack.get(sym);
+                if (buys != null && !buys.isEmpty()) {
+                    TransactionRecord buy = buys.remove(0);
+                    boolean isOpts = action.startsWith("CALL_") || action.startsWith("PUT_");
+                    double pnl = (r.getPricePerUnit() - buy.getPricePerUnit())
+                            * r.getQuantity() * (isOpts ? 100.0 : 1.0)
+                            - buy.getFeeCharged() - r.getFeeCharged();
+                    double[] v = bySymbol.computeIfAbsent(sym, k -> new double[3]);
+                    v[0] += pnl; v[1]++; if (pnl >= 0) v[2]++;
+                }
+            }
+        }
+
+        List<Map.Entry<String, double[]>> ranked = new ArrayList<>(bySymbol.entrySet());
+        ranked.sort((a, b) -> Double.compare(b.getValue()[0], a.getValue()[0]));
+
+        System.out.println("\n=== CANDIDATE SYMBOL RANKING ===");
+        System.out.printf("  %-8s  %12s  %6s  %7s%n", "Symbol", "Net P&L", "Trades", "WinRate");
+        System.out.println("  " + "-".repeat(40));
+        for (Map.Entry<String, double[]> e : ranked) {
+            double[] v = e.getValue();
+            double wr = v[1] > 0 ? v[2] / v[1] * 100 : 0;
+            System.out.printf("  %-8s  $%,10.2f  %6.0f  %6.1f%%%n", e.getKey(), v[0], v[1], wr);
+        }
+
+        List<String> top5 = ranked.stream().limit(5).map(Map.Entry::getKey).collect(Collectors.toList());
+        System.out.println("\n>>> Top 5 candidates to add: " + String.join(",", top5));
     }
 
     private static void appendHistorySummaries(AppConfig cfg, java.util.List<RunSummary> summaries,
@@ -282,6 +373,20 @@ public class IntradayBacktestRunner {
         }
     }
 
+    private static String normalizeExitReason(String reason) {
+        if (reason == null || reason.isBlank()) return "Unknown";
+        String r = reason.toLowerCase();
+        if (r.startsWith("profit target"))       return "Profit target";
+        if (r.startsWith("premium stop-loss"))   return "Stop-loss (premium)";
+        if (r.startsWith("trailing stop"))       return "Stop-loss (trailing)";
+        if (r.startsWith("signal reversal"))     return "Signal reversal";
+        if (r.startsWith("expiry"))              return "Near expiry (<3 days)";
+        if (r.startsWith("pre-close"))           return "Overnight close";
+        if (r.startsWith("premium collapsed"))   return "Worthless (expired)";
+        if (r.contains("halt"))                  return "Daily loss halt";
+        return reason.length() > 32 ? reason.substring(0, 32) : reason;
+    }
+
     private static void writeReport(PrintWriter out, IntradayBacktestResult result,
                                     LocalDate startDate, LocalDate endDate) {
         out.println("=== INTRADAY BACKTEST REPORT ===");
@@ -323,7 +428,9 @@ public class IntradayBacktestRunner {
 
             // Group buys/sells by symbol to compute round-trip P&L
             Map<String, List<TransactionRecord>> buyStack = new HashMap<>();
-            List<String[]> roundTrips = new ArrayList<>(); // [ts, sym, action, qty, entry, exit, pnl, reason]
+            record RoundTrip(String ts, String sym, String type, int qty,
+                             double entry, double exit, double pnl, String reason) {}
+            List<RoundTrip> roundTrips = new ArrayList<>();
 
             for (TransactionRecord r : chronological) {
                 String sym = r.getSymbol();
@@ -334,7 +441,7 @@ public class IntradayBacktestRunner {
                         r.getFeeCharged(), r.getBalanceAfter(),
                         r.getReason() != null ? r.getReason() : "");
 
-                boolean isBuy = action.equals("BUY") || action.equals("CALL_BUY") || action.equals("PUT_BUY");
+                boolean isBuy  = action.equals("BUY")  || action.equals("CALL_BUY")  || action.equals("PUT_BUY");
                 boolean isSell = action.equals("SELL") || action.equals("CALL_SELL") || action.equals("PUT_SELL");
 
                 if (isBuy) {
@@ -343,19 +450,15 @@ public class IntradayBacktestRunner {
                     List<TransactionRecord> buys = buyStack.get(sym);
                     if (buys != null && !buys.isEmpty()) {
                         TransactionRecord buy = buys.remove(0);
-                        double costBasis = buy.getPricePerUnit() * r.getQuantity();
-                        double proceeds = r.getPricePerUnit() * r.getQuantity();
                         boolean isOptions = action.startsWith("CALL_") || action.startsWith("PUT_");
                         double multiplier = isOptions ? 100.0 : 1.0;
-                        double pnl = (proceeds - costBasis) * multiplier - buy.getFeeCharged() - r.getFeeCharged();
-                        roundTrips.add(new String[]{
-                                ts, sym, action,
-                                String.valueOf(r.getQuantity()),
-                                String.format("%.3f", buy.getPricePerUnit()),
-                                String.format("%.3f", r.getPricePerUnit()),
-                                String.format("%.2f", pnl),
-                                r.getReason() != null ? r.getReason() : ""
-                        });
+                        double pnl = (r.getPricePerUnit() - buy.getPricePerUnit())
+                                * r.getQuantity() * multiplier
+                                - buy.getFeeCharged() - r.getFeeCharged();
+                        String type = action.contains("CALL") ? "CALL" : action.contains("PUT") ? "PUT" : "STOCK";
+                        roundTrips.add(new RoundTrip(ts, sym, type, r.getQuantity(),
+                                buy.getPricePerUnit(), r.getPricePerUnit(), pnl,
+                                r.getReason() != null ? r.getReason() : ""));
                     }
                 }
             }
@@ -365,36 +468,68 @@ public class IntradayBacktestRunner {
             out.println("--- ROUND-TRIP P&L SUMMARY ---");
             double totalPnl = 0;
             int winners = 0, losers = 0;
-            Map<String, double[]> bySymbol = new TreeMap<>(); // symbol -> [totalPnl, count]
-            Map<String, double[]> byType = new TreeMap<>();   // STOCK/CALL/PUT -> [totalPnl, count]
+            // symbol -> [totalPnl, trades, wins, sumWin, sumLoss]
+            Map<String, double[]> bySymbol = new TreeMap<>();
+            // type -> [totalPnl, trades]
+            Map<String, double[]> byType   = new TreeMap<>();
+            // normalized exit reason -> [trades, wins, totalPnl]
+            Map<String, double[]> byReason = new TreeMap<>();
 
-            for (String[] rt : roundTrips) {
-                double pnl = Double.parseDouble(rt[6]);
-                totalPnl += pnl;
-                if (pnl >= 0) winners++; else losers++;
+            for (RoundTrip rt : roundTrips) {
+                totalPnl += rt.pnl();
+                boolean win = rt.pnl() >= 0;
+                if (win) winners++; else losers++;
 
-                bySymbol.computeIfAbsent(rt[1], k -> new double[2]);
-                bySymbol.get(rt[1])[0] += pnl;
-                bySymbol.get(rt[1])[1]++;
+                double[] sv = bySymbol.computeIfAbsent(rt.sym(), k -> new double[5]);
+                sv[0] += rt.pnl(); sv[1]++; if (win) { sv[2]++; sv[3] += rt.pnl(); } else { sv[4] += rt.pnl(); }
 
-                String type = rt[2].contains("CALL") ? "CALL" : rt[2].contains("PUT") ? "PUT" : "STOCK";
-                byType.computeIfAbsent(type, k -> new double[2]);
-                byType.get(type)[0] += pnl;
-                byType.get(type)[1]++;
+                double[] tv = byType.computeIfAbsent(rt.type(), k -> new double[2]);
+                tv[0] += rt.pnl(); tv[1]++;
 
-                out.printf("  %s  %-20s %-5s  entry=$%s exit=$%s qty=%s  P&L=$%s  %s%n",
-                        rt[0], rt[1], rt[2].replace("_SELL",""), rt[4], rt[5], rt[3], rt[6], rt[7]);
+                String bucket = normalizeExitReason(rt.reason());
+                double[] rv = byReason.computeIfAbsent(bucket, k -> new double[3]);
+                rv[0]++; if (win) rv[1]++; rv[2] += rt.pnl();
+
+                out.printf("  %s  %-20s %-5s  entry=$%.3f exit=$%.3f qty=%d  P&L=$%.2f  %s%n",
+                        rt.ts(), rt.sym(), rt.type(), rt.entry(), rt.exit(), rt.qty(), rt.pnl(), rt.reason());
             }
             out.println();
             out.printf("  Total Round-Trip P&L: $%.2f  (winners=%d losers=%d)%n", totalPnl, winners, losers);
             out.println();
 
-            out.println("  By Symbol:");
+            // --- Per-symbol breakdown (sorted losers first) ---
+            out.println("--- PER-SYMBOL BREAKDOWN ---");
+            out.printf("  %-8s  %10s  %6s  %7s  %10s  %10s  %10s%n",
+                    "Symbol", "Net P&L", "Trades", "WinRate", "Avg Win", "Avg Loss", "Expectancy");
+            out.println("  " + "-".repeat(75));
             bySymbol.entrySet().stream()
-                    .sorted((a, b) -> Double.compare(a.getValue()[0], b.getValue()[0]))
-                    .forEach(e -> out.printf("    %-8s  P&L=$%10.2f  trades=%.0f%n",
-                            e.getKey(), e.getValue()[0], e.getValue()[1]));
+                    .sorted(Comparator.comparingDouble(e -> e.getValue()[0]))
+                    .forEach(e -> {
+                        double[] v = e.getValue();
+                        double wr  = v[1] > 0 ? v[2] / v[1] : 0;
+                        double avgW = v[2] > 0 ? v[3] / v[2] : 0;
+                        double avgL = (v[1] - v[2]) > 0 ? v[4] / (v[1] - v[2]) : 0;
+                        double exp  = wr * avgW + (1 - wr) * avgL;
+                        out.printf("  %-8s  %10.2f  %6.0f  %6.1f%%  %10.2f  %10.2f  %10.2f%n",
+                                e.getKey(), v[0], v[1], wr * 100, avgW, avgL, exp);
+                    });
             out.println();
+
+            // --- Exit reason breakdown (sorted by total P&L) ---
+            out.println("--- EXIT REASON BREAKDOWN ---");
+            out.printf("  %-32s  %6s  %7s  %11s  %10s%n",
+                    "Reason", "Trades", "WinRate", "Total P&L", "Avg P&L");
+            out.println("  " + "-".repeat(72));
+            byReason.entrySet().stream()
+                    .sorted(Comparator.comparingDouble(e -> e.getValue()[2]))
+                    .forEach(e -> {
+                        double[] v = e.getValue();
+                        double wr  = v[0] > 0 ? v[1] / v[0] * 100 : 0;
+                        out.printf("  %-32s  %6.0f  %6.1f%%  %11.2f  %10.2f%n",
+                                e.getKey(), v[0], wr, v[2], v[0] > 0 ? v[2] / v[0] : 0);
+                    });
+            out.println();
+
             out.println("  By Trade Type:");
             byType.forEach((type, v) ->
                     out.printf("    %-6s  P&L=$%10.2f  trades=%.0f%n", type, v[0], v[1]));
