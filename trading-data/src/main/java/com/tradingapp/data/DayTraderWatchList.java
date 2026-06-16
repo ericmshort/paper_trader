@@ -34,6 +34,11 @@ public class DayTraderWatchList {
         "REGN",  // $1,448
         "META",  // $1,425
         "MS",    // $1,173
-        "AMAT"   // $984  (COIN excluded — crypto correlation risk)
+        "AMAT",  // $984  (COIN excluded — crypto correlation risk)
+        "KLAC",  // scan P&L $162,640 — +327pp return, -3pp MaxDD vs 25-symbol baseline
+        "CAT",   // scan P&L $47,844
+        "NFLX",  // scan P&L $46,109
+        "UNH",   // scan P&L $26,125
+        "LMT"    // scan P&L $17,289
     );
 }

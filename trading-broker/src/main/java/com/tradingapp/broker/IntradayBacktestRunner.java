@@ -143,6 +143,15 @@ public class IntradayBacktestRunner {
         } else if ("loss-limit-compare".equals(mode)) {
             runs.add(new RunCfg("Daily loss limit  5% (baseline)", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), 5.0));
             runs.add(new RunCfg("Daily loss limit 10%",            baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), 10.0));
+        } else if ("add-candidates".equals(mode)) {
+            // Clean 2-run compare: baseline vs baseline + all newCandidates combined
+            List<String> allWl = new ArrayList<>(baseWatchlist);
+            java.util.HashSet<String> allOpts = new java.util.HashSet<>(BASE_OPTS);
+            for (String sym : newCandidates) {
+                if (barsBySymbol.containsKey(sym)) { allWl.add(sym); allOpts.add(sym); }
+            }
+            runs.add(new RunCfg("Baseline: " + baseWatchlist.size() + " symbols", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct));
+            runs.add(new RunCfg("All candidates: " + allWl.size() + " symbols (" + String.join(",", newCandidates) + ")", allWl, Set.copyOf(allOpts), cfg.getEnabledStrategies(), defaultLossLimitPct));
         } else if ("symbol-scan".equals(mode)) {
             // Run base watchlist + all candidate symbols to rank which to add next
             System.out.println("Symbol scan: testing " + scanCandidates.size() + " candidates: " + scanCandidates);
@@ -209,7 +218,7 @@ public class IntradayBacktestRunner {
 
             // Keep full results for single-run and small 2-run compares; use summaries for large multi-run modes.
             boolean keepFull = newCandidates.isEmpty() || cfg2.label().startsWith("ALL:")
-                    || "loss-limit-compare".equals(mode);
+                    || "loss-limit-compare".equals(mode) || "add-candidates".equals(mode);
             if (!keepFull || "strategy-compare".equals(mode)) {
                 summaries.add(new RunSummary(cfg2.label().trim(), cfg2.strategies(),
                         r.getTotalReturnPct(), r.getMaxDrawdownPct(),
