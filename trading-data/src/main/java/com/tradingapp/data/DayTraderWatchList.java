@@ -11,34 +11,34 @@ public class DayTraderWatchList {
 
     public static final List<String> SYMBOLS = List.of(
         "SPY",   // regime anchor
-        "NOC",   // $11,079 net P&L, 56.3% WR
-        "NVDA",  // $9,752
-        "MSFT",  // $8,584
-        "COST",  // $7,701
-        "VRTX",  // $6,524
-        "AMGN",  // $6,318
-        "CRWD",  // $6,139
-        "RTX",   // $5,905
-        "GS",    // $3,660
-        "AVGO",  // $3,353
-        "LRCX",  // $2,681
-        "XOM",   // $2,675
-        "WMT",   // $2,397
-        "DE",    // $2,204
-        "ORCL",  // $2,065
-        "PG",    // $1,921
-        "LLY",   // $1,918
-        "BLK",   // $1,654
-        "NOW",   // $1,623
-        "MA",    // $1,521
-        "REGN",  // $1,448
-        "META",  // $1,425
-        "MS",    // $1,173
-        "AMAT",  // $984  (COIN excluded — crypto correlation risk)
-        "KLAC",  // scan P&L $162,640 — +327pp return, -3pp MaxDD vs 25-symbol baseline
-        "CAT",   // scan P&L $47,844
-        "NFLX",  // scan P&L $46,109
-        "UNH",   // scan P&L $26,125
-        "LMT"    // scan P&L $17,289
+        "NOC",   // $47,786 net P&L, 51.2% WR
+        "NVDA",  // $16,423
+        "MSFT",  // $29,619
+        "COST",  // $66,816
+        "VRTX",  // $43,325
+        "AMGN",  // $24,205
+        "CRWD",  // $55,134
+        "GS",    // $104,298
+        "AVGO",  // $23,068
+        "LRCX",  // $60,660
+        "DE",    // $42,482
+        "ORCL",  // $23,454
+        "LLY",   // $83,927
+        "BLK",   // $49,138
+        "NOW",   // $29,529
+        "MA",    // $13,829
+        "REGN",  // $76,015
+        "META",  // $16,654
+        "AMAT",  // $22,986
+        "KLAC",  // $173,866
+        "CAT",   // $49,372
+        "NFLX",  // $54,868
+        "UNH",   // $24,273
+        "LMT",   // $14,458
+        "JPM",   // scan P&L $15,934 — +56pp return vs 25-symbol baseline
+        "MU",    // scan P&L $13,462
+        "HD",    // scan P&L $11,789
+        "MCD",   // scan P&L $8,908
+        "V"      // scan P&L $8,492
     );
 }
