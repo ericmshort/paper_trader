@@ -95,6 +95,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     // When true, all open positions for a symbol are closed immediately when the daily loss limit fires.
     // Intended for backtest use only — live trading leaves this false.
     private boolean closePositionsOnHalt      = false;
+    private int reversalMinSignals            = 3;
+    private int reversalMinConsecutive        = 2;
     // Set to the date once GET /positions confirms no open options remain after EOD close-all.
     private LocalDate brokerCloseAllDate      = null;
     // Set to true once the halt close-all confirms all positions are gone for the day.
@@ -124,6 +126,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     public void setPutsDisabledSymbols(Set<String> symbols)  { this.putsDisabledSymbols  = new HashSet<>(symbols); }
     public void setDowntrendPutMinSignals(int n)              { this.downtrendPutMinSignals = n; }
     public void setClosePositionsOnHalt(boolean v)            { this.closePositionsOnHalt = v; }
+    public void setReversalMinSignals(int n)                  { this.reversalMinSignals = n; }
+    public void setReversalMinConsecutive(int n)              { this.reversalMinConsecutive = n; }
     private boolean isStrategyEnabled(String name) { return enabledStrategies.isEmpty() || enabledStrategies.contains(name); }
 
     public OptionsSignalRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
@@ -645,15 +649,16 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         boolean hitProfitTarget = currentPremium >= pos.getPremiumPaid() * profitTarget;
         boolean nearExpiry      = pos.daysToExpiry(virtualDate) < 3;
 
-        // Require 3+ opposing signals for 2 consecutive ticks before exiting on reversal.
+        // Require reversalMinSignals+ opposing signals for reversalMinConsecutive consecutive
+        // ticks before exiting on reversal. Both thresholds are configurable for backtesting.
         int consecutive;
-        if (reversalSignals >= 3) {
+        if (reversalSignals >= reversalMinSignals) {
             consecutive = reversalConsecutive.merge(posKey, 1, Integer::sum);
         } else {
             reversalConsecutive.remove(posKey);
             consecutive = 0;
         }
-        boolean reversal = consecutive >= 2;
+        boolean reversal = consecutive >= reversalMinConsecutive;
 
         // Close as worthless only when the option has actually expired (T <= 0).
         boolean worthless = !canPrice && pos.getPremiumPaid() > 0;

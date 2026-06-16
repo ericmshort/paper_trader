@@ -129,7 +129,12 @@ public class IntradayBacktestRunner {
                 : List.of();
 
         double defaultLossLimitPct = cfg.getDailyLossLimitPct();
-        record RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies, double dailyLossLimitPct) {}
+        record RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies,
+                      double dailyLossLimitPct, int reversalMinSignals, int reversalMinConsecutive) {
+            RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies, double dailyLossLimitPct) {
+                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, 5, 2);
+            }
+        }
 
         java.util.List<RunCfg> runs = new java.util.ArrayList<>();
 
@@ -165,6 +170,25 @@ public class IntradayBacktestRunner {
             scanAllowlist.addAll(scanCandidates);
             runs.add(new RunCfg("SYMBOL SCAN: " + scanCandidates.size() + " candidates",
                     scanWatchlist, Set.copyOf(scanAllowlist), cfg.getEnabledStrategies(), defaultLossLimitPct));
+        } else if ("reversal-compare".equals(mode)) {
+            // Test signal reversal sensitivity: vary minSignals and minConsecutive thresholds.
+            // Baseline is the current hardcoded behaviour (3 signals, 2 consecutive ticks).
+            record RevCfg(int minSig, int minCons) {}
+            List<RevCfg> revCfgs = List.of(
+                new RevCfg(3, 2),   // current baseline
+                new RevCfg(3, 3),   // require 3 consecutive ticks
+                new RevCfg(4, 2),   // require 4 signals
+                new RevCfg(4, 3),   // 4 signals + 3 ticks
+                new RevCfg(5, 2),   // require 5 signals
+                new RevCfg(99, 2)   // effectively disabled
+            );
+            for (RevCfg rc : revCfgs) {
+                String label = rc.minSig() >= 99
+                        ? String.format("%-38s", "reversal DISABLED")
+                        : String.format("%-38s", "signals>=" + rc.minSig() + " for " + rc.minCons() + " ticks (current: signals>=3 for 2)");
+                runs.add(new RunCfg(label, baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(),
+                        defaultLossLimitPct, rc.minSig(), rc.minCons()));
+            }
         } else if ("today-compare".equals(mode)) {
             runs.add(new RunCfg("TODAY " + endDate + ": current config", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct));
         } else if (newCandidates.isEmpty()) {
@@ -205,6 +229,8 @@ public class IntradayBacktestRunner {
             router.setCallsDisabledSymbols(CALLS_DISABLED);
             router.setPutsDisabledSymbols(cfg.getOptionsPutsDisabled());
             router.setDowntrendPutMinSignals(cfg.getDowntrendPutMinSignals());
+            router.setReversalMinSignals(cfg2.reversalMinSignals());
+            router.setReversalMinConsecutive(cfg2.reversalMinConsecutive());
 
             long t0 = System.currentTimeMillis();
             IntradayBacktestResult r = engine.run(cfg2.watchlist(), barsBySymbol, 100_000.0, router, msg -> {},
@@ -226,7 +252,7 @@ public class IntradayBacktestRunner {
             boolean keepFull = newCandidates.isEmpty() || cfg2.label().startsWith("ALL:")
                     || "loss-limit-compare".equals(mode) || "add-candidates".equals(mode)
                     || "today-compare".equals(mode);
-            if (!keepFull || "strategy-compare".equals(mode)) {
+            if (!keepFull || "strategy-compare".equals(mode) || "reversal-compare".equals(mode)) {
                 summaries.add(new RunSummary(cfg2.label().trim(), cfg2.strategies(),
                         r.getTotalReturnPct(), r.getMaxDrawdownPct(),
                         r.getTotalTrades(), r.getWins(), r.getLosses()));
@@ -242,6 +268,19 @@ public class IntradayBacktestRunner {
             for (RunSummary s : summaries) {
                 double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
                 System.out.printf("%-37s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
+                        s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
+            }
+            appendHistorySummaries(cfg, summaries, startDate, endDate);
+            System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
+            return;
+        }
+
+        if ("reversal-compare".equals(mode)) {
+            System.out.printf("%n%-42s  %8s  %8s  %7s  %7s%n", "Reversal Config", "Return", "MaxDD", "Trades", "WinRate");
+            System.out.println("-".repeat(85));
+            for (RunSummary s : summaries) {
+                double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
+                System.out.printf("%-42s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
                         s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
             }
             appendHistorySummaries(cfg, summaries, startDate, endDate);

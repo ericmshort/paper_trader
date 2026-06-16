@@ -52,6 +52,8 @@ public class AppConfig {
     private Set<String> optionsPutsDisabled    = new LinkedHashSet<>();
     // Minimum sell signals required to open a put during a confirmed SPY downtrend.
     private int downtrendPutMinSignals = 4;
+    // Minimum opposing signals required on each of reversalMinConsecutive ticks to exit on reversal.
+    private int reversalMinSignals = 5;
     // When false, equity (stock) buys are disabled; only options trades execute.
     private boolean stockTradingEnabled = true;
     // Fraction of entry premium at which an options position is stop-lossed (default 0.50 = 50%).
@@ -121,6 +123,10 @@ public class AppConfig {
                 config.downtrendPutMinSignals = Integer.parseInt(
                         props.getProperty("options.downtrend_put_min_signals", "4"));
             } catch (NumberFormatException ignored) {}
+            try {
+                config.reversalMinSignals = Integer.parseInt(
+                        props.getProperty("options.reversal_min_signals", "5"));
+            } catch (NumberFormatException ignored) {}
             config.stockTradingEnabled = Boolean.parseBoolean(
                     props.getProperty("stock.trading.enabled", "true"));
             try {
@@ -155,6 +161,7 @@ public class AppConfig {
             props.setProperty("options.calls.disabled", String.join(",", optionsCallsDisabled));
             props.setProperty("options.puts.disabled",  String.join(",", optionsPutsDisabled));
             props.setProperty("options.downtrend_put_min_signals", String.valueOf(downtrendPutMinSignals));
+            props.setProperty("options.reversal_min_signals", String.valueOf(reversalMinSignals));
             props.setProperty("stock.trading.enabled", String.valueOf(stockTradingEnabled));
             props.setProperty("options.stop_loss_frac", String.valueOf(optionsStopLossFrac));
             props.setProperty("options.entry_cutoff", optionsEntryCutoff != null ? optionsEntryCutoff.toString() : "");
@@ -223,6 +230,9 @@ public class AppConfig {
     public boolean isStrategyEnabled(String name) { return enabledStrategies.contains(name); }
     public int getDowntrendPutMinSignals() { return downtrendPutMinSignals; }
     public void setDowntrendPutMinSignals(int n) { this.downtrendPutMinSignals = n; }
+
+    public int getReversalMinSignals() { return reversalMinSignals; }
+    public void setReversalMinSignals(int n) { this.reversalMinSignals = n; }
 
     public boolean isStockTradingEnabled() { return stockTradingEnabled; }
     public void setStockTradingEnabled(boolean v) { this.stockTradingEnabled = v; }
