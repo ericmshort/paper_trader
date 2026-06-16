@@ -19,7 +19,7 @@ public class DayTraderWatchList {
         "AMGN",  // $24,205
         "CRWD",  // $55,134
         "GS",    // $104,298
-        "AVGO",  // $23,068
+        "PLTR",  // $7,825 — replaced AVGO (ranked 37th at $4,536)
         "LRCX",  // $60,660
         "DE",    // $42,482
         "ORCL",  // $23,454
