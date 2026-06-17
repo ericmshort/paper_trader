@@ -65,7 +65,7 @@ public class AppConfig {
     // Consecutive same-direction ticks required before opening a new options position (default 1 = no filter).
     private int entryConfirmationTicks = 1;
     // When avoidOvernightHolds=false, close EOD positions below this fraction of entry premium (0.0 = hold all).
-    private double overnightMinPremiumFrac = 0.0;
+    private double overnightMinPremiumFrac = 0.8;
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();

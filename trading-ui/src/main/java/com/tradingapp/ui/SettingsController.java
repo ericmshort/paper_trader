@@ -51,6 +51,10 @@ public class SettingsController implements Initializable {
     @FXML private TextField downtrendPutMinSignalsField;
     @FXML private TextArea  optionsAllowlistArea;
     @FXML private TextField entryCutoffField;
+    @FXML private TextField profitTargetField;
+    @FXML private TextField reversalMinSignalsField;
+    @FXML private TextField entryConfirmationTicksField;
+    @FXML private TextField overnightFloorField;
     @FXML private TextField callsDisabledField;
     @FXML private TextField putsDisabledField;
     @FXML private PasswordField claudeApiKeyField;
@@ -121,6 +125,10 @@ public class SettingsController implements Initializable {
         downtrendPutMinSignalsField.setText(String.valueOf(cfg.getDowntrendPutMinSignals()));
         optionsAllowlistArea.setText(String.join(",", cfg.getOptionsSymbolAllowlist()));
         entryCutoffField.setText(cfg.getOptionsEntryCutoff() != null ? cfg.getOptionsEntryCutoff().toString() : "");
+        profitTargetField.setText(String.valueOf(cfg.getProfitTarget()));
+        reversalMinSignalsField.setText(String.valueOf(cfg.getReversalMinSignals()));
+        entryConfirmationTicksField.setText(String.valueOf(cfg.getEntryConfirmationTicks()));
+        overnightFloorField.setText(String.valueOf((int) Math.round(cfg.getOvernightMinPremiumFrac() * 100)));
         callsDisabledField.setText(String.join(",", cfg.getOptionsCallsDisabled()));
         putsDisabledField.setText(String.join(",", cfg.getOptionsPutsDisabled()));
         updateAlpacaFieldVisibility();
@@ -359,6 +367,22 @@ public class SettingsController implements Initializable {
             try { cfg.setOptionsEntryCutoff(LocalTime.parse(cutoffText)); }
             catch (DateTimeParseException ignored) {}
         }
+        try {
+            double pt = Double.parseDouble(profitTargetField.getText().strip());
+            cfg.setProfitTarget(Math.max(1.1, pt));
+        } catch (NumberFormatException ignored) {}
+        try {
+            int n = Integer.parseInt(reversalMinSignalsField.getText().strip());
+            cfg.setReversalMinSignals(Math.min(6, Math.max(1, n)));
+        } catch (NumberFormatException ignored) {}
+        try {
+            int n = Integer.parseInt(entryConfirmationTicksField.getText().strip());
+            cfg.setEntryConfirmationTicks(Math.max(1, n));
+        } catch (NumberFormatException ignored) {}
+        try {
+            int pct = Integer.parseInt(overnightFloorField.getText().strip());
+            cfg.setOvernightMinPremiumFrac(Math.min(100, Math.max(0, pct)) / 100.0);
+        } catch (NumberFormatException ignored) {}
         cfg.setOptionsCallsDisabled(parseSymbolSet(callsDisabledField.getText()));
         cfg.setOptionsPutsDisabled(parseSymbolSet(putsDisabledField.getText()));
         return cfg;

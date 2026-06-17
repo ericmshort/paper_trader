@@ -126,6 +126,15 @@
     </HBox>
 
     <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Overnight Floor:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="overnightFloorField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="80"/>
+        <Label text="% — when holding overnight, close EOD losers below this pct of entry (0 = hold all)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
         <Label text="Earnings Blackout:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
         <TextField fx:id="earningsBlackoutField" prefWidth="60"
                    style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
@@ -174,7 +183,25 @@
         <TextField fx:id="optionsStopLossField" prefWidth="60"
                    style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
                    promptText="30"/>
-        <Label text="exit when premium drops to this pct of entry cost (10–90)"
+        <Label text="% — exit when premium drops to this pct of entry cost (10–90)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Profit Target:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="profitTargetField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="2.5"/>
+        <Label text="× entry premium to close at profit (e.g. 2.5 = 150% gain)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Reversal Signals:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="reversalMinSignalsField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="5"/>
+        <Label text="opposing signals required per tick to trigger reversal exit (1–6)"
                style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
     </HBox>
 
@@ -184,6 +211,15 @@
                    style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
                    promptText="14:45"/>
         <Label text="ET — no new positions after this time (HH:mm, leave blank for no cutoff)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Entry Confirmation:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="entryConfirmationTicksField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="12"/>
+        <Label text="consecutive 5s ticks required before opening a position (1 = off, 12 = 60s)"
                style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
     </HBox>
 

@@ -172,6 +172,14 @@ public class DashboardController implements Initializable {
                     optionsRouter.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
                     optionsRouter.setEntryConfirmationTicks(cfg.getEntryConfirmationTicks());
                     optionsRouter.setOvernightMinPremiumFrac(cfg.getOvernightMinPremiumFrac());
+                    optionsRouter.setStopLossFrac(cfg.getOptionsStopLossFrac());
+                    optionsRouter.setProfitTarget(cfg.getProfitTarget());
+                    optionsRouter.setReversalMinSignals(cfg.getReversalMinSignals());
+                    optionsRouter.setDowntrendPutMinSignals(cfg.getDowntrendPutMinSignals());
+                    optionsRouter.setEntryCutoff(cfg.getOptionsEntryCutoff());
+                    optionsRouter.setOptionsAllowlist(cfg.getOptionsSymbolAllowlist());
+                    optionsRouter.setCallsDisabledSymbols(cfg.getOptionsCallsDisabled());
+                    optionsRouter.setPutsDisabledSymbols(cfg.getOptionsPutsDisabled());
                 }
                 Platform.runLater(() -> researchArea.appendText(
                         "\nRisk settings updated (effective next tick). Broker/quote changes take effect on next restart.\n"));
