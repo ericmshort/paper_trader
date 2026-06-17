@@ -169,6 +169,9 @@ public class DashboardController implements Initializable {
                 if (optionsRouter != null) {
                     optionsRouter.setMaxPortfolioExposure(cfg.getMaxPortfolioExposurePct() / 100.0);
                     optionsRouter.setEnabledStrategies(cfg.getEnabledStrategies());
+                    optionsRouter.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
+                    optionsRouter.setEntryConfirmationTicks(cfg.getEntryConfirmationTicks());
+                    optionsRouter.setOvernightMinPremiumFrac(cfg.getOvernightMinPremiumFrac());
                 }
                 Platform.runLater(() -> researchArea.appendText(
                         "\nRisk settings updated (effective next tick). Broker/quote changes take effect on next restart.\n"));
@@ -301,6 +304,9 @@ public class DashboardController implements Initializable {
         optionsRouter.setReversalMinSignals(appConfig.getReversalMinSignals());
         optionsRouter.setProfitTarget(appConfig.getProfitTarget());
         tradingLoop.setAvoidOvernightHolds(appConfig.isAvoidOvernightHolds());
+        optionsRouter.setAvoidOvernightHolds(appConfig.isAvoidOvernightHolds());
+        optionsRouter.setEntryConfirmationTicks(appConfig.getEntryConfirmationTicks());
+        optionsRouter.setOvernightMinPremiumFrac(appConfig.getOvernightMinPremiumFrac());
         tradingLoop.setMarketRegimeFilterEnabled(appConfig.isMarketRegimeFilterEnabled());
         tradingLoop.setEarningsCalendar(earningsCalendar);
         tradingLoop.setEarningsBlackoutDays(appConfig.getEarningsBlackoutDays());

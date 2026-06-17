@@ -62,6 +62,10 @@ public class AppConfig {
     private double optionsStopLossFrac = 0.50;
     // No new options entries after this ET time (null = no cutoff).
     private LocalTime optionsEntryCutoff = null;
+    // Consecutive same-direction ticks required before opening a new options position (default 1 = no filter).
+    private int entryConfirmationTicks = 1;
+    // When avoidOvernightHolds=false, close EOD positions below this fraction of entry premium (0.0 = hold all).
+    private double overnightMinPremiumFrac = 0.0;
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
@@ -144,6 +148,14 @@ public class AppConfig {
                 try { config.optionsEntryCutoff = LocalTime.parse(cutoffRaw); }
                 catch (DateTimeParseException ignored) {}
             }
+            try {
+                config.entryConfirmationTicks = Integer.parseInt(
+                        props.getProperty("options.entry_confirmation_ticks", "1"));
+            } catch (NumberFormatException ignored) {}
+            try {
+                config.overnightMinPremiumFrac = Double.parseDouble(
+                        props.getProperty("options.overnight_min_premium_frac", "0.0"));
+            } catch (NumberFormatException ignored) {}
         } catch (IOException ignored) {}
         return config;
     }
@@ -172,6 +184,8 @@ public class AppConfig {
             props.setProperty("stock.trading.enabled", String.valueOf(stockTradingEnabled));
             props.setProperty("options.stop_loss_frac", String.valueOf(optionsStopLossFrac));
             props.setProperty("options.entry_cutoff", optionsEntryCutoff != null ? optionsEntryCutoff.toString() : "");
+            props.setProperty("options.entry_confirmation_ticks", String.valueOf(entryConfirmationTicks));
+            props.setProperty("options.overnight_min_premium_frac", String.valueOf(overnightMinPremiumFrac));
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
             }
@@ -264,6 +278,12 @@ public class AppConfig {
 
     public LocalTime getOptionsEntryCutoff() { return optionsEntryCutoff; }
     public void setOptionsEntryCutoff(LocalTime t) { this.optionsEntryCutoff = t; }
+
+    public int getEntryConfirmationTicks() { return entryConfirmationTicks; }
+    public void setEntryConfirmationTicks(int n) { this.entryConfirmationTicks = n; }
+
+    public double getOvernightMinPremiumFrac() { return overnightMinPremiumFrac; }
+    public void setOvernightMinPremiumFrac(double frac) { this.overnightMinPremiumFrac = frac; }
 
     public boolean isAlpacaBroker() {
         return brokerType == BrokerType.ALPACA_PAPER || brokerType == BrokerType.ALPACA_LIVE;

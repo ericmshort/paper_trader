@@ -72,6 +72,9 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private final Map<String, ZonedDateTime> lastDirectionalCloseTime = new HashMap<>();
     private final Map<String, ZonedDateTime> lastAnyCloseTime         = new HashMap<>();
     private final Map<String, Integer> reversalConsecutive = new HashMap<>();
+    // Per-symbol consecutive-tick streaks for entry signal confirmation.
+    private final Map<String, Integer> entryBullStreak = new HashMap<>();
+    private final Map<String, Integer> entryBearStreak = new HashMap<>();
 
     private LocalDate stopLossResetDate;
     private BooleanSupplier uptrendSupplier;
@@ -97,6 +100,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private boolean closePositionsOnHalt      = false;
     private int reversalMinSignals            = 3;
     private int reversalMinConsecutive        = 2;
+    // Require this many consecutive same-direction ticks before opening a new position.
+    // Default 1 (no confirmation). Set to 12 on live to match ~60s of 1-min bar consensus.
+    private int entryConfirmationTicks        = 1;
+    // When avoidOvernightHolds=false, close any position whose EOD premium is below this
+    // fraction of entry (0.0 = hold everything). Cuts losers while letting winners run overnight.
+    private double overnightMinPremiumFrac    = 0.0;
     // Set to the date once GET /positions confirms no open options remain after EOD close-all.
     private LocalDate brokerCloseAllDate      = null;
     // Set to true once the halt close-all confirms all positions are gone for the day.
@@ -128,6 +137,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     public void setClosePositionsOnHalt(boolean v)            { this.closePositionsOnHalt = v; }
     public void setReversalMinSignals(int n)                  { this.reversalMinSignals = n; }
     public void setReversalMinConsecutive(int n)              { this.reversalMinConsecutive = n; }
+    public void setEntryConfirmationTicks(int n)              { this.entryConfirmationTicks = n; }
+    public void setOvernightMinPremiumFrac(double frac)       { this.overnightMinPremiumFrac = frac; }
     private boolean isStrategyEnabled(String name) { return enabledStrategies.isEmpty() || enabledStrategies.contains(name); }
 
     public OptionsSignalRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
@@ -176,6 +187,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         lastDirectionalCloseTime.clear();
         lastAnyCloseTime.clear();
         reversalConsecutive.clear();
+        entryBullStreak.clear();
+        entryBearStreak.clear();
         stopLossResetDate = date;
         if (dailyAllowlistProvider != null) {
             optionsAllowlist = new java.util.HashSet<>(dailyAllowlistProvider.apply(date));
@@ -259,24 +272,31 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                                     List<com.tradingapp.engine.SignalResult> rawSignals) {
         resetIfNewDay();
 
-        // ── Pre-close: force-close all open options ───────────────────────────
+        // ── Pre-close: force-close all, or apply overnight floor ─────────────
         LocalTime time = clock.get().toLocalTime();
-        if (avoidOvernightHolds && !time.isBefore(effectiveForceCloseTime)) {
-            LocalDate today = clock.get().toLocalDate();
-            if (today.equals(brokerCloseAllDate)) {
-                return; // confirmed all clear with broker — nothing left to do
+        if (!time.isBefore(effectiveForceCloseTime)) {
+            if (avoidOvernightHolds) {
+                LocalDate today = clock.get().toLocalDate();
+                if (today.equals(brokerCloseAllDate)) {
+                    return; // confirmed all clear with broker — nothing left to do
+                }
+                int result = optExec.closeAllFromBroker();
+                if (result == 0) {
+                    brokerCloseAllDate = today;
+                    researchCallback.accept("EOD: all options positions confirmed closed");
+                } else if (result > 0) {
+                    researchCallback.accept("EOD: " + result + " position(s) submitted for close — retrying next tick");
+                } else {
+                    // Paper trading: close this symbol's positions using local state + BS pricing
+                    forceCloseAllForSymbol(symbol, price);
+                }
+                return;
             }
-            int result = optExec.closeAllFromBroker();
-            if (result == 0) {
-                brokerCloseAllDate = today;
-                researchCallback.accept("EOD: all options positions confirmed closed");
-            } else if (result > 0) {
-                researchCallback.accept("EOD: " + result + " position(s) submitted for close — retrying next tick");
-            } else {
-                // Paper trading: close this symbol's positions using local state + BS pricing
-                forceCloseAllForSymbol(symbol, price);
+            // avoidOvernightHolds=false: cut positions below the premium floor (if configured),
+            // then fall through so stop-loss/profit-target still fire between 3:45 and close.
+            if (overnightMinPremiumFrac > 0.0) {
+                closeUnderfloorPositionsForSymbol(symbol, price);
             }
-            return;
         }
 
         String callKey            = symbol + "_CALL";
@@ -378,6 +398,23 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         boolean mixedStrong     = (buySignals >= 2 && sellSignals >= 1)
                                || (sellSignals >= 2 && buySignals >= 1);
 
+        // Track consecutive same-direction ticks; require entryConfirmationTicks before entry.
+        // This matches the signal consensus a 1-minute bar provides vs raw 5-second noise.
+        boolean netBullishTick = buySignals > 0 && sellSignals == 0;
+        boolean netBearishTick = sellSignals > 0 && buySignals == 0;
+        if (netBullishTick) {
+            entryBullStreak.merge(symbol, 1, Integer::sum);
+            entryBearStreak.remove(symbol);
+        } else if (netBearishTick) {
+            entryBearStreak.merge(symbol, 1, Integer::sum);
+            entryBullStreak.remove(symbol);
+        } else {
+            entryBullStreak.remove(symbol);
+            entryBearStreak.remove(symbol);
+        }
+        boolean canEnterBull = entryBullStreak.getOrDefault(symbol, 0) >= entryConfirmationTicks;
+        boolean canEnterBear = entryBearStreak.getOrDefault(symbol, 0) >= entryConfirmationTicks;
+
         // Block calls in downtrend — symmetric to the per-method put block in uptrend
         boolean inDowntrend = uptrendSupplier != null && !uptrendSupplier.getAsBoolean();
         // Require more sell signals to open a put in a bull market — loosens in a bear market
@@ -420,7 +457,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         boolean callsAllowed = !callsDisabledSymbols.contains(symbol);
         boolean putsAllowed  = !putsDisabledSymbols.contains(symbol);
 
-        if (extremeBullish && !hasDirectional && !hasMultiLeg) {
+        if (extremeBullish && !hasDirectional && !hasMultiLeg && canEnterBull) {
             if (!callsAllowed)
                 researchCallback.accept(symbol + " CALL skip: calls disabled for symbol");
             else if (inDowntrend)
@@ -428,7 +465,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             else if (isStrategyEnabled("HIGH_DELTA_SCALP"))
                 tryOpenHighDeltaScalp(symbol, price, K, expiry, T, sigma, true, signalStr, featureCsv);
 
-        } else if (veryStrongBull && !hasDirectional && !hasMultiLeg) {
+        } else if (veryStrongBull && !hasDirectional && !hasMultiLeg && canEnterBull) {
             if (!callsAllowed)
                 researchCallback.accept(symbol + " CALL skip: calls disabled for symbol");
             else if (inDowntrend)
@@ -436,7 +473,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             else if (isStrategyEnabled("MOMENTUM_NEAR_TERM"))
                 tryOpenMomentumNearTerm(symbol, price, true, sigma, signalStr, featureCsv);
 
-        } else if (purelyBullish && !hasDirectional && !hasMultiLeg) {
+        } else if (purelyBullish && !hasDirectional && !hasMultiLeg && canEnterBull) {
             if (!callsAllowed)
                 researchCallback.accept(symbol + " CALL skip: calls disabled for symbol");
             else if (inDowntrend)
@@ -444,7 +481,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             else if (isStrategyEnabled("LONG_CALL"))
                 tryOpenLongCall(symbol, price, K, expiry, T, sigma, signalStr, featureCsv, callKey, opts);
 
-        } else if (extremeBearish && !hasDirectional && !hasMultiLeg) {
+        } else if (extremeBearish && !hasDirectional && !hasMultiLeg && canEnterBear) {
             if (!putsAllowed)
                 researchCallback.accept(symbol + " PUT skip: puts disabled for symbol");
             else if (sellSignals < putMin)
@@ -452,7 +489,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             else if (isStrategyEnabled("HIGH_DELTA_SCALP"))
                 tryOpenHighDeltaScalp(symbol, price, K, expiry, T, sigma, false, signalStr, featureCsv);
 
-        } else if (veryStrongBear && !hasDirectional && !hasMultiLeg) {
+        } else if (veryStrongBear && !hasDirectional && !hasMultiLeg && canEnterBear) {
             if (!putsAllowed)
                 researchCallback.accept(symbol + " PUT skip: puts disabled for symbol");
             else if (sellSignals < putMin)
@@ -460,7 +497,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             else if (isStrategyEnabled("MOMENTUM_NEAR_TERM"))
                 tryOpenMomentumNearTerm(symbol, price, false, sigma, signalStr, featureCsv);
 
-        } else if (purelyBearish && !hasDirectional && !hasMultiLeg) {
+        } else if (purelyBearish && !hasDirectional && !hasMultiLeg && canEnterBear) {
             if (!putsAllowed)
                 researchCallback.accept(symbol + " PUT skip: puts disabled for symbol");
             else if (sellSignals < putMin)
@@ -468,7 +505,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             else if (isStrategyEnabled("LONG_PUT"))
                 tryOpenLongPut(symbol, price, K, expiry, T, sigma, signalStr, featureCsv, putKey, sellSignals, opts);
 
-        } else if (mixedStrong && !hasDirectional && !hasMultiLeg) {
+        } else if (mixedStrong && !hasDirectional && !hasMultiLeg && (canEnterBull || canEnterBear)) {
             if (callsAllowed && putsAllowed && isZeroDteDay() && isStrategyEnabled("ZERO_DTE"))
                 tryOpenZeroDTE(symbol, price, K, sigma, signalStr, featureCsv);
         }
@@ -497,10 +534,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             LocalDate breakoutExpiry = bsEngine.selectNearTermExpiry();
             double breakoutT = bsEngine.timeToExpiry(breakoutExpiry);
             if (breakoutT <= 0) breakoutT = 5.0 / 365.0;
-            if (orbBuy && buySignals >= 2 && callsAllowed && !inDowntrend) {
+            if (orbBuy && buySignals >= 2 && callsAllowed && !inDowntrend && canEnterBull) {
                 tryOpenDirectional(symbol, price, true, breakoutCallKey, "OPENING-BREAKOUT",
                         breakoutExpiry, breakoutT, K, sigma, 0.05, 5, signalStr, featureCsv);
-            } else if (orbSell && sellSignals >= 2 && putsAllowed && sellSignals >= putMin) {
+            } else if (orbSell && sellSignals >= 2 && putsAllowed && sellSignals >= putMin && canEnterBear) {
                 tryOpenDirectional(symbol, price, false, breakoutPutKey, "OPENING-BREAKOUT",
                         breakoutExpiry, breakoutT, K, sigma, 0.05, 5, signalStr, featureCsv);
             }
@@ -525,10 +562,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             LocalDate stochExpiry = bsEngine.selectNearTermExpiry();
             double stochT = bsEngine.timeToExpiry(stochExpiry);
             if (stochT <= 0) stochT = 5.0 / 365.0;
-            if (stochBuy && buySignals >= 1 && callsAllowed && !inDowntrend) {
+            if (stochBuy && buySignals >= 1 && callsAllowed && !inDowntrend && canEnterBull) {
                 tryOpenDirectional(symbol, price, true, stochCallKey, "STOCH-REVERSAL",
                         stochExpiry, stochT, K, sigma, 0.05, 5, signalStr, featureCsv);
-            } else if (stochSell && sellSignals >= 1 && putsAllowed && sellSignals >= putMin) {
+            } else if (stochSell && sellSignals >= 1 && putsAllowed && sellSignals >= putMin && canEnterBear) {
                 tryOpenDirectional(symbol, price, false, stochPutKey, "STOCH-REVERSAL",
                         stochExpiry, stochT, K, sigma, 0.05, 5, signalStr, featureCsv);
             }
@@ -550,10 +587,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                     s -> "RELATIVE_STRENGTH".equals(s.getIndicatorName()) && s.getDirection() == com.tradingapp.engine.SignalResult.Direction.BUY);
             boolean rsSell = rawSignals.stream().anyMatch(
                     s -> "RELATIVE_STRENGTH".equals(s.getIndicatorName()) && s.getDirection() == com.tradingapp.engine.SignalResult.Direction.SELL);
-            if (rsBuy && buySignals >= 2 && callsAllowed && !inDowntrend) {
+            if (rsBuy && buySignals >= 2 && callsAllowed && !inDowntrend && canEnterBull) {
                 tryOpenDirectional(symbol, price, true, rsCallKey, "RS-DIVERGENCE",
                         expiry, T, K, sigma, 0.05, 5, signalStr, featureCsv);
-            } else if (rsSell && sellSignals >= 2 && putsAllowed && sellSignals >= putMin) {
+            } else if (rsSell && sellSignals >= 2 && putsAllowed && sellSignals >= putMin && canEnterBear) {
                 tryOpenDirectional(symbol, price, false, rsPutKey, "RS-DIVERGENCE",
                         expiry, T, K, sigma, 0.05, 5, signalStr, featureCsv);
             }
@@ -578,10 +615,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             LocalDate macdExpiry = bsEngine.selectNearTermExpiry();
             double macdT = bsEngine.timeToExpiry(macdExpiry);
             if (macdT <= 0) macdT = 7.0 / 365.0;
-            if (macdBuy && buySignals >= 1 && callsAllowed && !inDowntrend) {
+            if (macdBuy && buySignals >= 1 && callsAllowed && !inDowntrend && canEnterBull) {
                 tryOpenDirectional(symbol, price, true, macdCallKey, "MACD-CROSSOVER",
                         macdExpiry, macdT, K, sigma, 0.05, 5, signalStr, featureCsv);
-            } else if (macdSell && sellSignals >= 1 && putsAllowed && sellSignals >= putMin) {
+            } else if (macdSell && sellSignals >= 1 && putsAllowed && sellSignals >= putMin && canEnterBear) {
                 tryOpenDirectional(symbol, price, false, macdPutKey, "MACD-CROSSOVER",
                         macdExpiry, macdT, K, sigma, 0.05, 5, signalStr, featureCsv);
             }
@@ -616,6 +653,42 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             lastAnyCloseTime.put(symbol, clock.get());
             researchCallback.accept(symbol + (isCall ? " CALL" : " PUT")
                     + " closed pre-close prem=" + String.format("%.2f", premium));
+        }
+    }
+
+    // Closes positions below overnightMinPremiumFrac of entry; holds the rest overnight.
+    private void closeUnderfloorPositionsForSymbol(String symbol, double stockPrice) {
+        List<String> keys = account.getOptionsPositions().entrySet().stream()
+                .filter(e -> symbol.equals(e.getValue().getSymbol()))
+                .map(Map.Entry::getKey)
+                .collect(java.util.stream.Collectors.toList());
+        double sigma = computeVol(symbol);
+        for (String key : keys) {
+            OptionsPosition pos = account.getOptionsPositions().get(key);
+            if (pos == null) continue;
+            boolean isCall = "CALL".equals(pos.getType());
+            double T = bsEngine.timeToExpiry(pos.getExpiry());
+            double bsPrice;
+            if (sigma > 0 && T > 0) {
+                bsPrice = isCall
+                    ? bsEngine.callPrice(stockPrice, pos.getStrike(), RISK_FREE_RATE, T, sigma)
+                    : bsEngine.putPrice(stockPrice, pos.getStrike(), RISK_FREE_RATE, T, sigma);
+            } else {
+                bsPrice = isCall
+                    ? Math.max(0, stockPrice - pos.getStrike())
+                    : Math.max(0, pos.getStrike() - stockPrice);
+            }
+            double premium = resolveClosePremium(symbol, pos.getStrike(), pos.getExpiry(), isCall, bsPrice);
+            double floor   = pos.getPremiumPaid() * overnightMinPremiumFrac;
+            if (premium < floor) {
+                optExec.closePosition(key, premium, "EOD floor: below overnight hold threshold");
+                lastAnyCloseTime.put(symbol, clock.get());
+                researchCallback.accept(String.format("%s %s closed EOD (prem=%.2f < floor=%.2f)",
+                        symbol, isCall ? "CALL" : "PUT", premium, floor));
+            } else {
+                researchCallback.accept(String.format("%s %s held overnight (prem=%.2f >= floor=%.2f)",
+                        symbol, isCall ? "CALL" : "PUT", premium, floor));
+            }
         }
     }
 
@@ -1057,6 +1130,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             lastMultiLegCloseTime.clear();
             lastDirectionalCloseTime.clear();
             reversalConsecutive.clear();
+            entryBullStreak.clear();
+            entryBearStreak.clear();
             haltCloseDone = false;
             stopLossResetDate = today;
         }

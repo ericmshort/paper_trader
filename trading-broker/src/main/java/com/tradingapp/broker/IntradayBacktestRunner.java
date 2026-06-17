@@ -262,6 +262,8 @@ public class IntradayBacktestRunner {
             router.setReversalMinSignals(cfg2.reversalMinSignals());
             router.setReversalMinConsecutive(cfg2.reversalMinConsecutive());
             router.setProfitTarget(cfg2.profitTarget());
+            router.setEntryConfirmationTicks(1); // backtest uses 1-min bars; no tick confirmation needed
+            router.setOvernightMinPremiumFrac(cfg.getOvernightMinPremiumFrac());
 
             long t0 = System.currentTimeMillis();
             IntradayBacktestResult r = engine.run(cfg2.watchlist(), barsBySymbol, 100_000.0, router, msg -> {},
