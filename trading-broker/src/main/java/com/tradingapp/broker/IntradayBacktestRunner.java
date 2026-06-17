@@ -26,6 +26,7 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -77,8 +78,10 @@ public class IntradayBacktestRunner {
         }
         LocalDate startDate = endDate.minusDays(800);
 
-        // Empty = confirmation run; populate for swap-testing candidates against the final 30
-        List<String> newCandidates = List.of();
+        // Empty = confirmation run; pass comma-separated symbols via -Dbacktest.candidates=AMD,AVGO,...
+        String candidatesStr = System.getProperty("backtest.candidates", "");
+        List<String> newCandidates = candidatesStr.isBlank() ? List.of()
+                : Arrays.stream(candidatesStr.split(",")).map(String::trim).filter(s -> !s.isEmpty()).toList();
 
         List<String> baseWatchlist = new ArrayList<>(DayTraderWatchList.SYMBOLS);
         List<String> allSymbols = new ArrayList<>(baseWatchlist);
