@@ -674,6 +674,7 @@ public class DashboardController implements Initializable {
             double optTotalUnrealized,
             List<StockPositionRow> stockRows,
             double stkTotalUnrealized,
+            double totalUnrealizedPnl,
             int wins,
             int losses,
             double winRate,
@@ -708,9 +709,16 @@ public class DashboardController implements Initializable {
         double brokerPv = account.getBrokerPortfolioValue();
         double totalPortfolio = brokerPv > 0 ? brokerPv : availableCash + stockHoldings + optionHoldings;
 
+        // Derive total unrealized P&L from Alpaca's authoritative portfolio value so it
+        // stays consistent with the total portfolio figure (brokerPv - starting = total P&L).
+        // Fall back to local computation when Alpaca data isn't available yet.
+        double totalUnrealizedPnl = brokerPv > 0
+                ? brokerPv - Account.STARTING_BALANCE
+                : optTotalUnrealized + stkTotalUnrealized;
+
         return new UiSnapshot(history, availableCash, stockHoldings, optionHoldings, totalPortfolio,
                 optionsCashDeployed, optionRows, optTotalUnrealized, stockRows, stkTotalUnrealized,
-                wins, losses, winRate, realizedPnl, account.isTradingHalted());
+                totalUnrealizedPnl, wins, losses, winRate, realizedPnl, account.isTradingHalted());
     }
 
     // Must be called on the FX thread. Only touches FX nodes.
@@ -728,7 +736,7 @@ public class DashboardController implements Initializable {
         optionsCashDeployedLabel.setText(String.format("Options Reserved: $%,.2f", s.optionsCashDeployed()));
         optionsTable.setItems(FXCollections.observableArrayList(s.optionRows()));
         stockPositionsTable.setItems(FXCollections.observableArrayList(s.stockRows()));
-        unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", s.optTotalUnrealized() + s.stkTotalUnrealized()));
+        unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", s.totalUnrealizedPnl()));
         optionsTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total P&L", s.optTotalUnrealized()));
         stockTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", s.stkTotalUnrealized()));
         winsLabel.setText("Wins: " + s.wins());
@@ -748,10 +756,12 @@ public class DashboardController implements Initializable {
         double availableCash = account.getBalance();
         double stockHoldings = computeStockHoldings();
         double optionHoldings = computeOptionHoldings();
-        double unrealizedPnl = computeStockUnrealizedPnL() + computeOptionsUnrealizedPnL();
         double realizedPnl = computeClosedTrades().stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
         double brokerPv = account.getBrokerPortfolioValue();
         double totalPortfolio = brokerPv > 0 ? brokerPv : availableCash + stockHoldings + optionHoldings;
+        double unrealizedPnl = brokerPv > 0
+                ? brokerPv - Account.STARTING_BALANCE
+                : computeStockUnrealizedPnL() + computeOptionsUnrealizedPnL();
 
         totalPortfolioLabel.setText(String.format("Total Portfolio: $%,.2f", totalPortfolio));
         stockHoldingsLabel.setText(String.format("Stocks: $%,.2f", stockHoldings));
