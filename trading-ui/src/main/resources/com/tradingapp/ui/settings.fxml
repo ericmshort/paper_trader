@@ -130,7 +130,7 @@
         <TextField fx:id="overnightFloorField" prefWidth="60"
                    style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
                    promptText="80"/>
-        <Label text="% — when holding overnight, close EOD losers below this pct of entry (0 = hold all)"
+        <Label text="pct of entry — when holding overnight, close EOD losers below this floor (0 = hold all)"
                style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
     </HBox>
 
@@ -183,7 +183,7 @@
         <TextField fx:id="optionsStopLossField" prefWidth="60"
                    style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
                    promptText="30"/>
-        <Label text="% — exit when premium drops to this pct of entry cost (10–90)"
+        <Label text="exit when premium drops to this pct of entry cost (10–90)"
                style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
     </HBox>
 

@@ -63,6 +63,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
 import java.util.function.Consumer;
 
@@ -127,6 +128,9 @@ public class DashboardController implements Initializable {
     private int tickCount = 0;
     private boolean alpacaMode = false;
     private final ConcurrentLinkedQueue<String> pendingMessages = new ConcurrentLinkedQueue<>();
+    // Coalesces concurrent refresh requests: at most one applyUiSnapshot is queued in the FX
+    // event loop at any time. The FX thread always applies the latest snapshot.
+    private final AtomicReference<UiSnapshot> pendingSnapshot = new AtomicReference<>();
 
     private static final Logger LOG = Logger.getLogger(DashboardController.class.getName());
     private final TradingLogger tradingLogger = new TradingLogger();
@@ -238,10 +242,19 @@ public class DashboardController implements Initializable {
                 tradingLogger.log(msg);
             }
         };
-        // Compute snapshot on the trading-loop thread; only dispatch FX mutations to the FX thread.
+        // Coalescing UI refresh: snapshot is computed on the trading thread, then stored in
+        // pendingSnapshot. Only one Platform.runLater dispatch is outstanding at a time — if one
+        // is already queued, we just replace the snapshot value so the FX thread applies the
+        // latest state when it runs. This prevents multiple applyUiSnapshot calls from piling up
+        // in the FX event queue on ticks where several trades fire in quick succession.
         Runnable uiRefresh = () -> {
             UiSnapshot snapshot = computeUiSnapshot();
-            Platform.runLater(() -> applyUiSnapshot(snapshot));
+            if (pendingSnapshot.getAndSet(snapshot) == null) {
+                Platform.runLater(() -> {
+                    UiSnapshot s = pendingSnapshot.getAndSet(null);
+                    if (s != null) applyUiSnapshot(s);
+                });
+            }
         };
 
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, transactionLog,
@@ -740,7 +753,15 @@ public class DashboardController implements Initializable {
         String msg;
         StringBuilder logBuf = new StringBuilder();
         while ((msg = pendingMessages.poll()) != null) logBuf.append(msg).append('\n');
-        if (logBuf.length() > 0) researchArea.appendText(logBuf.toString());
+        if (logBuf.length() > 0) {
+            // TextArea layout cost grows with text length; trim from the top when it gets large.
+            String existing = researchArea.getText();
+            if (existing.length() > 80_000) {
+                int cut = existing.indexOf('\n', existing.length() - 60_000);
+                researchArea.setText(cut > 0 ? existing.substring(cut + 1) : existing.substring(existing.length() - 60_000));
+            }
+            researchArea.appendText(logBuf.toString());
+        }
 
         tradeHistoryTable.setItems(FXCollections.observableArrayList(s.history()));
         totalPortfolioLabel.setText(String.format("Total Portfolio: $%,.2f", s.totalPortfolio()));
