@@ -79,7 +79,6 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private LocalDate stopLossResetDate;
     private BooleanSupplier uptrendSupplier;
     private Set<String> enabledStrategies    = new HashSet<>();
-    private volatile boolean tradingEnabled  = true;
     // If set, no new options entries are opened at or after this time (closes still run).
     private LocalTime entryCutoff             = null;
     // If non-empty, only these symbols may open new options positions.
@@ -120,7 +119,6 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     public void setUptrendSupplier(BooleanSupplier s) { this.uptrendSupplier = s; }
     public void setMaxPortfolioExposure(double fraction) { this.maxPortfolioExposure = fraction; }
     public void setEnabledStrategies(Set<String> strategies) { this.enabledStrategies = new HashSet<>(strategies); }
-    public void setTradingEnabled(boolean enabled) { this.tradingEnabled = enabled; }
     public void setClock(Supplier<ZonedDateTime> clock) { this.clock = clock; }
     public void setStopLossFrac(double frac)           { this.stopLossFrac = frac; }
     public void setProfitTarget(double multiple)       { this.profitTarget = multiple; }
@@ -273,11 +271,11 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     public void evaluateWithSignals(String symbol, double price, int buySignals, int sellSignals,
                                     String signalStr, String featureCsv,
                                     List<com.tradingapp.engine.SignalResult> rawSignals) {
-        if (!tradingEnabled) return;
         resetIfNewDay();
 
         // ── Pre-close: force-close all, or apply overnight floor ─────────────
         LocalTime time = clock.get().toLocalTime();
+        bsEngine.setCurrentTime(time);
         if (!time.isBefore(effectiveForceCloseTime)) {
             if (avoidOvernightHolds) {
                 LocalDate today = clock.get().toLocalDate();

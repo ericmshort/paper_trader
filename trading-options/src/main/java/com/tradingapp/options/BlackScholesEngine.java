@@ -1,18 +1,78 @@
 package com.tradingapp.options;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.DayOfWeek;
 import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAdjusters;
 import java.util.List;
+import java.util.function.Function;
 
 public class BlackScholesEngine {
+
+    // ── IV adjustment (backtest realism) ─────────────────────────────────────
+
+    // Market open IV premium: options at 9:30am trade ~30% above theoretical BS value.
+    // This premium is absorbed linearly over the first 60 minutes of trading.
+    static final double OPEN_IV_MULT  = 1.30;
+    static final int    DECAY_MINUTES = 60;
+    private static final LocalTime MARKET_OPEN = LocalTime.of(9, 30);
+
+    private Function<LocalDate, Double> vixProvider = null;
+    private double baselineVix = 18.0;
+    private double vixScale    = 1.0;  // updated each day via setReferenceDate
+    private LocalTime currentTime = null;
+
+    /**
+     * Injects a per-day VIX provider and long-term VIX average.
+     * When set, sigma is scaled by vix_today / baseline each trading day.
+     * No-op in live trading (provider is never set outside the backtest runner).
+     */
+    public void setVixProvider(Function<LocalDate, Double> provider, double baseline) {
+        this.vixProvider = provider;
+        this.baselineVix = baseline > 0 ? baseline : 18.0;
+    }
+
+    /** Current virtual time of day — used to compute the intraday IV decay factor. */
+    public void setCurrentTime(LocalTime time) { this.currentTime = time; }
+
+    /**
+     * Effective sigma for pricing: raw historical vol × VIX scale × intraday open premium.
+     * <p>
+     * VIX scale: sigma is proportionally larger on high-VIX days and smaller on low-VIX days,
+     * reflecting that option market-makers charge more when realized vol is expected to be higher.
+     * Capped at [0.5×, 2.5×] to prevent extreme VIX spikes from producing nonsensical premiums.
+     * <p>
+     * Intraday decay: ATM options at the open carry a 30% IV premium above fair value as the
+     * overnight gap risk is priced in. This premium decays to zero by 10:30am as order flow
+     * establishes the true intraday range.
+     */
+    double adjustedSigma(double sigma) {
+        double intraday = 1.0;
+        if (currentTime != null && !currentTime.isBefore(MARKET_OPEN)) {
+            long mins = ChronoUnit.MINUTES.between(MARKET_OPEN, currentTime);
+            if (mins < DECAY_MINUTES) {
+                intraday = OPEN_IV_MULT - (OPEN_IV_MULT - 1.0) * mins / (double) DECAY_MINUTES;
+            }
+        }
+        return sigma * vixScale * intraday;
+    }
+
+    // ── Date / time ───────────────────────────────────────────────────────────
 
     private LocalDate referenceDate = null;
 
     /** Override the "today" used for expiry selection and time-to-expiry calculations.
      *  Set to the simulated date during backtesting; leave null for live trading. */
-    public void setReferenceDate(LocalDate date) { this.referenceDate = date; }
+    public void setReferenceDate(LocalDate date) {
+        this.referenceDate = date;
+        if (vixProvider != null && baselineVix > 0) {
+            double vix = vixProvider.apply(date);
+            vixScale = Math.max(0.5, Math.min(2.5, vix / baselineVix));
+        } else {
+            vixScale = 1.0;
+        }
+    }
 
     private LocalDate today() { return referenceDate != null ? referenceDate : LocalDate.now(); }
 
@@ -117,18 +177,18 @@ public class BlackScholesEngine {
     }
 
     public double callPrice(double S, double K, double r, double T, double sigma) {
-        double[] d = d1d2(S, K, r, T, sigma);
+        double[] d = d1d2(S, K, r, T, adjustedSigma(sigma));
         return S * normalCDF(d[0]) - K * Math.exp(-r * T) * normalCDF(d[1]);
     }
 
     public double putPrice(double S, double K, double r, double T, double sigma) {
-        double[] d = d1d2(S, K, r, T, sigma);
+        double[] d = d1d2(S, K, r, T, adjustedSigma(sigma));
         return K * Math.exp(-r * T) * normalCDF(-d[1]) - S * normalCDF(-d[0]);
     }
 
     public GreeksResult greeks(double S, double K, double r, double T, double sigma, boolean isCall) {
         if (T <= 0 || sigma <= 0) return new GreeksResult(0, 0, 0, 0);
-        double[] d = d1d2(S, K, r, T, sigma);
+        double[] d = d1d2(S, K, r, T, adjustedSigma(sigma));
         double d1 = d[0], d2 = d[1];
         double sqrtT = Math.sqrt(T);
         double phi = normalPDF(d1);

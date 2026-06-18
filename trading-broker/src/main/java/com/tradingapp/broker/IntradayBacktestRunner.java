@@ -118,6 +118,9 @@ public class IntradayBacktestRunner {
         }
         System.out.println("Fetched data for " + barsBySymbol.size() + " symbols. Running sim...");
 
+        VixCache vixCache = new VixCache();
+        vixCache.load(startDate, endDate);
+
         double maxExposure = cfg.getMaxPortfolioExposurePct() / 100.0;
         IntradayBacktestEngine engine = new IntradayBacktestEngine(new IndicatorEngine(), new FeeCalculator());
 
@@ -302,8 +305,10 @@ public class IntradayBacktestRunner {
         for (RunCfg cfg2 : runs) {
             System.out.println("\n=== " + cfg2.label() + " ===");
             OptionsOrderExecutor optExec = new OptionsOrderExecutor(new Account(), null);
+            BlackScholesEngine bs = new BlackScholesEngine();
+            bs.setVixProvider(vixCache::getVix, vixCache.baselineVix());
             OptionsSignalRouter router = new OptionsSignalRouter(
-                    new BlackScholesEngine(), optExec, new Account(), new PriceHistory(), msg -> {}, null);
+                    bs, optExec, new Account(), new PriceHistory(), msg -> {}, null);
             router.setMaxPortfolioExposure(maxExposure);
             router.setEnabledStrategies(cfg2.strategies());
             router.setStopLossFrac(cfg.getOptionsStopLossFrac());
