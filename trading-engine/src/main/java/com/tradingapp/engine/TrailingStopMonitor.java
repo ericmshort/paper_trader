@@ -17,10 +17,14 @@ public class TrailingStopMonitor {
             peaks.put(symbol, currentPrice);
             return false;
         }
-        return currentPrice <= peak * 0.95;
+        return currentPrice <= peak * 0.96;
     }
 
     public void reset(String symbol) {
         peaks.remove(symbol);
+    }
+
+    public void resetAll() {
+        peaks.clear();
     }
 }

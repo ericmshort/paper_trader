@@ -3,8 +3,15 @@ package com.tradingapp.broker;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Properties;
@@ -14,7 +21,7 @@ import java.util.stream.Collectors;
 public class AppConfig {
 
     public enum BrokerType { SIMULATED, ALPACA_PAPER, ALPACA_LIVE }
-    public enum QuoteProviderType { YAHOO, ALPACA }
+    public enum QuoteProviderType { YAHOO, ALPACA, ALPACA_WEBSOCKET_FREE }
 
     public static final String APP_PROFILE = "paper-trader";
 
@@ -27,6 +34,7 @@ public class AppConfig {
     private BrokerType brokerType = BrokerType.SIMULATED;
     private String alpacaApiKey = "";
     private String alpacaApiSecret = "";
+    private String claudeApiKey = "";
     private QuoteProviderType quoteProviderType = QuoteProviderType.YAHOO;
     private double dailyLossLimitPct = 5.0;
     private double maxPortfolioExposurePct = 60.0;
@@ -34,9 +42,31 @@ public class AppConfig {
     private boolean marketRegimeFilterEnabled = true;
     private int earningsBlackoutDays = 3;
     private boolean optionsTradingEnabled = true;
-    // Strategies enabled for live trading. Defaults to conservative set.
+    // Strategies enabled for live trading.
     private Set<String> enabledStrategies = new LinkedHashSet<>(
-            Arrays.asList("COVERED_CALL", "BULL_PUT_SPREAD"));
+            Arrays.asList("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM", "LONG_CALL", "LONG_PUT", "ZERO_DTE"));
+    // If non-empty, only these symbols may trade options. Empty = all symbols allowed.
+    private Set<String> optionsSymbolAllowlist = new LinkedHashSet<>();
+    // Symbols in this set may trade puts but not calls.
+    private Set<String> optionsCallsDisabled   = new LinkedHashSet<>();
+    // Symbols in this set may trade calls but not puts.
+    private Set<String> optionsPutsDisabled    = new LinkedHashSet<>();
+    // Minimum sell signals required to open a put during a confirmed SPY downtrend.
+    private int downtrendPutMinSignals = 4;
+    // Minimum opposing signals required on each of reversalMinConsecutive ticks to exit on reversal.
+    private int reversalMinSignals = 5;
+    // Close a winning options position when premium reaches this multiple of entry (e.g. 2.5 = 150% gain).
+    private double profitTarget = 2.5;
+    // When false, equity (stock) buys are disabled; only options trades execute.
+    private boolean stockTradingEnabled = true;
+    // Fraction of entry premium at which an options position is stop-lossed (default 0.50 = 50%).
+    private double optionsStopLossFrac = 0.50;
+    // No new options entries after this ET time (null = no cutoff).
+    private LocalTime optionsEntryCutoff = null;
+    // Consecutive same-direction ticks required before opening a new options position (default 1 = no filter).
+    private int entryConfirmationTicks = 1;
+    // When avoidOvernightHolds=false, close EOD positions below this fraction of entry premium (0.0 = hold all).
+    private double overnightMinPremiumFrac = 0.8;
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
@@ -52,6 +82,7 @@ public class AppConfig {
             } catch (IllegalArgumentException ignored) {}
             config.alpacaApiKey = props.getProperty("broker.alpaca.api_key", "");
             config.alpacaApiSecret = props.getProperty("broker.alpaca.api_secret", "");
+            config.claudeApiKey = props.getProperty("ai.claude.api_key", "");
             try {
                 config.quoteProviderType = QuoteProviderType.valueOf(props.getProperty("quote.provider", "YAHOO"));
             } catch (IllegalArgumentException ignored) {}
@@ -79,6 +110,55 @@ public class AppConfig {
                         .map(String::strip).filter(s -> !s.isEmpty())
                         .collect(Collectors.toCollection(LinkedHashSet::new));
             }
+            String allowlistRaw = props.getProperty("options.symbol.allowlist", "");
+            if (!allowlistRaw.isBlank()) {
+                config.optionsSymbolAllowlist = Arrays.stream(allowlistRaw.split(","))
+                        .map(String::strip).filter(s -> !s.isEmpty())
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
+            }
+            String callsDisabledRaw = props.getProperty("options.calls.disabled", "");
+            if (!callsDisabledRaw.isBlank()) {
+                config.optionsCallsDisabled = Arrays.stream(callsDisabledRaw.split(","))
+                        .map(String::strip).filter(s -> !s.isEmpty())
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
+            }
+            String putsDisabledRaw = props.getProperty("options.puts.disabled", "");
+            if (!putsDisabledRaw.isBlank()) {
+                config.optionsPutsDisabled = Arrays.stream(putsDisabledRaw.split(","))
+                        .map(String::strip).filter(s -> !s.isEmpty())
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
+            }
+            try {
+                config.downtrendPutMinSignals = Integer.parseInt(
+                        props.getProperty("options.downtrend_put_min_signals", "4"));
+            } catch (NumberFormatException ignored) {}
+            try {
+                config.reversalMinSignals = Integer.parseInt(
+                        props.getProperty("options.reversal_min_signals", "5"));
+            } catch (NumberFormatException ignored) {}
+            try {
+                config.profitTarget = Double.parseDouble(
+                        props.getProperty("options.profit_target", "2.0"));
+            } catch (NumberFormatException ignored) {}
+            config.stockTradingEnabled = Boolean.parseBoolean(
+                    props.getProperty("stock.trading.enabled", "true"));
+            try {
+                config.optionsStopLossFrac = Double.parseDouble(
+                        props.getProperty("options.stop_loss_frac", "0.50"));
+            } catch (NumberFormatException ignored) {}
+            String cutoffRaw = props.getProperty("options.entry_cutoff", "");
+            if (!cutoffRaw.isBlank()) {
+                try { config.optionsEntryCutoff = LocalTime.parse(cutoffRaw); }
+                catch (DateTimeParseException ignored) {}
+            }
+            try {
+                config.entryConfirmationTicks = Integer.parseInt(
+                        props.getProperty("options.entry_confirmation_ticks", "1"));
+            } catch (NumberFormatException ignored) {}
+            try {
+                config.overnightMinPremiumFrac = Double.parseDouble(
+                        props.getProperty("options.overnight_min_premium_frac", "0.0"));
+            } catch (NumberFormatException ignored) {}
         } catch (IOException ignored) {}
         return config;
     }
@@ -90,6 +170,7 @@ public class AppConfig {
             props.setProperty("broker.type", brokerType.name());
             props.setProperty("broker.alpaca.api_key", alpacaApiKey);
             props.setProperty("broker.alpaca.api_secret", alpacaApiSecret);
+            props.setProperty("ai.claude.api_key", claudeApiKey);
             props.setProperty("quote.provider", quoteProviderType.name());
             props.setProperty("risk.daily_loss_limit_pct", String.valueOf(dailyLossLimitPct));
             props.setProperty("risk.max_portfolio_exposure_pct", String.valueOf(maxPortfolioExposurePct));
@@ -98,12 +179,48 @@ public class AppConfig {
             props.setProperty("risk.earnings_blackout_days", String.valueOf(earningsBlackoutDays));
             props.setProperty("trading.options_enabled", String.valueOf(optionsTradingEnabled));
             props.setProperty("strategy.enabled", String.join(",", enabledStrategies));
+            props.setProperty("options.symbol.allowlist", String.join(",", optionsSymbolAllowlist));
+            props.setProperty("options.calls.disabled", String.join(",", optionsCallsDisabled));
+            props.setProperty("options.puts.disabled",  String.join(",", optionsPutsDisabled));
+            props.setProperty("options.downtrend_put_min_signals", String.valueOf(downtrendPutMinSignals));
+            props.setProperty("options.reversal_min_signals", String.valueOf(reversalMinSignals));
+            props.setProperty("options.profit_target", String.valueOf(profitTarget));
+            props.setProperty("stock.trading.enabled", String.valueOf(stockTradingEnabled));
+            props.setProperty("options.stop_loss_frac", String.valueOf(optionsStopLossFrac));
+            props.setProperty("options.entry_cutoff", optionsEntryCutoff != null ? optionsEntryCutoff.toString() : "");
+            props.setProperty("options.entry_confirmation_ticks", String.valueOf(entryConfirmationTicks));
+            props.setProperty("options.overnight_min_premium_frac", String.valueOf(overnightMinPremiumFrac));
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
             }
+            appendConfigHistory();
         } catch (IOException e) {
             throw new RuntimeException("Failed to save app config", e);
         }
+    }
+
+    private void appendConfigHistory() {
+        try {
+            Path histPath = CONFIG_PATH.getParent().resolve("config-history.tsv");
+            boolean isNew = !Files.exists(histPath);
+            try (PrintWriter w = new PrintWriter(Files.newBufferedWriter(histPath,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND))) {
+                if (isNew) {
+                    w.println("timestamp\tstrategies\tstop_loss\tentry_cutoff\tdaily_loss_limit\tmax_exposure\tallowlist_count\tdowntrend_put_min");
+                }
+                String ts = ZonedDateTime.now(ZoneId.of("America/New_York"))
+                        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+                w.printf("%s\t%s\t%.2f\t%s\t%.1f\t%.1f\t%d\t%d%n",
+                        ts,
+                        String.join("|", enabledStrategies),
+                        optionsStopLossFrac,
+                        optionsEntryCutoff != null ? optionsEntryCutoff.toString() : "",
+                        dailyLossLimitPct,
+                        maxPortfolioExposurePct,
+                        optionsSymbolAllowlist.size(),
+                        downtrendPutMinSignals);
+            }
+        } catch (Exception ignored) {}
     }
 
     public BrokerType getBrokerType() { return brokerType; }
@@ -139,6 +256,41 @@ public class AppConfig {
     public Set<String> getEnabledStrategies() { return enabledStrategies; }
     public void setEnabledStrategies(Set<String> strategies) { this.enabledStrategies = new LinkedHashSet<>(strategies); }
     public boolean isStrategyEnabled(String name) { return enabledStrategies.contains(name); }
+    public int getDowntrendPutMinSignals() { return downtrendPutMinSignals; }
+    public void setDowntrendPutMinSignals(int n) { this.downtrendPutMinSignals = n; }
+
+    public int getReversalMinSignals() { return reversalMinSignals; }
+    public void setReversalMinSignals(int n) { this.reversalMinSignals = n; }
+
+    public double getProfitTarget() { return profitTarget; }
+    public void setProfitTarget(double multiple) { this.profitTarget = multiple; }
+
+    public boolean isStockTradingEnabled() { return stockTradingEnabled; }
+    public void setStockTradingEnabled(boolean v) { this.stockTradingEnabled = v; }
+
+    public double getOptionsStopLossFrac() { return optionsStopLossFrac; }
+    public void setOptionsStopLossFrac(double frac) { this.optionsStopLossFrac = frac; }
+
+    public String getClaudeApiKey() { return claudeApiKey; }
+    public void setClaudeApiKey(String key) { this.claudeApiKey = key; }
+
+    public Set<String> getOptionsSymbolAllowlist() { return optionsSymbolAllowlist; }
+    public void setOptionsSymbolAllowlist(Set<String> symbols) { this.optionsSymbolAllowlist = new LinkedHashSet<>(symbols); }
+
+    public Set<String> getOptionsCallsDisabled() { return optionsCallsDisabled; }
+    public void setOptionsCallsDisabled(Set<String> symbols) { this.optionsCallsDisabled = new LinkedHashSet<>(symbols); }
+
+    public Set<String> getOptionsPutsDisabled() { return optionsPutsDisabled; }
+    public void setOptionsPutsDisabled(Set<String> symbols) { this.optionsPutsDisabled = new LinkedHashSet<>(symbols); }
+
+    public LocalTime getOptionsEntryCutoff() { return optionsEntryCutoff; }
+    public void setOptionsEntryCutoff(LocalTime t) { this.optionsEntryCutoff = t; }
+
+    public int getEntryConfirmationTicks() { return entryConfirmationTicks; }
+    public void setEntryConfirmationTicks(int n) { this.entryConfirmationTicks = n; }
+
+    public double getOvernightMinPremiumFrac() { return overnightMinPremiumFrac; }
+    public void setOvernightMinPremiumFrac(double frac) { this.overnightMinPremiumFrac = frac; }
 
     public boolean isAlpacaBroker() {
         return brokerType == BrokerType.ALPACA_PAPER || brokerType == BrokerType.ALPACA_LIVE;

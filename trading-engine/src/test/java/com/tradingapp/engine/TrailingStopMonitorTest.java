@@ -13,27 +13,27 @@ public class TrailingStopMonitorTest {
     }
 
     @Test
-    void testTriggerAtExactlyFivePercent() {
+    void testTriggerAtExactlyFourPercent() {
         TrailingStopMonitor monitor = new TrailingStopMonitor();
         monitor.updatePeak("AAPL", 100.0);
-        assertTrue(monitor.check("AAPL", 95.0));
+        assertTrue(monitor.check("AAPL", 96.0));
     }
 
     @Test
-    void testNoTriggerJustAboveFivePercent() {
+    void testNoTriggerJustAboveFourPercent() {
         TrailingStopMonitor monitor = new TrailingStopMonitor();
         monitor.updatePeak("AAPL", 100.0);
-        assertFalse(monitor.check("AAPL", 95.01));
+        assertFalse(monitor.check("AAPL", 96.01));
     }
 
     @Test
     void testPeakUpdatesOnHigherPrice() {
         TrailingStopMonitor monitor = new TrailingStopMonitor();
         monitor.updatePeak("AAPL", 100.0);
-        assertFalse(monitor.check("AAPL", 110.0));  // rises, peak now 110
-        assertFalse(monitor.check("AAPL", 106.0));  // 106 > 104.5 = 110*0.95, no trigger
-        assertFalse(monitor.check("AAPL", 104.51)); // 104.51 > 104.5, no trigger
-        assertTrue(monitor.check("AAPL", 104.5));   // 104.5 <= 110 * 0.95, triggers
+        assertFalse(monitor.check("AAPL", 110.0));    // rises, peak now 110
+        assertFalse(monitor.check("AAPL", 106.0));    // 106 > 105.6 = 110*0.96, no trigger
+        assertFalse(monitor.check("AAPL", 105.61));   // just above threshold, no trigger
+        assertTrue(monitor.check("AAPL", 105.6));     // 105.6 <= 110 * 0.96, triggers
     }
 
     @Test
@@ -42,6 +42,6 @@ public class TrailingStopMonitorTest {
         monitor.updatePeak("AAPL", 100.0);
         monitor.reset("AAPL");
         monitor.updatePeak("AAPL", 50.0);
-        assertTrue(monitor.check("AAPL", 47.5));
+        assertTrue(monitor.check("AAPL", 48.0)); // 48 <= 50 * 0.96 = 48.0
     }
 }

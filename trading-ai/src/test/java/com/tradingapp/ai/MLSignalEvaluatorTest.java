@@ -11,35 +11,36 @@ class MLSignalEvaluatorTest {
 
     @Test
     void weightedBuyScoreSumsWeightsOfBuySignals() {
-        SignalWeights weights = new SignalWeights(new double[]{2.0, 1.0, 1.0, 0.5, 0.5});
+        // RSI=2.0, Bollinger=1.0, VolumeSurge=1.0, VWAP=0.5, ORB=0.5, Candlestick=0.5
+        SignalWeights weights = new SignalWeights(new double[]{2.0, 1.0, 1.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0});
         MLSignalEvaluator eval = new MLSignalEvaluator(weights);
 
         List<SignalResult> signals = List.of(
             SignalResult.buy("RSI", 25.0),
-            SignalResult.sell("MACD", 0.5),
+            SignalResult.sell("ORB", 0.5),
             SignalResult.buy("BollingerBands", 95.0)
         );
 
-        assertEquals(3.0, eval.weightedBuyScore(signals), 0.001); // RSI(2.0) + Bollinger(1.0)
+        assertEquals(3.0, eval.weightedBuyScore(signals), 0.001); // RSI(2.0) + BollingerBands(1.0)
     }
 
     @Test
     void weightedSellScoreSumsWeightsOfSellSignals() {
-        SignalWeights weights = new SignalWeights(new double[]{2.0, 1.0, 1.0, 0.5, 0.5});
+        SignalWeights weights = new SignalWeights(new double[]{2.0, 1.0, 1.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0});
         MLSignalEvaluator eval = new MLSignalEvaluator(weights);
 
         List<SignalResult> signals = List.of(
             SignalResult.sell("RSI", 80.0),
-            SignalResult.sell("MACD", 0.5),
+            SignalResult.sell("VWAP", 0.5),
             SignalResult.buy("BollingerBands", 95.0)
         );
 
-        assertEquals(3.0, eval.weightedSellScore(signals), 0.001); // RSI(2.0) + MACD(1.0)
+        assertEquals(2.5, eval.weightedSellScore(signals), 0.001); // RSI(2.0) + VWAP(0.5)
     }
 
     @Test
     void unknownIndicatorNamesAreIgnored() {
-        SignalWeights weights = new SignalWeights(new double[]{1.0, 1.0, 1.0, 1.0, 1.0});
+        SignalWeights weights = new SignalWeights(new double[]{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0});
         MLSignalEvaluator eval = new MLSignalEvaluator(weights);
 
         List<SignalResult> signals = List.of(
@@ -63,7 +64,7 @@ class MLSignalEvaluatorTest {
 
         List<SignalResult> signals = List.of(
             SignalResult.buy("RSI", 25.0),
-            SignalResult.buy("MACD", 0.5),
+            SignalResult.buy("VWAP", 0.5),
             SignalResult.neutral("BollingerBands", 100.0)
         );
 

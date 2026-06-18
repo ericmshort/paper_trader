@@ -17,6 +17,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -24,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.logging.Logger;
 
 public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
@@ -34,6 +36,7 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
     private final Account account;
     private final TransactionLog log;
     private final HttpClient http;
+    private Consumer<String> logCallback = msg -> {};
 
     public AlpacaBroker(AppConfig config, Account account, TransactionLog log) {
         this.config = config;
@@ -43,6 +46,10 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                 .connectTimeout(Duration.ofSeconds(10))
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
+    }
+
+    public void setLogCallback(Consumer<String> callback) {
+        this.logCallback = callback != null ? callback : msg -> {};
     }
 
     @Override
@@ -184,6 +191,36 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
         }
     }
 
+    /** Fetches the mid price (bid+ask)/2 for an OCC symbol; returns 0 if unavailable. */
+    private double fetchMidPrice(String occSymbol) {
+        try {
+            String url = config.getAlpacaDataUrl()
+                    + "/v1beta1/options/snapshots/" + java.net.URLEncoder.encode(occSymbol, java.nio.charset.StandardCharsets.UTF_8)
+                    + "?feed=indicative";
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("APCA-API-KEY-ID", config.getAlpacaApiKey())
+                    .header("APCA-API-SECRET-KEY", config.getAlpacaApiSecret())
+                    .GET()
+                    .timeout(Duration.ofSeconds(10))
+                    .build();
+            HttpResponse<String> resp = http.send(request, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) return 0;
+            JSONObject body = new JSONObject(resp.body());
+            JSONObject snapshots = body.optJSONObject("snapshots");
+            if (snapshots == null || !snapshots.has(occSymbol)) return 0;
+            JSONObject quote = snapshots.getJSONObject(occSymbol).optJSONObject("latestQuote");
+            if (quote == null) return 0;
+            double bid = quote.optDouble("bp", 0.0);
+            double ask = quote.optDouble("ap", 0.0);
+            if (bid > 0 && ask > 0) return (bid + ask) / 2.0;
+            return Math.max(bid, ask);
+        } catch (Exception e) {
+            LOG.warning("Could not fetch mid price for " + occSymbol + ": " + e.getMessage());
+            return 0;
+        }
+    }
+
     /** Fetches the current bid (for sells) or ask (for buys) for an OCC symbol from the snapshot API. */
     private double fetchLimitPriceForClose(String occSymbol, String side) {
         try {
@@ -290,8 +327,21 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                     .put("symbol", occSymbol)
                     .put("qty", contracts)
                     .put("side", side)
-                    .put("type", "market")
                     .put("time_in_force", "day");
+            // Use limit orders on entry buys to avoid overpaying on the ask.
+            // Closes still use DELETE /positions which routes as market.
+            if ("buy".equals(side)) {
+                double mid = fetchMidPrice(occSymbol);
+                if (mid > 0) {
+                    body.put("type", "limit").put("limit_price", String.format("%.2f", mid));
+                    LOG.info("Alpaca options buy limit: " + occSymbol + " mid=" + String.format("%.2f", mid));
+                } else {
+                    body.put("type", "market");
+                    LOG.info("Alpaca options buy market (no mid quote): " + occSymbol);
+                }
+            } else {
+                body.put("type", "market");
+            }
             if (positionIntent != null) {
                 body.put("position_intent", positionIntent);
             }
@@ -315,55 +365,116 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
      * whose strike is closest to {@code targetStrike} and whose expiry is within 14 days of
      * {@code targetExpiry}. Returns null if no contract is found.
      */
-    private String lookupBestContract(String symbol, String optionType, double targetStrike, LocalDate targetExpiry) {
+    String lookupBestContract(String symbol, String optionType, double targetStrike, LocalDate targetExpiry) {
         try {
             String type = optionType.equalsIgnoreCase("CALL") ? "call" : "put";
-            LocalDate expiryFrom = targetExpiry.minusDays(14);
-            LocalDate expiryTo   = targetExpiry.plusDays(14);
-            double strikeFrom = targetStrike * 0.85;
-            double strikeTo   = targetStrike * 1.15;
 
-            String path = "/options/contracts"
-                    + "?underlying_symbols=" + symbol
-                    + "&type=" + type
-                    + "&status=active"
-                    + "&expiration_date_gte=" + expiryFrom
-                    + "&expiration_date_lte=" + expiryTo
-                    + "&strike_price_gte=" + String.format("%.2f", strikeFrom)
-                    + "&strike_price_lte=" + String.format("%.2f", strikeTo)
-                    + "&limit=50";
+            // Query strategy: always start from the exact target expiry and widen outward.
+            // SPY has $1-wide strikes, so a ±14-day window returns 14+ expirations × ~45
+            // in-range strikes = 600+ contracts. With limit=50 the nearest expiry fills
+            // the result set entirely and the target expiry never appears.
+            // By fixing the expiry window first we ensure the 50-result page contains
+            // the contracts we actually want.
+            double tightFrom = targetStrike * 0.97;
+            double tightTo   = targetStrike * 1.03;
+            double wideFrom  = targetStrike * 0.85;
+            double wideTo    = targetStrike * 1.15;
 
-            JSONObject resp = getJson(path);
-            JSONArray contracts = resp != null ? resp.optJSONArray("option_contracts") : null;
-            if (contracts == null || contracts.length() == 0) {
-                // Widen to full strike range in case price has moved significantly
-                path = "/options/contracts?underlying_symbols=" + symbol
-                        + "&type=" + type + "&status=active"
-                        + "&expiration_date_gte=" + expiryFrom
-                        + "&expiration_date_lte=" + expiryTo
-                        + "&limit=50";
-                resp = getJson(path);
-                contracts = resp != null ? resp.optJSONArray("option_contracts") : null;
-            }
-            if (contracts == null || contracts.length() == 0) return null;
+            // Pass 1: exact expiry ± 2 days, tight strike (covers almost all cases)
+            JSONArray contracts = queryContracts(symbol, type,
+                    targetExpiry.minusDays(2), targetExpiry.plusDays(2),
+                    tightFrom, tightTo);
 
-            // Pick the contract with the closest strike to targetStrike
+            // Pass 2: exact expiry ± 7 days, tight strike (nearby weekly alternative)
+            if (empty(contracts))
+                contracts = queryContracts(symbol, type,
+                        targetExpiry.minusDays(7), targetExpiry.plusDays(7),
+                        tightFrom, tightTo);
+
+            // Pass 3: exact expiry ± 14 days, wide strike (price moved far from target)
+            if (empty(contracts))
+                contracts = queryContracts(symbol, type,
+                        targetExpiry.minusDays(14), targetExpiry.plusDays(14),
+                        wideFrom, wideTo);
+
+            // Pass 4: exact expiry ± 14 days, no strike filter (last resort)
+            if (empty(contracts))
+                contracts = queryContracts(symbol, type,
+                        targetExpiry.minusDays(14), targetExpiry.plusDays(14),
+                        Double.NaN, Double.NaN);
+
+            if (empty(contracts)) return null;
+
+            // Pick the contract with the closest strike to targetStrike.
+            // Break ties by expiry closest to targetExpiry.
             String bestSymbol = null;
-            double bestDist = Double.MAX_VALUE;
+            double bestStrike = Double.MAX_VALUE;
+            double bestStrikeDist = Double.MAX_VALUE;
+            long bestExpiryDist = Long.MAX_VALUE;
             for (int i = 0; i < contracts.length(); i++) {
                 JSONObject c = contracts.getJSONObject(i);
                 double k = c.optDouble("strike_price", Double.MAX_VALUE);
-                double dist = Math.abs(k - targetStrike);
-                if (dist < bestDist) {
-                    bestDist = dist;
+                double strikeDist = Math.abs(k - targetStrike);
+                long expiryDist = Long.MAX_VALUE;
+                try {
+                    expiryDist = Math.abs(ChronoUnit.DAYS.between(
+                            LocalDate.parse(c.optString("expiration_date")), targetExpiry));
+                } catch (Exception ignored) {}
+                if (strikeDist < bestStrikeDist
+                        || (strikeDist == bestStrikeDist && expiryDist < bestExpiryDist)) {
+                    bestStrikeDist = strikeDist;
+                    bestExpiryDist = expiryDist;
+                    bestStrike = k;
                     bestSymbol = c.optString("symbol");
                 }
             }
+
+            // Reject if the closest contract is still more than 5% away from target.
+            // A mismatch this large means the local position's recorded strike diverges
+            // from Alpaca's actual fill, causing broker-sync fingerprint mismatches that
+            // remove the local position and trigger false daily-loss-limit halts.
+            double maxAcceptableDist = targetStrike * 0.05;
+            if (bestStrikeDist > maxAcceptableDist) {
+                LOG.warning(String.format(
+                        "lookupBestContract: best strike %.2f is %.2f away from target %.2f (>5%%) — rejecting [%s %s exp=%s]",
+                        bestStrike, bestStrikeDist, targetStrike, symbol, optionType, targetExpiry));
+                return null;
+            }
+
+            LOG.info(String.format(
+                    "lookupBestContract: selected %s (K=%.2f, exp+%dd) for target K=%.2f exp=%s",
+                    bestSymbol, bestStrike, bestExpiryDist, targetStrike, targetExpiry));
             return bestSymbol;
         } catch (Exception e) {
             LOG.warning("lookupBestContract failed: " + e.getMessage());
             return null;
         }
+    }
+
+    private JSONArray queryContracts(String symbol, String type,
+                                     LocalDate expiryFrom, LocalDate expiryTo,
+                                     double strikeFrom, double strikeTo) {
+        try {
+            String path = "/options/contracts"
+                    + "?underlying_symbols=" + symbol
+                    + "&type=" + type
+                    + "&status=active"
+                    + "&expiration_date_gte=" + expiryFrom
+                    + "&expiration_date_lte=" + expiryTo;
+            if (!Double.isNaN(strikeFrom)) {
+                path += "&strike_price_gte=" + String.format("%.2f", strikeFrom)
+                      + "&strike_price_lte=" + String.format("%.2f", strikeTo);
+            }
+            path += "&limit=50";
+            JSONObject resp = getJson(path);
+            return resp != null ? resp.optJSONArray("option_contracts") : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean empty(JSONArray arr) {
+        return arr == null || arr.length() == 0;
     }
 
     @Override
@@ -382,6 +493,9 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                 account.setBuyingPower(bp);
                 double lastEquity = alpacaAccount.optDouble("last_equity", 0.0);
                 if (lastEquity > 0) account.setLastEquity(lastEquity);
+                double portfolioValue = alpacaAccount.optDouble("portfolio_value",
+                        alpacaAccount.optDouble("equity", -1.0));
+                if (portfolioValue > 0) account.setBrokerPortfolioValue(portfolioValue);
             }
 
             JSONArray positions = getJsonArray("/positions");
@@ -433,8 +547,9 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                             // positions that appeared in Alpaca but weren't locally tracked.
                             com.tradingapp.account.OptionsPosition existing = posByFingerprint.get(fp);
                             if (existingKey != null && existing != null) {
-                                // Matched: update broker OCC symbol and re-verify
+                                // Matched: update broker OCC symbol, market price, and re-verify
                                 existing.setBrokerOccSymbol(symbol);
+                                existing.setCurrentMarketPrice(currentPrice);
                                 account.addOptionsPosition(existingKey, existing);
                                 account.markOptionVerified(existingKey);
                             } else {
@@ -445,6 +560,7 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                                                 occ.underlying, occ.type, occ.strike, occ.expiry, signedQty, avgCost);
                                 // Pin the exact Alpaca OCC symbol so close orders bypass re-lookup.
                                 optPos.setBrokerOccSymbol(symbol);
+                                optPos.setCurrentMarketPrice(currentPrice);
                                 newBrokerOptions.add(new Object[]{occ, optPos});
                             }
                         }
@@ -551,11 +667,17 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                 staleOptions.forEach(account::removeOptionsPosition);
 
                 account.setBrokerSyncComplete(true);
-                LOG.info("[BrokerSync] Verified " + account.getPositions().size()
-                        + " stock(s) and " + account.getOptionsPositions().size() + " option(s) against broker.");
+                String syncMsg = "[BrokerSync] Restored " + account.getOptionsPositions().size()
+                        + " option position(s) and " + account.getPositions().size()
+                        + " stock position(s) from Alpaca.";
+                LOG.info(syncMsg);
+                logCallback.accept(syncMsg);
             }
         } catch (Exception e) {
-            System.err.println("Alpaca account sync failed: " + e.getMessage());
+            String errMsg = "[BrokerSync] WARNING: sync failed (" + e.getMessage()
+                    + ") — open position state may be incomplete, re-entries not blocked.";
+            System.err.println(errMsg);
+            logCallback.accept(errMsg);
         }
 
         if (log != null) syncOrderHistory();
@@ -713,6 +835,33 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
     @Override
     public String getName() {
         return config.getBrokerType() == AppConfig.BrokerType.ALPACA_LIVE ? "Alpaca Live" : "Alpaca Paper";
+    }
+
+    @Override
+    public int closeAllOptionsPositions() {
+        try {
+            JSONArray positions = getJsonArray("/positions");
+            if (positions == null) return 0;
+            int found = 0;
+            for (int i = 0; i < positions.length(); i++) {
+                String symbol = positions.getJSONObject(i).optString("symbol");
+                if (!isOccSymbol(symbol)) continue;
+                found++;
+                LOG.info("Force-close: " + symbol);
+                try {
+                    HttpResponse<String> resp = deletePosition(symbol);
+                    if (resp.statusCode() != 200 && resp.statusCode() != 201) {
+                        LOG.warning("Force-close failed for " + symbol + " (" + resp.statusCode() + "): " + resp.body());
+                    }
+                } catch (Exception e) {
+                    LOG.warning("Force-close error for " + symbol + ": " + e.getMessage());
+                }
+            }
+            return found;
+        } catch (Exception e) {
+            LOG.warning("Force-close-all failed: " + e.getMessage());
+            return -1;
+        }
     }
 
     private void tryInsertLog(TransactionRecord r) {

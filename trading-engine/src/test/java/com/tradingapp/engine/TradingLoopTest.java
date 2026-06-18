@@ -109,25 +109,36 @@ public class TradingLoopTest {
     }
 
     @Test
-    void extractFeatureCsvReturnsFiveValues() throws Exception {
+    void extractFeatureCsvReturnsSixValues() throws Exception {
         List<String> research = new ArrayList<>();
         ZonedDateTime afterClose = ZonedDateTime.of(2026, 5, 15, 17, 0, 0, 0, ET);
         TradingLoop loop = buildLoopWithEvaluator(afterClose, null, null, research);
 
         List<SignalResult> signals = List.of(
             SignalResult.buy("RSI", 25.0),
-            SignalResult.sell("MACD", 0.5),
-            SignalResult.neutral("BollingerBands", 102.0)
+            SignalResult.neutral("BollingerBands", 102.0),
+            SignalResult.buy("VolumeSurge", 2.5),
+            SignalResult.buy("VWAP", 150.0),
+            SignalResult.neutral("ORB", 148.0),
+            SignalResult.buy("Candlestick", 1.0),
+            SignalResult.buy("MACD", 0.5),
+            SignalResult.sell("STOCHASTIC", 88.0),
+            SignalResult.buy("RELATIVE_STRENGTH", 0.02)
         );
-        // Access via a subclass to expose the private helper for testing
         java.lang.reflect.Method m = TradingLoop.class.getDeclaredMethod("extractFeatureCsv", List.class);
         m.setAccessible(true);
         String csv = (String) m.invoke(loop, signals);
         String[] parts = csv.split(",");
-        assertEquals(5, parts.length);
-        assertEquals(25.0, Double.parseDouble(parts[0]), 0.001); // RSI
-        assertEquals(0.5, Double.parseDouble(parts[1]), 0.001);  // MACD
-        assertEquals(102.0, Double.parseDouble(parts[2]), 0.001); // BollingerBands
+        assertEquals(9, parts.length);
+        assertEquals(25.0,  Double.parseDouble(parts[0]), 0.001); // RSI
+        assertEquals(102.0, Double.parseDouble(parts[1]), 0.001); // BollingerBands
+        assertEquals(2.5,   Double.parseDouble(parts[2]), 0.001); // VolumeSurge
+        assertEquals(150.0, Double.parseDouble(parts[3]), 0.001); // VWAP
+        assertEquals(148.0, Double.parseDouble(parts[4]), 0.001); // ORB
+        assertEquals(1.0,   Double.parseDouble(parts[5]), 0.001); // Candlestick
+        assertEquals(0.5,   Double.parseDouble(parts[6]), 0.001); // MACD
+        assertEquals(88.0,  Double.parseDouble(parts[7]), 0.001); // STOCHASTIC
+        assertEquals(0.02,  Double.parseDouble(parts[8]), 0.001); // RELATIVE_STRENGTH
     }
 
     @Test
@@ -342,9 +353,9 @@ public class TradingLoopTest {
         FeeCalculator fees = new FeeCalculator();
         BrokerClient broker = new SimulatedBroker(new OrderExecutor(account, safety, log, fees));
 
-        // Seed SPY with 50 bars at $500, then one bar at $400 (below 50-day MA of $500)
+        // Seed SPY with 5 bars at $500, then one bar at $400 (below 5-day MA of $500)
         PriceHistory ph = new PriceHistory();
-        for (int i = 0; i < 50; i++) ph.recordDaily("SPY", 500.0, 1_000_000);
+        for (int i = 0; i < 5; i++) ph.recordDaily("SPY", 500.0, 1_000_000);
         ph.recordDaily("SPY", 400.0, 1_000_000);
 
         SignalWeightEvaluator alwaysBuy = new SignalWeightEvaluator() {
@@ -360,9 +371,9 @@ public class TradingLoopTest {
         loop.run();
 
         assertFalse(account.getPositions().containsKey("AAPL"),
-                "Buy should be blocked when SPY is below its 50-day MA");
-        assertTrue(research.stream().anyMatch(m -> m.contains("bear regime")),
-                "Should log bear regime skip message");
+                "Buy should be blocked when SPY is below its 5-day MA");
+        assertTrue(research.stream().anyMatch(m -> m.contains("5-day MA")),
+                "Should log 5-day MA skip message");
     }
 
     @Test
@@ -375,9 +386,9 @@ public class TradingLoopTest {
         FeeCalculator fees = new FeeCalculator();
         BrokerClient broker = new SimulatedBroker(new OrderExecutor(account, safety, log, fees));
 
-        // Seed SPY with 50 bars at $400, then one bar at $500 (above 50-day MA of $400)
+        // Seed SPY with 5 bars at $400, then one bar at $500 (above 5-day MA of $400)
         PriceHistory ph = new PriceHistory();
-        for (int i = 0; i < 50; i++) ph.recordDaily("SPY", 400.0, 1_000_000);
+        for (int i = 0; i < 5; i++) ph.recordDaily("SPY", 400.0, 1_000_000);
         ph.recordDaily("SPY", 500.0, 1_000_000);
 
         SignalWeightEvaluator alwaysBuy = new SignalWeightEvaluator() {
@@ -392,8 +403,8 @@ public class TradingLoopTest {
         loop.setMarketRegimeFilterEnabled(true);
         loop.run();
 
-        assertFalse(research.stream().anyMatch(m -> m.contains("bear regime")),
-                "Bear regime filter should not fire when SPY is above its 50-day MA");
+        assertFalse(research.stream().anyMatch(m -> m.contains("5-day MA")),
+                "Regime filter should not fire when SPY is above its 5-day MA");
     }
 
     @Test

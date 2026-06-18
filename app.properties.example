@@ -1,0 +1,34 @@
+# Trading App Configuration — copy to ~/.tradingapp/day-trader/app.properties and fill in keys
+# DO NOT commit the real app.properties (it contains API secrets)
+
+# --- Broker ---
+broker.type=ALPACA_PAPER
+broker.alpaca.api_key=YOUR_ALPACA_API_KEY
+broker.alpaca.api_secret=YOUR_ALPACA_API_SECRET
+
+# --- Quote provider ---
+# ALPACA_WEBSOCKET_FREE is capped at 30 symbols
+quote.provider=ALPACA_WEBSOCKET_FREE
+
+# --- AI (optional) ---
+ai.claude.api_key=
+
+# --- Risk controls ---
+risk.avoid_overnight_holds=true
+risk.daily_loss_limit_pct=5.0
+risk.earnings_blackout_days=3
+risk.market_regime_filter=true
+risk.max_portfolio_exposure_pct=70.0
+
+# --- Strategies ---
+strategy.enabled=HIGH_DELTA_SCALP,MOMENTUM_NEAR_TERM,LONG_CALL,LONG_PUT,OPENING_BREAKOUT,MACD_CROSSOVER
+options.stop_loss_frac=0.30
+options.downtrend_put_min_signals=3
+options.entry_cutoff=14:45
+
+# --- Options filters ---
+# 30-symbol options allowlist: top 30 by 2-year net P&L across 100-symbol MasterUniverse (COIN excluded)
+options.symbol.allowlist=SPY,NOC,NVDA,MSFT,COST,VRTX,AMGN,CRWD,RTX,GD,GS,AVGO,LRCX,XOM,ADBE,WMT,TGT,DE,ORCL,AMZN,PG,LLY,PANW,BLK,NOW,MA,REGN,META,MS,AMAT
+options.calls.disabled=
+options.puts.disabled=
+stock.trading.enabled=false

@@ -8,8 +8,12 @@ import com.tradingapp.account.TransactionLog;
 import com.tradingapp.account.TransactionRecord;
 import com.tradingapp.broker.AlpacaBroker;
 import com.tradingapp.broker.AlpacaQuoteProvider;
+import com.tradingapp.broker.AlpacaWebSocketFreeProvider;
 import com.tradingapp.broker.AppConfig;
+import com.tradingapp.data.CandleHistory;
+import com.tradingapp.data.DayTraderWatchList;
 import com.tradingapp.data.EarningsCalendar;
+import com.tradingapp.data.HistoricalBarFetcher;
 import com.tradingapp.data.LargeCapWatchList;
 import com.tradingapp.data.SmallCapWatchList;
 import com.tradingapp.data.PriceHistory;
@@ -17,7 +21,9 @@ import com.tradingapp.data.QuoteProvider;
 import com.tradingapp.data.YahooFinanceQuoteProvider;
 import com.tradingapp.ai.MLSignalEvaluator;
 import com.tradingapp.ai.SignalWeights;
+import com.tradingapp.data.NewsSentimentCache;
 import com.tradingapp.engine.*;
+import com.tradingapp.sentiment.SentimentRefreshScheduler;
 import com.tradingapp.options.BlackScholesEngine;
 import com.tradingapp.options.OptionsOrderExecutor;
 import com.tradingapp.options.OptionsSignalRouter;
@@ -33,6 +39,7 @@ import javafx.scene.control.*;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 
 import java.io.IOException;
@@ -56,6 +63,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
 import java.util.function.Consumer;
 
@@ -83,6 +91,7 @@ public class DashboardController implements Initializable {
     @FXML private TableColumn<OptionsPositionRow, Integer> optColContracts;
     @FXML private TableColumn<OptionsPositionRow, String> optColCost;
     @FXML private TableColumn<OptionsPositionRow, String> optColCurrentValue;
+    @FXML private TableColumn<OptionsPositionRow, String> optColPnl;
     @FXML private TableView<StockPositionRow> stockPositionsTable;
     @FXML private TableColumn<StockPositionRow, String> stkColSymbol;
     @FXML private TableColumn<StockPositionRow, Integer> stkColQuantity;
@@ -107,14 +116,21 @@ public class DashboardController implements Initializable {
     private Account account;
     private TransactionLog transactionLog;
     private PriceHistory priceHistory;
+    private CandleHistory candleHistory;
     private BlackScholesEngine bsEngine;
     private ScheduledExecutorService scheduler;
     private TradingLoop tradingLoop;
     private OptionsSignalRouter optionsRouter;
+    private AlpacaWebSocketFreeProvider wsProvider;
+    private SentimentRefreshScheduler sentimentScheduler;
+    private final NewsSentimentCache sentimentCache = new NewsSentimentCache();
     private XYChart.Series<Number, Number> equitySeries;
     private int tickCount = 0;
     private boolean alpacaMode = false;
     private final ConcurrentLinkedQueue<String> pendingMessages = new ConcurrentLinkedQueue<>();
+    // Coalesces concurrent refresh requests: at most one applyUiSnapshot is queued in the FX
+    // event loop at any time. The FX thread always applies the latest snapshot.
+    private final AtomicReference<UiSnapshot> pendingSnapshot = new AtomicReference<>();
 
     private static final Logger LOG = Logger.getLogger(DashboardController.class.getName());
     private final TradingLogger tradingLogger = new TradingLogger();
@@ -128,6 +144,7 @@ public class DashboardController implements Initializable {
                 AppConfig.getDataDir().resolve("transactions.db").toString());
         transactionLog.restoreAccount(account);
         priceHistory = new PriceHistory();
+        candleHistory = new CandleHistory();
         bsEngine = new BlackScholesEngine();
 
         equitySeries = new XYChart.Series<>();
@@ -157,6 +174,17 @@ public class DashboardController implements Initializable {
                     optionsRouter.setTradingEnabled(cfg.isOptionsTradingEnabled());
                     optionsRouter.setMaxPortfolioExposure(cfg.getMaxPortfolioExposurePct() / 100.0);
                     optionsRouter.setEnabledStrategies(cfg.getEnabledStrategies());
+                    optionsRouter.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
+                    optionsRouter.setEntryConfirmationTicks(cfg.getEntryConfirmationTicks());
+                    optionsRouter.setOvernightMinPremiumFrac(cfg.getOvernightMinPremiumFrac());
+                    optionsRouter.setStopLossFrac(cfg.getOptionsStopLossFrac());
+                    optionsRouter.setProfitTarget(cfg.getProfitTarget());
+                    optionsRouter.setReversalMinSignals(cfg.getReversalMinSignals());
+                    optionsRouter.setDowntrendPutMinSignals(cfg.getDowntrendPutMinSignals());
+                    optionsRouter.setEntryCutoff(cfg.getOptionsEntryCutoff());
+                    optionsRouter.setOptionsAllowlist(cfg.getOptionsSymbolAllowlist());
+                    optionsRouter.setCallsDisabledSymbols(cfg.getOptionsCallsDisabled());
+                    optionsRouter.setPutsDisabledSymbols(cfg.getOptionsPutsDisabled());
                 }
                 Platform.runLater(() -> researchArea.appendText(
                         "\nRisk settings updated (effective next tick). Broker/quote changes take effect on next restart.\n"));
@@ -166,15 +194,25 @@ public class DashboardController implements Initializable {
     }
 
     private void startTradingComponents(AppConfig appConfig) {
+        boolean useWsProvider = appConfig.getQuoteProviderType() == AppConfig.QuoteProviderType.ALPACA_WEBSOCKET_FREE
+                && appConfig.isAlpacaBroker();
+
         researchArea.setText("Waiting for market data...\n\nMarket hours: 9:30 AM – 4:00 PM ET"
-                + "\nWatching 100 large-cap and small-cap US stocks."
+                + "\nWatching " + (useWsProvider ? "30 most-liquid day-trading symbols" : "100 large-cap and small-cap US stocks") + "."
                 + "\nBroker: " + SettingsController.brokerTypeLabel(appConfig.getBrokerType())
                 + " | Quotes: " + appConfig.getQuoteProviderType().name());
 
         QuoteProvider quoteProvider;
-        if (appConfig.getQuoteProviderType() == AppConfig.QuoteProviderType.ALPACA && appConfig.isAlpacaBroker()) {
+        if (useWsProvider) {
+            wsProvider = new AlpacaWebSocketFreeProvider(appConfig, candleHistory,
+                    msg -> Platform.runLater(() -> researchArea.appendText(msg + "\n")));
+            wsProvider.start();
+            quoteProvider = wsProvider;
+        } else if (appConfig.getQuoteProviderType() == AppConfig.QuoteProviderType.ALPACA && appConfig.isAlpacaBroker()) {
+            wsProvider = null;
             quoteProvider = new AlpacaQuoteProvider(appConfig);
         } else {
+            wsProvider = null;
             quoteProvider = new YahooFinanceQuoteProvider();
         }
 
@@ -187,6 +225,7 @@ public class DashboardController implements Initializable {
         BrokerClient brokerClient;
         if (appConfig.isAlpacaBroker()) {
             AlpacaBroker alpaca = new AlpacaBroker(appConfig, account, transactionLog);
+            alpaca.setLogCallback(tradingLogger::log);
             alpaca.syncAccount(account);
             alpaca.reconcileTransactionLog();
             brokerClient = alpaca;
@@ -204,18 +243,39 @@ public class DashboardController implements Initializable {
                 tradingLogger.log(msg);
             }
         };
-        // Compute snapshot on the trading-loop thread; only dispatch FX mutations to the FX thread.
+        // Coalescing UI refresh: snapshot is computed on the trading thread, then stored in
+        // pendingSnapshot. Only one Platform.runLater dispatch is outstanding at a time — if one
+        // is already queued, we just replace the snapshot value so the FX thread applies the
+        // latest state when it runs. This prevents multiple applyUiSnapshot calls from piling up
+        // in the FX event queue on ticks where several trades fire in quick succession.
         Runnable uiRefresh = () -> {
             UiSnapshot snapshot = computeUiSnapshot();
-            Platform.runLater(() -> applyUiSnapshot(snapshot));
+            if (pendingSnapshot.getAndSet(snapshot) == null) {
+                Platform.runLater(() -> {
+                    UiSnapshot s = pendingSnapshot.getAndSet(null);
+                    if (s != null) applyUiSnapshot(s);
+                });
+            }
         };
 
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(account, transactionLog,
                 appConfig.isAlpacaBroker()
                         ? (AlpacaBroker) brokerClient
                         : null);
+        // AlpacaWebSocketFreeProvider.getOptionsChain() is a stub — options chains
+        // require REST. Use a dedicated AlpacaQuoteProvider for chain lookups when
+        // the WebSocket provider is active for real-time prices.
+        QuoteProvider optionsDataClient = useWsProvider
+                ? new AlpacaQuoteProvider(appConfig)
+                : quoteProvider;
         optionsRouter = new OptionsSignalRouter(
-                bsEngine, optExec, account, priceHistory, researchCb, quoteProvider);
+                bsEngine, optExec, account, priceHistory, researchCb, optionsDataClient);
+        optionsRouter.setOptionsAllowlist(appConfig.getOptionsSymbolAllowlist());
+        optionsRouter.setCallsDisabledSymbols(appConfig.getOptionsCallsDisabled());
+        optionsRouter.setPutsDisabledSymbols(appConfig.getOptionsPutsDisabled());
+        if (appConfig.isAlpacaBroker()) {
+            optionsRouter.restoreSessionState(transactionLog);
+        }
 
         Path weightsPath = AppConfig.getDataDir().resolve("signal-weights.json");
         SignalWeights initialWeights;
@@ -225,69 +285,98 @@ public class DashboardController implements Initializable {
             initialWeights = new SignalWeights();
         }
         MLSignalEvaluator mlEval = new MLSignalEvaluator(initialWeights, weightsPath);
-        // Auto-retraining disabled: early trade history was corrupted by the options position
-        // key-mismatch bug (excessive contract accumulation). Re-enable once we have a clean
-        // history of at least 50 trades placed under correct conditions.
-        Runnable trainingCallback = null;
+        Runnable trainingCallback = () -> {
+            mlEval.retrain(transactionLog);
+            Platform.runLater(() -> researchArea.appendText(
+                "ML weights updated: " + mlEval.getWeightsSummary() + "\n"));
+        };
 
         EarningsCalendar earningsCalendar = new EarningsCalendar();
 
-        List<String> allSymbols = new ArrayList<>();
-        allSymbols.addAll(LargeCapWatchList.SYMBOLS);
-        allSymbols.addAll(SmallCapWatchList.SYMBOLS);
+        List<String> allSymbols;
+        if (useWsProvider) {
+            allSymbols = new ArrayList<>(DayTraderWatchList.SYMBOLS);
+        } else {
+            allSymbols = new ArrayList<>();
+            allSymbols.addAll(LargeCapWatchList.SYMBOLS);
+            allSymbols.addAll(SmallCapWatchList.SYMBOLS);
+        }
 
         tradingLoop = new TradingLoop(quoteProvider, priceHistory,
                 new IndicatorEngine(), new TrailingStopMonitor(), brokerClient, feeCalc,
                 allSymbols, researchCb, uiRefresh, account,
                 optionsRouter, mlEval, trainingCallback);
         tradingLoop.setTransactionLog(transactionLog);
+        if (useWsProvider) {
+            tradingLoop.setCandleHistory(candleHistory);
+        }
+        tradingLoop.setNewsSentimentCache(sentimentCache);
+
+        if (sentimentScheduler != null) sentimentScheduler.stop();
+        if (!appConfig.getClaudeApiKey().isBlank()) {
+            sentimentScheduler = new SentimentRefreshScheduler(
+                    sentimentCache, appConfig.getClaudeApiKey(), allSymbols, researchCb);
+            sentimentScheduler.start();
+        }
         tradingLoop.setDailyLossLimitPct(appConfig.getDailyLossLimitPct() / 100.0);
         tradingLoop.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
         optionsRouter.setTradingEnabled(appConfig.isOptionsTradingEnabled());
         optionsRouter.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
         optionsRouter.setEnabledStrategies(appConfig.getEnabledStrategies());
+        optionsRouter.setDowntrendPutMinSignals(appConfig.getDowntrendPutMinSignals());
+        optionsRouter.setReversalMinSignals(appConfig.getReversalMinSignals());
+        optionsRouter.setProfitTarget(appConfig.getProfitTarget());
         tradingLoop.setAvoidOvernightHolds(appConfig.isAvoidOvernightHolds());
+        optionsRouter.setAvoidOvernightHolds(appConfig.isAvoidOvernightHolds());
+        optionsRouter.setEntryConfirmationTicks(appConfig.getEntryConfirmationTicks());
+        optionsRouter.setOvernightMinPremiumFrac(appConfig.getOvernightMinPremiumFrac());
         tradingLoop.setMarketRegimeFilterEnabled(appConfig.isMarketRegimeFilterEnabled());
         tradingLoop.setEarningsCalendar(earningsCalendar);
         tradingLoop.setEarningsBlackoutDays(appConfig.getEarningsBlackoutDays());
         optionsRouter.setUptrendSupplier(tradingLoop::isUptrend);
+        optionsRouter.setStopLossFrac(appConfig.getOptionsStopLossFrac());
+        optionsRouter.setEntryCutoff(appConfig.getOptionsEntryCutoff());
+        optionsRouter.setClosePositionsOnHalt(true);
+        tradingLoop.setAccurateOptionsValuation(true);
+        tradingLoop.setStockTradingEnabled(appConfig.isStockTradingEnabled());
 
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "trading-loop");
             t.setDaemon(true);
             return t;
         });
-        scheduler.scheduleAtFixedRate(tradingLoop, 0, 30, TimeUnit.SECONDS);
+        // Day trading: 5s interval so candle data and signals are evaluated frequently
+        scheduler.scheduleAtFixedRate(tradingLoop, 0, 5, TimeUnit.SECONDS);
 
-        // Seed price history from 200 days of daily bars so MACrossover is immediately usable.
-        // Always use Yahoo for seeding — Alpaca's data API lacks historical depth at startup.
-        // Runs in background — does not block the trading loop or the UI.
-        QuoteProvider seedProvider = new YahooFinanceQuoteProvider();
+        // Seed daily price history so RSI and Bollinger Bands are active from the first tick.
+        // Always use Yahoo Finance (free, no credentials) — Alpaca's data API requires
+        // a paid subscription and fails silently, leaving RSI/BB permanently neutral.
+        // 60 calendar days gives ~43 trading days, enough for RSI(9) and BB(20) with buffer.
+        HistoricalBarFetcher seedFetcher = new HistoricalBarFetcher();
         Thread seedThread = new Thread(() -> {
             LocalDate end = LocalDate.now();
-            LocalDate start = end.minusDays(280); // extra buffer for weekends/holidays
+            LocalDate start = end.minusDays(60);
             int seeded = 0;
-            // Include SPY for the market-regime filter (not traded, just tracked)
             List<String> symbolsToSeed = new ArrayList<>(allSymbols);
-            symbolsToSeed.add("SPY");
+            if (!symbolsToSeed.contains("SPY")) symbolsToSeed.add("SPY");
             for (String sym : symbolsToSeed) {
                 try {
-                    var bars = seedProvider.getHistoricalBars(sym, start, end);
+                    var bars = seedFetcher.fetchDailyBars(sym, start, end);
                     if (bars != null && !bars.isEmpty()) {
                         priceHistory.seed(sym, bars);
                         seeded++;
                     }
-                    Thread.sleep(120); // avoid bursting Yahoo's rate limit alongside the live-quote loop
+                    Thread.sleep(120);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
-                    // Non-fatal: symbol will build history organically from live ticks
+                    researchCb.accept("Seed failed for " + sym + ": " + e.getMessage());
                 }
             }
             int finalSeeded = seeded;
-            Platform.runLater(() -> researchCb.accept(
-                    "Price history seeded for " + finalSeeded + "/" + symbolsToSeed.size() + " symbols (incl. SPY regime data)."));
+            researchCb.accept("Price history seeded for " + finalSeeded + "/"
+                    + symbolsToSeed.size() + " symbols — RSI and Bollinger Bands now active.");
         }, "price-history-seed");
         seedThread.setDaemon(true);
         seedThread.start();
@@ -398,6 +487,20 @@ public class DashboardController implements Initializable {
         optColContracts.setCellValueFactory(new PropertyValueFactory<>("contracts"));
         optColCost.setCellValueFactory(new PropertyValueFactory<>("cost"));
         optColCurrentValue.setCellValueFactory(new PropertyValueFactory<>("currentValue"));
+        optColPnl.setCellValueFactory(new PropertyValueFactory<>("pnl"));
+        optColPnl.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String value, boolean empty) {
+                super.updateItem(value, empty);
+                if (empty || value == null) {
+                    setText(null);
+                    setTextFill(Color.BLACK);
+                } else {
+                    setText(value);
+                    setTextFill(value.startsWith("-") ? Color.RED : Color.GREEN);
+                }
+            }
+        });
     }
 
     private void setupStockTableColumns() {
@@ -511,14 +614,20 @@ public class DashboardController implements Initializable {
     private double computeStockHoldings() {
         double total = 0.0;
         for (var entry : account.getPositions().entrySet()) {
-            List<Double> prices = priceHistory.getPrices(entry.getKey());
-            double price = prices.isEmpty() ? entry.getValue().getAverageCost() : prices.get(prices.size() - 1);
-            total += entry.getValue().getQuantity() * price;
+            total += entry.getValue().getMarketValue();
         }
         return total;
     }
 
     private double computeOptionCurrentPremium(OptionsPosition pos) {
+        // Prefer the Alpaca-reported market price (set during broker sync) over Black-Scholes.
+        // This eliminates the historical-vol vs implied-vol gap that causes portfolio overvaluation.
+        // -1.0 means Alpaca has never reported a price for this position; use Black-Scholes as a fallback.
+        // 0.0 means Alpaca explicitly returned no quote — honour it rather than overvaluing with BS.
+        double marketPrice = pos.getCurrentMarketPrice();
+        if (marketPrice >= 0) return marketPrice;
+
+        // Fall back to Black-Scholes for paper trading or before the first sync tick.
         // Use the most recent intraday tick for the spot price, falling back to daily
         List<Double> intradayPrices = priceHistory.getPrices(pos.getSymbol());
         List<Double> dailyPrices    = priceHistory.getDailyPrices(pos.getSymbol());
@@ -594,6 +703,7 @@ public class DashboardController implements Initializable {
             double optTotalUnrealized,
             List<StockPositionRow> stockRows,
             double stkTotalUnrealized,
+            double totalUnrealizedPnl,
             int wins,
             int losses,
             double winRate,
@@ -607,7 +717,6 @@ public class DashboardController implements Initializable {
         double availableCash = account.getBalance();
         double stockHoldings = computeStockHoldings();
         double optionHoldings = computeOptionHoldings();
-        double totalPortfolio = availableCash + stockHoldings + optionHoldings;
         double optionsCashDeployed = computeOptionsCashDeployed();
 
         List<OptionsPositionRow> optionRows = new ArrayList<>();
@@ -623,9 +732,22 @@ public class DashboardController implements Initializable {
         double winRate    = total > 0 ? (wins * 100.0 / total) : 0.0;
         double realizedPnl = closedTrades.stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
 
+        // Prefer Alpaca's own portfolio_value from /account — it's the authoritative number
+        // that matches their UI display and eliminates local pricing discrepancies.
+        // Fall back to local computation before the first sync tick completes.
+        double brokerPv = account.getBrokerPortfolioValue();
+        double totalPortfolio = brokerPv > 0 ? brokerPv : availableCash + stockHoldings + optionHoldings;
+
+        // Derive total unrealized P&L from Alpaca's authoritative portfolio value so it
+        // stays consistent with the total portfolio figure (brokerPv - starting = total P&L).
+        // Fall back to local computation when Alpaca data isn't available yet.
+        double totalUnrealizedPnl = brokerPv > 0
+                ? brokerPv - Account.STARTING_BALANCE
+                : optTotalUnrealized + stkTotalUnrealized;
+
         return new UiSnapshot(history, availableCash, stockHoldings, optionHoldings, totalPortfolio,
                 optionsCashDeployed, optionRows, optTotalUnrealized, stockRows, stkTotalUnrealized,
-                wins, losses, winRate, realizedPnl, account.isTradingHalted());
+                totalUnrealizedPnl, wins, losses, winRate, realizedPnl, account.isTradingHalted());
     }
 
     // Must be called on the FX thread. Only touches FX nodes.
@@ -633,7 +755,15 @@ public class DashboardController implements Initializable {
         String msg;
         StringBuilder logBuf = new StringBuilder();
         while ((msg = pendingMessages.poll()) != null) logBuf.append(msg).append('\n');
-        if (logBuf.length() > 0) researchArea.appendText(logBuf.toString());
+        if (logBuf.length() > 0) {
+            // TextArea layout cost grows with text length; trim from the top when it gets large.
+            String existing = researchArea.getText();
+            if (existing.length() > 80_000) {
+                int cut = existing.indexOf('\n', existing.length() - 60_000);
+                researchArea.setText(cut > 0 ? existing.substring(cut + 1) : existing.substring(existing.length() - 60_000));
+            }
+            researchArea.appendText(logBuf.toString());
+        }
 
         tradeHistoryTable.setItems(FXCollections.observableArrayList(s.history()));
         totalPortfolioLabel.setText(String.format("Total Portfolio: $%,.2f", s.totalPortfolio()));
@@ -643,8 +773,8 @@ public class DashboardController implements Initializable {
         optionsCashDeployedLabel.setText(String.format("Options Reserved: $%,.2f", s.optionsCashDeployed()));
         optionsTable.setItems(FXCollections.observableArrayList(s.optionRows()));
         stockPositionsTable.setItems(FXCollections.observableArrayList(s.stockRows()));
-        unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", s.optTotalUnrealized() + s.stkTotalUnrealized()));
-        optionsTotalUnrealizedLabel.setText(String.format("Market Value: $%,.2f", s.optionHoldings()));
+        unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", s.totalUnrealizedPnl()));
+        optionsTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total P&L", s.optTotalUnrealized()));
         stockTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", s.stkTotalUnrealized()));
         winsLabel.setText("Wins: " + s.wins());
         lossesLabel.setText("Losses: " + s.losses());
@@ -663,15 +793,18 @@ public class DashboardController implements Initializable {
         double availableCash = account.getBalance();
         double stockHoldings = computeStockHoldings();
         double optionHoldings = computeOptionHoldings();
-        double totalPortfolio = availableCash + stockHoldings + optionHoldings;
+        double realizedPnl = computeClosedTrades().stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
+        double brokerPv = account.getBrokerPortfolioValue();
+        double totalPortfolio = brokerPv > 0 ? brokerPv : availableCash + stockHoldings + optionHoldings;
+        double unrealizedPnl = brokerPv > 0
+                ? brokerPv - Account.STARTING_BALANCE
+                : computeStockUnrealizedPnL() + computeOptionsUnrealizedPnL();
 
         totalPortfolioLabel.setText(String.format("Total Portfolio: $%,.2f", totalPortfolio));
         stockHoldingsLabel.setText(String.format("Stocks: $%,.2f", stockHoldings));
         optionHoldingsLabel.setText(String.format("Options: $%,.2f", optionHoldings));
         availableCashLabel.setText(String.format("Cash: $%,.2f", availableCash));
         optionsCashDeployedLabel.setText(String.format("Options Reserved: $%,.2f", computeOptionsCashDeployed()));
-        double unrealizedPnl = computeStockUnrealizedPnL() + computeOptionsUnrealizedPnL();
-        double realizedPnl = computeClosedTrades().stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
         pnlButton.setText(String.format("P&L: $%,.2f", realizedPnl));
         unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", unrealizedPnl));
 
@@ -1036,6 +1169,10 @@ public class DashboardController implements Initializable {
     }
 
     public void stop() {
+        if (sentimentScheduler != null) sentimentScheduler.stop();
+        if (wsProvider != null) {
+            wsProvider.stop();
+        }
         if (scheduler != null) {
             scheduler.shutdownNow();
             try {

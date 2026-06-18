@@ -4,11 +4,17 @@ import com.tradingapp.account.Account;
 import com.tradingapp.account.OptionsPosition;
 import com.tradingapp.account.Position;
 import com.tradingapp.account.TransactionLog;
+import com.tradingapp.data.CandleBar;
+import com.tradingapp.data.CandleHistory;
 import com.tradingapp.data.EarningsCalendar;
+import com.tradingapp.data.NewsSentimentCache;
 import com.tradingapp.data.PriceHistory;
 import com.tradingapp.data.QuoteModel;
 import com.tradingapp.data.QuoteProvider;
+import com.tradingapp.data.SentimentDirection;
+import com.tradingapp.data.SentimentScore;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
@@ -17,6 +23,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -24,10 +31,22 @@ import java.util.stream.Collectors;
 public class TradingLoop implements Runnable {
 
     static final double SIGNAL_THRESHOLD = 2.5;
+    // Sell threshold is higher than buy — signal sells had a 4% win rate at 2.5, meaning they
+    // were cutting winners early. Requiring stronger consensus before exiting on signals alone.
+    private static final double SELL_SIGNAL_THRESHOLD = 4.0;
     private double maxPortfolioExposure = 0.60;
-    private static final LocalTime MARKET_OPEN = LocalTime.of(9, 30);
-    private static final LocalTime MARKET_CLOSE = LocalTime.of(16, 0);
+    private static final LocalTime MARKET_OPEN      = LocalTime.of(9, 30);
+    private static final LocalTime MARKET_CLOSE     = LocalTime.of(16, 0);
     private static final LocalTime PRE_CLOSE_CUTOFF = LocalTime.of(15, 45);
+    // No new entries during the first 5 minutes — the opening range is still forming
+    private static final LocalTime ORB_FORMATION_END = LocalTime.of(9, 35);
+    // No new stock entries after 2:30 PM — gives every position at least 75 min of runway
+    // before the 3:45 forced sweep. Entries after 2:30 have too little time to recover from a bad tick.
+    private static final LocalTime LAST_ENTRY_TIME = LocalTime.of(14, 30);
+    // Cap on simultaneous stock positions — configurable for backtesting; default mirrors live trading
+    private int maxConcurrentStockPositions = 5;
+    // VIX above this level means panic/spreads blow out — skip new directional entries
+    private static final double VIX_BLOCK_THRESHOLD = 35.0;
     private static final ZoneId ET = ZoneId.of("America/New_York");
 
     private final QuoteProvider dataClient;
@@ -45,16 +64,31 @@ public class TradingLoop implements Runnable {
     private final SignalWeightEvaluator weightEvaluator;
     private final Runnable afterMarketCallback;
     private LocalDate lastTrainingDate;
+    private LocalDate lastMarketClosedLoggedDate;
     private double dailyLossLimitPct = 0.05;
+    // When true, short options are valued at current market price (not ignored) in the daily loss check.
+    // Requires OptionsSignalRouter to update currentMarketPrice each tick. Backtest-only by default.
+    private boolean accurateOptionsValuation = false;
     private double dayStartValue = -1;
     private LocalDate lastDayTrackingDate;
     private TransactionLog transactionLog;
     private boolean avoidOvernightHolds = true;
     private boolean marketRegimeFilterEnabled = true;
+    private Set<String> inverseEtfSymbols = Set.of();
+    private boolean stockTradingEnabled = true;
     private EarningsCalendar earningsCalendar;
     private int earningsBlackoutDays = 3;
+    private int minHoldMinutes = 15;
+    private final int lossCooldownMinutes = 60;
     private final Map<String, Double> lastKnownPrices = new HashMap<>();
     private final Map<String, LocalDate> dailyBarLastRecorded = new HashMap<>();
+    private final Map<String, Double> dailyOpenPrices = new HashMap<>();
+    private final Map<String, ZonedDateTime> entryTimes = new HashMap<>();
+    private final Map<String, Double> entryPrices = new HashMap<>();
+    private final Map<String, ZonedDateTime> lossCooldowns = new HashMap<>();
+    private final Map<String, Boolean> prevOrbBuy = new HashMap<>();
+    private CandleHistory candleHistory;
+    private NewsSentimentCache sentimentCache;
 
     public TradingLoop(QuoteProvider dataClient, PriceHistory priceHistory,
                        IndicatorEngine indicators, TrailingStopMonitor trailingStop,
@@ -134,13 +168,20 @@ public class TradingLoop implements Runnable {
     }
 
     public void setDailyLossLimitPct(double pct) { this.dailyLossLimitPct = pct; }
+    public void setAccurateOptionsValuation(boolean v) { this.accurateOptionsValuation = v; }
     public void setMaxPortfolioExposure(double fraction) { this.maxPortfolioExposure = fraction; }
     public void setTransactionLog(TransactionLog log) { this.transactionLog = log; }
     public void setAvoidOvernightHolds(boolean v) { this.avoidOvernightHolds = v; }
     public void setMarketRegimeFilterEnabled(boolean v) { this.marketRegimeFilterEnabled = v; }
+    public void setInverseEtfSymbols(Set<String> symbols) { this.inverseEtfSymbols = symbols; }
+    public void setMaxConcurrentStockPositions(int n) { this.maxConcurrentStockPositions = n; }
+    public void setStockTradingEnabled(boolean v) { this.stockTradingEnabled = v; }
     public boolean isUptrend() { return isMarketInUptrend(); }
     public void setEarningsCalendar(EarningsCalendar cal) { this.earningsCalendar = cal; }
     public void setEarningsBlackoutDays(int days) { this.earningsBlackoutDays = days; }
+    public void setMinHoldMinutes(int minutes) { this.minHoldMinutes = minutes; }
+    public void setCandleHistory(CandleHistory history) { this.candleHistory = history; }
+    public void setNewsSentimentCache(NewsSentimentCache cache) { this.sentimentCache = cache; }
 
     @Override
     public void run() {
@@ -149,14 +190,20 @@ public class TradingLoop implements Runnable {
             LocalTime time = now.toLocalTime();
             LocalDate today = now.toLocalDate();
             if (time.isBefore(MARKET_OPEN) || time.isAfter(MARKET_CLOSE)) {
-                researchCallback.accept("Market closed. Next open: " + MARKET_OPEN + " ET.");
+                // Log once per day — avoid flooding the research area every 5 seconds.
+                if (!today.equals(lastMarketClosedLoggedDate)) {
+                    lastMarketClosedLoggedDate = today;
+                    researchCallback.accept("Market closed. Next open: " + MARKET_OPEN + " ET.");
+                }
                 if (!time.isBefore(MARKET_CLOSE) && afterMarketCallback != null
                         && !today.equals(lastTrainingDate)) {
                     lastTrainingDate = today;
                     afterMarketCallback.run();
                 }
+                uiRefreshCallback.run();
                 return;
             }
+            boolean orbFormationPeriod = time.isBefore(ORB_FORMATION_END);
             if (account.isTradingHalted()) {
                 researchCallback.accept("TRADING HALTED — balance below $100.");
                 return;
@@ -181,72 +228,213 @@ public class TradingLoop implements Runnable {
                     dayStartValue = account.getBalance() + stockMV;
                 }
                 account.setDailyLossHalted(false);
+                // Re-evaluate immediately: if the app was restarted after hitting the loss limit
+                // intraday, dayStartValue is set from yesterday's close but the portfolio is already
+                // depleted. Without this check, the halt is cleared and trading resumes from the
+                // already-degraded baseline until the new limit is hit again.
+                if (dailyLossLimitPct > 0 && dayStartValue > 0) {
+                    double stockMV = account.getPositions().values().stream()
+                            .mapToDouble(Position::getMarketValue).sum();
+                    double optsBasis = account.getOptionsPositions().values().stream()
+                            .filter(p -> p.getContracts() > 0)
+                            .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
+                            .sum();
+                    double currentVal = account.getBalance() + stockMV + optsBasis;
+                    if (currentVal < dayStartValue * (1 - dailyLossLimitPct)) {
+                        account.setDailyLossHalted(true);
+                        researchCallback.accept(String.format(
+                                "Daily loss limit (%.0f%%) already exceeded on startup (current=%.0f, start=%.0f) — trading halted",
+                                dailyLossLimitPct * 100, currentVal, dayStartValue));
+                    }
+                }
+                lossCooldowns.clear();
+                prevOrbBuy.clear();
             }
             List<QuoteModel> quotes = dataClient.getQuotes(watchList);
+
+            // Pass 1: update all stock prices and mark all options to market before the loss
+            // check runs. Without this, the loss limit sees last tick's option prices for most
+            // symbols, so per-position stop-losses can drain well beyond 5% before the halt
+            // fires — the halt only catches it mid-loop when enough positions have been closed.
             for (QuoteModel quote : quotes) {
                 String symbol = quote.getSymbol();
                 double price = quote.getPrice();
                 double volume = quote.getVolume();
                 lastKnownPrices.put(symbol, price);
                 priceHistory.record(symbol, price, volume);
-                // Gap 6: one daily bar per symbol per trading day — keeps indicators on daily cadence
                 if (!today.equals(dailyBarLastRecorded.get(symbol))) {
+                    dailyOpenPrices.put(symbol, price);
                     priceHistory.recordDaily(symbol, price, volume);
                     dailyBarLastRecorded.put(symbol, today);
                 }
                 account.updatePositionPrice(symbol, price);
-                if (!account.isDailyLossHalted() && dailyLossLimitPct > 0 && dayStartValue > 0) {
-                    double optionsCostBasis = account.getOptionsPositions().values().stream()
+                if (optionsEvaluator != null && !account.isDailyLossHalted()) {
+                    optionsEvaluator.markPositionsToMarket(symbol, price);
+                }
+            }
+
+            // Single aggregate loss check with all symbols' fresh prices.
+            if (!account.isDailyLossHalted() && dailyLossLimitPct > 0 && dayStartValue > 0) {
+                double optionsValue;
+                if (accurateOptionsValuation) {
+                    // Mark-to-market: cash already includes premiums received for short positions,
+                    // so subtract current buyback cost for shorts (contracts < 0) and add current
+                    // value for longs (contracts > 0). Falls back to premiumPaid for unpriced longs
+                    // and 0 for unpriced shorts (conservative — understates loss until first tick).
+                    optionsValue = account.getOptionsPositions().values().stream()
+                            .mapToDouble(p -> {
+                                double mktPrice = p.getCurrentMarketPrice();
+                                double prem = (mktPrice >= 0) ? mktPrice
+                                        : (p.getContracts() > 0 ? p.getPremiumPaid() : 0.0);
+                                return prem * 100 * p.getContracts();
+                            })
+                            .sum();
+                } else {
+                    optionsValue = account.getOptionsPositions().values().stream()
                             .filter(p -> p.getContracts() > 0)
                             .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
                             .sum();
-                    // Use market value (not just unrealized PnL) so that open stock positions
-                    // don't appear as losses: buying $14k of stock reduces cash by $14k but
-                    // adds $14k of market value — net portfolio value is unchanged.
-                    double stockValue = account.getPositions().values().stream()
-                            .mapToDouble(Position::getMarketValue).sum();
-                    double currentValue = account.getBalance() + stockValue + optionsCostBasis;
-                    if (currentValue < dayStartValue * (1 - dailyLossLimitPct)) {
-                        account.setDailyLossHalted(true);
-                        researchCallback.accept(String.format(
-                                "DAILY LOSS LIMIT (%.0f%%) reached — no new positions for the rest of the session",
-                                dailyLossLimitPct * 100));
-                    }
                 }
+                // Use market value (not just unrealized PnL) so that open stock positions
+                // don't appear as losses: buying $14k of stock reduces cash by $14k but
+                // adds $14k of market value — net portfolio value is unchanged.
+                double stockValue = account.getPositions().values().stream()
+                        .mapToDouble(Position::getMarketValue).sum();
+                double currentValue = account.getBalance() + stockValue + optionsValue;
+                if (currentValue < dayStartValue * (1 - dailyLossLimitPct)) {
+                    account.setDailyLossHalted(true);
+                    researchCallback.accept(String.format(
+                            "DAILY LOSS LIMIT (%.0f%%) reached — no new positions for the rest of the session",
+                            dailyLossLimitPct * 100));
+                }
+            }
+
+            // Pass 2: run per-symbol signal evaluation, entries/exits, and router logic.
+            // Price history and mark-to-market were already updated in Pass 1.
+            for (QuoteModel quote : quotes) {
+                String symbol = quote.getSymbol();
+                double price = quote.getPrice();
+                double volume = quote.getVolume();
                 // Gap 6: use daily-resolution prices for indicators; fall back to intraday if not yet seeded
                 List<Double> dailyPs = priceHistory.getDailyPrices(symbol);
                 List<Double> dailyVs = priceHistory.getDailyVolumes(symbol);
                 List<Double> prices  = dailyPs.isEmpty() ? priceHistory.getPrices(symbol)  : dailyPs;
                 List<Double> volumes = dailyVs.isEmpty() ? priceHistory.getVolumes(symbol) : dailyVs;
-                List<SignalResult> signals = indicators.evaluateAll(prices, volumes, price);
+                List<SignalResult> signals;
+                if (candleHistory != null) {
+                    List<CandleBar> oneMin  = candleHistory.getOneMinBarsWithCurrent(symbol);
+                    List<CandleBar> fiveMin = candleHistory.getFiveMinBarsWithCurrent(symbol);
+                    signals = indicators.evaluateAllWithCandles(prices, volumes, price, oneMin, fiveMin);
+                } else {
+                    signals = indicators.evaluateAll(prices, volumes, price);
+                }
+                // Append today's news sentiment as an additional weighted signal.
+                // Only use scores from today — stale scores from a prior session are ignored.
+                if (sentimentCache != null && sentimentCache.isRefreshedToday()) {
+                    SentimentScore sentiment = sentimentCache.getScore(symbol);
+                    if (sentiment != null && sentiment.direction() != SentimentDirection.NEUTRAL
+                            && sentiment.weight() > 0) {
+                        SignalResult.Direction dir = sentiment.direction() == SentimentDirection.BULLISH
+                                ? SignalResult.Direction.BUY : SignalResult.Direction.SELL;
+                        signals.add(new SignalResult("NEWS_SENTIMENT", dir, sentiment.weight()));
+                    }
+                }
+                // Relative strength vs SPY: stock out/underperforming SPY by 1.5%+ intraday
+                // signals institutional flow independent of broad market direction.
+                if (!"SPY".equals(symbol)) {
+                    Double symOpen = dailyOpenPrices.get(symbol);
+                    Double spyOpen = dailyOpenPrices.get("SPY");
+                    double spyPrice = lastKnownPrices.getOrDefault("SPY", 0.0);
+                    if (symOpen != null && spyOpen != null && symOpen > 0 && spyOpen > 0 && spyPrice > 0) {
+                        double symPct = (price - symOpen) / symOpen;
+                        double spyPct = (spyPrice - spyOpen) / spyOpen;
+                        double divergence = symPct - spyPct;
+                        if (divergence >= 0.015)
+                            signals.add(SignalResult.buy("RELATIVE_STRENGTH", divergence));
+                        else if (divergence <= -0.015)
+                            signals.add(SignalResult.sell("RELATIVE_STRENGTH", divergence));
+                    }
+                }
+                // Candlestick is useful for confirming entries but too noisy as an exit trigger —
+                // a single red candle should not close a position. Exclude it from sell scoring.
+                List<SignalResult> sellSignals = signals.stream()
+                        .filter(s -> !"Candlestick".equals(s.getIndicatorName()))
+                        .collect(Collectors.toList());
+
                 int buys = indicators.countBuySignals(signals);
-                int sells = indicators.countSellSignals(signals);
+                int sells = indicators.countSellSignals(sellSignals);
                 double weightedBuys = weightEvaluator != null
                         ? weightEvaluator.weightedBuyScore(signals) : (double) buys;
                 double weightedSells = weightEvaluator != null
-                        ? weightEvaluator.weightedSellScore(signals) : (double) sells;
+                        ? weightEvaluator.weightedSellScore(sellSignals) : (double) sells;
                 String signalStr = signals.stream().map(SignalResult::toString).collect(Collectors.joining(", "));
                 String featureCsv = extractFeatureCsv(signals);
                 boolean hasPosition = account.isStockVerified(symbol);
 
                 // ── Multi-indicator ───────────────────────────────────────────────────
                 if (trailingStop.check(symbol, price) && hasPosition) {
+                    // Trailing stop always fires regardless of hold time — it's a loss-protection rule.
                     Position pos = account.getPositions().get(symbol);
-                    brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Trailing stop: 5% drawdown from peak");
+                    brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Trailing stop: 4% drawdown from peak");
                     account.removePosition(symbol);
                     trailingStop.reset(symbol);
+                    entryTimes.remove(symbol);
+                    Double ep = entryPrices.remove(symbol);
+                    lossCooldowns.put(symbol, now);
+                    researchCallback.accept(symbol + " on 60-min re-entry cooldown after trailing stop (price $"
+                            + String.format("%.2f", price) + (ep != null ? " < peak, entry was $" + String.format("%.2f", ep) : "") + ")");
                     uiRefreshCallback.run();
-                } else if (weightedSells >= SIGNAL_THRESHOLD && hasPosition) {
-                    Position pos = account.getPositions().get(symbol);
-                    brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Signals: " + sells + "/" + signals.size() + " SELL");
-                    account.removePosition(symbol);
-                    trailingStop.reset(symbol);
-                    uiRefreshCallback.run();
-                } else if (weightedBuys >= SIGNAL_THRESHOLD && !hasPosition) {
+                } else if (weightedSells >= SELL_SIGNAL_THRESHOLD && hasPosition) {
+                    ZonedDateTime entryTime = entryTimes.get(symbol);
+                    long heldMinutes = entryTime != null
+                            ? Duration.between(entryTime, now).toMinutes() : Long.MAX_VALUE;
+                    if (heldMinutes < minHoldMinutes) {
+                        researchCallback.accept(symbol + " SELL skipped: min hold ("
+                                + heldMinutes + "/" + minHoldMinutes + "min)");
+                    } else {
+                        Position pos = account.getPositions().get(symbol);
+                        brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr,
+                                "Signals: " + sells + "/" + sellSignals.size() + " SELL");
+                        account.removePosition(symbol);
+                        trailingStop.reset(symbol);
+                        entryTimes.remove(symbol);
+                        // Trigger re-entry cooldown if this was a losing trade opened this session.
+                        Double ep = entryPrices.remove(symbol);
+                        if (ep != null && price < ep) {
+                            lossCooldowns.put(symbol, now);
+                            researchCallback.accept(symbol + " on 60-min re-entry cooldown (sold $"
+                                    + String.format("%.2f", price) + " < entry $" + String.format("%.2f", ep) + ")");
+                        }
+                        uiRefreshCallback.run();
+                    }
+                } else if (weightedBuys >= SIGNAL_THRESHOLD && !hasPosition
+                        && !orbFormationPeriod && !time.isAfter(LAST_ENTRY_TIME)) {
                     int daysToEarnings = earningsCalendar != null
                             ? earningsCalendar.daysUntilEarnings(symbol) : Integer.MAX_VALUE;
-                    if (!isMarketInUptrend()) {
-                        researchCallback.accept(symbol + " BUY skipped: SPY below 50-day MA (bear regime)");
+                    boolean inCooldown = lossCooldowns.containsKey(symbol)
+                            && Duration.between(lossCooldowns.get(symbol), now).toMinutes() < lossCooldownMinutes;
+                    // Require ORB to have been BUY on the previous tick as well — filters single-tick
+                    // false breakouts that cross the ORB level and immediately reverse.
+                    // Only enforced when ORB is actively signaling BUY; neutral ORB (e.g. no candle
+                    // data) does not block entry so other indicators can still trade.
+                    boolean orbBuyNow = signals.stream().anyMatch(
+                            s -> "ORB".equals(s.getIndicatorName())
+                                    && s.getDirection() == SignalResult.Direction.BUY);
+                    boolean orbConfirmedTwice = !orbBuyNow || prevOrbBuy.getOrDefault(symbol, false);
+                    // Skip entry if RSI is active and overbought — avoids buying into exhausted moves.
+                    boolean rsiOverbought = signals.stream()
+                            .anyMatch(s -> "RSI".equals(s.getIndicatorName())
+                                    && s.getDirection() == SignalResult.Direction.SELL);
+                    if (inCooldown) {
+                        researchCallback.accept(symbol + " BUY skipped: 60-min re-entry cooldown after loss");
+                    } else if (!orbConfirmedTwice) {
+                        // Silent — fires on nearly every ORB-false-breakout tick; logging would flood the feed.
+                    } else if (rsiOverbought) {
+                        researchCallback.accept(symbol + " BUY skipped: RSI overbought");
+                    } else if (inverseEtfSymbols.contains(symbol) ? isMarketInUptrend() : !isMarketInUptrend()) {
+                        researchCallback.accept(symbol + (inverseEtfSymbols.contains(symbol)
+                                ? " BUY skipped: SPY in uptrend (inverse ETF — needs downtrend)"
+                                : " BUY skipped: SPY below 5-day MA (short-term downtrend)"));
                     } else if (daysToEarnings <= earningsBlackoutDays) {
                         researchCallback.accept(symbol + " BUY skipped: earnings in "
                                 + daysToEarnings + " day" + (daysToEarnings == 1 ? "" : "s"));
@@ -256,18 +444,35 @@ public class TradingLoop implements Runnable {
                                 + " deployed, limit " + String.format("%.0f%%", maxPortfolioExposure * 100) + ")");
                     } else if (account.isDailyLossHalted()) {
                         researchCallback.accept(symbol + " BUY skipped: daily loss limit active");
-                    } else {
+                    } else if (account.getPositions().size() >= maxConcurrentStockPositions) {
+                        researchCallback.accept(symbol + " BUY skipped: max concurrent positions ("
+                                + maxConcurrentStockPositions + ") already open");
+                    } else if (isVixSpiking()) {
+                        researchCallback.accept(symbol + " BUY skipped: VIX spike above "
+                                + (int) VIX_BLOCK_THRESHOLD + " — widened spreads, panic conditions");
+                    } else if (stockTradingEnabled) {
                         int shares = fees.maxShares(account.getBalance(), price);
                         if (shares > 0) {
                             brokerClient.submitBuy(symbol, shares, price, signalStr,
                                     "Signals: " + buys + "/" + signals.size() + " BUY", featureCsv);
+                            entryTimes.put(symbol, now);
+                            entryPrices.put(symbol, price);
+                            // Reset peak to entry price so the 2% trailing stop is measured
+                            // from where we entered, not from an earlier intraday high.
+                            trailingStop.reset(symbol);
                             uiRefreshCallback.run();
                         }
                     }
                 }
                 trailingStop.updatePeak(symbol, price);
+                // Track ORB state for 2-tick confirmation on the next evaluation cycle.
+                prevOrbBuy.put(symbol, signals.stream().anyMatch(
+                        s -> "ORB".equals(s.getIndicatorName())
+                                && s.getDirection() == SignalResult.Direction.BUY));
+                // Always call the router even when halted — the router's halt handler is what
+                // calls forceCloseAllForSymbol to close open positions on the halt tick itself.
                 if (optionsEvaluator != null) {
-                    optionsEvaluator.evaluate(symbol, price, buys, sells, signalStr, featureCsv);
+                    optionsEvaluator.evaluateWithSignals(symbol, price, buys, sells, signalStr, featureCsv, signals);
                 }
                 researchCallback.accept(time + " | " + symbol + " $" + String.format("%.2f", price)
                         + " | " + signalStr + " | BUY=" + buys + " SELL=" + sells);
@@ -282,6 +487,8 @@ public class TradingLoop implements Runnable {
                     brokerClient.submitSell(sym, pos.getQuantity(), closePrice, "",
                             "Pre-close: avoid overnight hold");
                     trailingStop.reset(sym);
+                    entryTimes.remove(sym);
+                    entryPrices.remove(sym);
                     researchCallback.accept(sym + " closed at $" + String.format("%.2f", closePrice)
                             + ": pre-close overnight avoidance");
                 }
@@ -295,13 +502,21 @@ public class TradingLoop implements Runnable {
     private boolean isMarketInUptrend() {
         if (!marketRegimeFilterEnabled) return true;
         List<Double> spyPrices = priceHistory.getDailyPrices("SPY");
-        if (spyPrices.size() < 50) return true; // insufficient data — don't block trades
-        double ma50 = spyPrices.subList(spyPrices.size() - 50, spyPrices.size())
+        if (spyPrices.size() < 5) return true; // insufficient data — don't block trades
+        double ma5 = spyPrices.subList(spyPrices.size() - 5, spyPrices.size())
                 .stream().mapToDouble(Double::doubleValue).average().orElse(0);
-        return spyPrices.get(spyPrices.size() - 1) >= ma50;
+        return spyPrices.get(spyPrices.size() - 1) >= ma5;
     }
 
-    private static final String[] FEATURE_NAMES = {"RSI", "MACD", "BollingerBands", "MACrossover", "VolumeSurge"};
+    private boolean isVixSpiking() {
+        double vix = lastKnownPrices.getOrDefault("^VIX", lastKnownPrices.getOrDefault("VIX", 0.0));
+        return vix > 0 && vix > VIX_BLOCK_THRESHOLD;
+    }
+
+    private static final String[] FEATURE_NAMES = {
+        "RSI", "BollingerBands", "VolumeSurge", "VWAP", "ORB", "Candlestick",
+        "MACD", "STOCHASTIC", "RELATIVE_STRENGTH"
+    };
 
     private String extractFeatureCsv(List<SignalResult> signals) {
         double[] vals = new double[FEATURE_NAMES.length];

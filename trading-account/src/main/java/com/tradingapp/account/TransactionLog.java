@@ -357,7 +357,15 @@ public class TransactionLog {
     }
 
     public int countWins() {
-        String sql = "SELECT COUNT(*) FROM transactions WHERE action='SELL' AND (price_per_unit * quantity) >= fee_charged";
+        // A round-trip is a win when sell price > entry price of the most recent preceding buy
+        String sql = "SELECT COUNT(*) FROM transactions s" +
+                " WHERE s.action IN ('SELL','CALL_SELL','PUT_SELL')" +
+                " AND s.price_per_unit > (" +
+                "   SELECT b.price_per_unit FROM transactions b" +
+                "   WHERE b.symbol = s.symbol" +
+                "     AND b.action IN ('BUY','CALL_BUY','PUT_BUY')" +
+                "     AND b.id < s.id" +
+                "   ORDER BY b.id DESC LIMIT 1)";
         try (Connection conn = connect();
              Statement stmt = conn.createStatement();
              ResultSet rs = stmt.executeQuery(sql)) {
@@ -365,6 +373,39 @@ public class TransactionLog {
         } catch (SQLException e) {
             throw new RuntimeException("Failed to count wins", e);
         }
+    }
+
+    /** Returns today's options close records (CALL_SELL / PUT_SELL) in chronological order. */
+    public List<TransactionRecord> findTodaysCloseActions(java.time.ZoneId tz) {
+        long todayStartMs = java.time.LocalDate.now(tz)
+                .atStartOfDay(tz).toInstant().toEpochMilli();
+        String sql = "SELECT * FROM transactions"
+                + " WHERE action IN ('CALL_SELL','PUT_SELL')"
+                + " AND timestamp >= ?"
+                + " ORDER BY timestamp ASC";
+        List<TransactionRecord> records = new ArrayList<>();
+        try (Connection conn = connect();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, todayStartMs);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    TransactionRecord r = new TransactionRecord();
+                    r.setId(rs.getLong("id"));
+                    r.setTimestamp(rs.getLong("timestamp"));
+                    r.setSymbol(rs.getString("symbol"));
+                    r.setAction(TransactionRecord.TransactionAction.valueOf(rs.getString("action")));
+                    r.setQuantity(rs.getInt("quantity"));
+                    r.setPricePerUnit(rs.getDouble("price_per_unit"));
+                    r.setFeeCharged(rs.getDouble("fee_charged"));
+                    r.setBalanceAfter(rs.getDouble("balance_after"));
+                    r.setReason(rs.getString("reason"));
+                    records.add(r);
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to query today's close actions", e);
+        }
+        return records;
     }
 
     public void clearAll() {
@@ -376,7 +417,14 @@ public class TransactionLog {
     }
 
     public int countLosses() {
-        String sql = "SELECT COUNT(*) FROM transactions WHERE action='SELL' AND (price_per_unit * quantity) < fee_charged";
+        String sql = "SELECT COUNT(*) FROM transactions s" +
+                " WHERE s.action IN ('SELL','CALL_SELL','PUT_SELL')" +
+                " AND s.price_per_unit <= (" +
+                "   SELECT b.price_per_unit FROM transactions b" +
+                "   WHERE b.symbol = s.symbol" +
+                "     AND b.action IN ('BUY','CALL_BUY','PUT_BUY')" +
+                "     AND b.id < s.id" +
+                "   ORDER BY b.id DESC LIMIT 1)";
         try (Connection conn = connect();
              Statement stmt = conn.createStatement();
              ResultSet rs = stmt.executeQuery(sql)) {

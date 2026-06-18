@@ -40,6 +40,10 @@
             <artifactId>trading-broker</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.tradingapp</groupId>
+            <artifactId>trading-sentiment</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.openjfx</groupId>
             <artifactId>javafx-controls</artifactId>
         </dependency>

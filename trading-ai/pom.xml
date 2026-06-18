@@ -21,6 +21,10 @@
         </dependency>
         <dependency>
             <groupId>com.tradingapp</groupId>
+            <artifactId>trading-broker</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.tradingapp</groupId>
             <artifactId>trading-engine</artifactId>
         </dependency>
         <dependency>

@@ -15,7 +15,7 @@
 <VBox style="-fx-background-color: #1a1a2e; -fx-padding: 20;"
       spacing="16">
 
-    <Label text="Broker &amp; Data Source Settings"
+    <Label text="Settings"
            style="-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #e0e0e0;"/>
     <Separator/>
 
@@ -66,6 +66,27 @@
            style="-fx-font-size: 11px; -fx-text-fill: #888888;"
            maxWidth="520"/>
 
+    <HBox fx:id="testWsRow" spacing="12" alignment="CENTER_LEFT">
+        <Button fx:id="testWsButton" text="Test WebSocket"
+                onAction="#onTestWebSocket"
+                style="-fx-background-color: #16213e; -fx-text-fill: #00ff88; -fx-border-color: #00ff88; -fx-border-radius: 4; -fx-cursor: hand;"/>
+    </HBox>
+
+    <Separator/>
+
+    <!-- AI / News Sentiment section -->
+    <Label text="AI News Sentiment"
+           style="-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #aaaaaa;"/>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Claude API Key:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <PasswordField fx:id="claudeApiKeyField" prefWidth="340"
+                       style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                       promptText="sk-ant-…"/>
+    </HBox>
+    <Label text="Used for pre-market news sentiment analysis. Leave blank to disable. Get a key at console.anthropic.com."
+           style="-fx-font-size: 11px; -fx-text-fill: #888888;" wrapText="true" maxWidth="520"/>
+
     <Separator/>
 
     <!-- Risk settings section -->
@@ -86,22 +107,31 @@
         <TextField fx:id="maxPortfolioExposureField" prefWidth="60"
                    style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
                    promptText="60"/>
-        <Label text="(% of portfolio that can be committed to stock and options positions, 1–100)"
+        <Label text="(% of portfolio committed to stock and options positions, 1–100)"
                style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
-    </HBox>
-
-    <HBox spacing="12" alignment="CENTER_LEFT">
-        <Label text="Avoid Overnight:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
-        <CheckBox fx:id="avoidOvernightCheck"
-                  style="-fx-text-fill: #e0e0e0;"
-                  text="Close all equity positions at 15:45 ET"/>
     </HBox>
 
     <HBox spacing="12" alignment="CENTER_LEFT">
         <Label text="Market Regime:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
         <CheckBox fx:id="marketRegimeFilterCheck"
                   style="-fx-text-fill: #e0e0e0;"
-                  text="Block new stock buys when SPY is below its 50-day MA"/>
+                  text="Block new stock buys when SPY is below its 5-day MA (short-term trend)"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Overnight Holds:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <CheckBox fx:id="avoidOvernightHoldsCheck"
+                  style="-fx-text-fill: #e0e0e0;"
+                  text="Force-close all positions at 15:45 ET (avoid overnight holds)"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Overnight Floor:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="overnightFloorField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="80"/>
+        <Label text="pct of entry — when holding overnight, close EOD losers below this floor (0 = hold all)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
     </HBox>
 
     <HBox spacing="12" alignment="CENTER_LEFT">
@@ -115,32 +145,126 @@
 
     <Separator/>
 
-    <!-- Strategies -->
-    <Label text="Strategies"
+    <!-- Stock Strategies section -->
+    <Label text="Stock Strategies"
+           style="-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #aaaaaa;"/>
+
+    <CheckBox fx:id="stockTradingEnabledCheck" text="Enable Stock Trading"
+              style="-fx-text-fill: #e0e0e0;"/>
+
+    <Label text="Select which stock strategies can open new positions. Disabled strategies still close existing positions."
+           style="-fx-font-size: 11px; -fx-text-fill: #888888;" wrapText="true" maxWidth="520"/>
+
+    <HBox spacing="20" alignment="CENTER_LEFT">
+        <CheckBox fx:id="strategyOpeningBreakout" text="Opening Breakout" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyStochasticReversal" text="Stochastic Reversal" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyRelativeStrengthDivergence" text="RS Divergence" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyMacdCrossover" text="MACD Crossover" style="-fx-text-fill: #e0e0e0;"/>
+    </HBox>
+
+    <Separator/>
+
+    <!-- Options Strategies section -->
+    <Label text="Options Strategies"
            style="-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #aaaaaa;"/>
 
     <CheckBox fx:id="optionsTradingEnabledCheck" text="Enable Options Trading"
               style="-fx-text-fill: #e0e0e0;"/>
 
-    <Label text="Select which strategies can open new positions. Disabled strategies still close existing positions."
+    <Label text="Select which options strategies can open new positions. Disabled strategies still close existing positions."
            style="-fx-font-size: 11px; -fx-text-fill: #888888;" wrapText="true" maxWidth="520"/>
 
     <HBox spacing="20" alignment="CENTER_LEFT">
-        <CheckBox fx:id="strategyCoveredCall" text="Covered Call" style="-fx-text-fill: #e0e0e0;"/>
-        <CheckBox fx:id="strategyBullPutSpread" text="Bull Put Spread" style="-fx-text-fill: #e0e0e0;"/>
-        <CheckBox fx:id="strategyBearCallSpread" text="Bear Call Spread" style="-fx-text-fill: #e0e0e0;"/>
-        <CheckBox fx:id="strategyIronCondor" text="Iron Condor" style="-fx-text-fill: #e0e0e0;"/>
-    </HBox>
-    <HBox spacing="20" alignment="CENTER_LEFT">
-        <CheckBox fx:id="strategyLongCall" text="Long Call" style="-fx-text-fill: #e0e0e0;"/>
-        <CheckBox fx:id="strategyLongPut" text="Long Put" style="-fx-text-fill: #e0e0e0;"/>
         <CheckBox fx:id="strategyHighDeltaScalp" text="High-Delta Scalp" style="-fx-text-fill: #e0e0e0;"/>
         <CheckBox fx:id="strategyMomentumNearTerm" text="Momentum Near-Term" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyLongCall" text="Long Call" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyLongPut" text="Long Put" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyZeroDte" text="Zero-DTE (Fridays)" style="-fx-text-fill: #e0e0e0;"/>
     </HBox>
-    <HBox spacing="20" alignment="CENTER_LEFT">
-        <CheckBox fx:id="strategyStraddle" text="Straddle / Strangle" style="-fx-text-fill: #e0e0e0;"/>
-        <CheckBox fx:id="strategyZeroDte" text="Zero-DTE" style="-fx-text-fill: #e0e0e0;"/>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Options Stop-Loss:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="optionsStopLossField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="30"/>
+        <Label text="exit when premium drops to this pct of entry cost (10–90)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
     </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Profit Target:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="profitTargetField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="2.5"/>
+        <Label text="× entry premium to close at profit (e.g. 2.5 = 150% gain)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Reversal Signals:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="reversalMinSignalsField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="5"/>
+        <Label text="opposing signals required per tick to trigger reversal exit (1–6)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Last Entry:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="entryCutoffField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="14:45"/>
+        <Label text="ET — no new positions after this time (HH:mm, leave blank for no cutoff)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Entry Confirmation:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="entryConfirmationTicksField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="12"/>
+        <Label text="consecutive 5s ticks required before opening a position (1 = off, 12 = 60s)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Put Min Signals:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="downtrendPutMinSignalsField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="3"/>
+        <Label text="sell signals required to open a put during SPY downtrend (1–6)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="TOP_LEFT">
+        <Label text="Options Allowlist:" style="-fx-text-fill: #e0e0e0;" prefWidth="140" prefHeight="24"/>
+        <VBox spacing="4">
+            <TextArea fx:id="optionsAllowlistArea" prefWidth="380" prefHeight="72"
+                      wrapText="true"
+                      style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                      promptText="SPY,AAPL,MSFT,…  (leave blank to allow all symbols)"/>
+            <Label text="Comma-separated symbols allowed to trade options. Leave blank to allow all."
+                   style="-fx-font-size: 11px; -fx-text-fill: #888888;"/>
+        </VBox>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Calls Disabled:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="callsDisabledField" prefWidth="380"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="e.g. MSFT,TSLA  (leave blank for none)"/>
+    </HBox>
+    <Label text="Symbols in this list may trade puts but not calls."
+           style="-fx-font-size: 11px; -fx-text-fill: #888888;"/>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Puts Disabled:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="putsDisabledField" prefWidth="380"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="e.g. NVDA  (leave blank for none)"/>
+    </HBox>
+    <Label text="Symbols in this list may trade calls but not puts."
+           style="-fx-font-size: 11px; -fx-text-fill: #888888;"/>
 
     <Separator/>
 

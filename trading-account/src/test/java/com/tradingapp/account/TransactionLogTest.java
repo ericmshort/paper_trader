@@ -57,11 +57,16 @@ public class TransactionLogTest {
     @Test
     void testCountWinsAndLosses() {
         TransactionLog log = new TransactionLog(tempDbPath());
+        // BUY at $100, then sell at $110 (win) and at $90 (loss)
+        log.insert(new TransactionRecord("AAPL", TransactionRecord.TransactionAction.BUY,
+                10, 100.0, 0.10, 99000.0, "buy signal", "RSI=30"));
         log.insert(new TransactionRecord("AAPL", TransactionRecord.TransactionAction.SELL,
-                100, 2.0, 0.05, 99800.0, "sell signal", "RSI=72"));
+                10, 110.0, 0.10, 99000.0, "sell signal", "RSI=72"));
+        log.insert(new TransactionRecord("TSLA", TransactionRecord.TransactionAction.BUY,
+                5, 200.0, 0.05, 98000.0, "buy signal", "RSI=35"));
         log.insert(new TransactionRecord("TSLA", TransactionRecord.TransactionAction.SELL,
-                1, 0.02, 1.0, 99799.0, "sell signal", "MACD"));
-        assertEquals(1, log.countWins(), "Should count 1 win (revenue >= fee)");
-        assertEquals(1, log.countLosses(), "Should count 1 loss (revenue < fee)");
+                5, 190.0, 0.05, 97500.0, "sell signal", "trailing stop"));
+        assertEquals(1, log.countWins(), "AAPL sold above entry price is a win");
+        assertEquals(1, log.countLosses(), "TSLA sold below entry price is a loss");
     }
 }
