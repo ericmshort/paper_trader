@@ -67,6 +67,12 @@ public class AppConfig {
     private int entryConfirmationTicks = 1;
     // When avoidOvernightHolds=false, close EOD positions below this fraction of entry premium (0.0 = hold all).
     private double overnightMinPremiumFrac = 0.8;
+    // Trailing stop: close position when price falls this fraction from its peak (default 4%).
+    private double trailingStopPct = 0.04;
+    // Risk sizing: max fraction of portfolio to risk on a single stock trade (default 0.3%).
+    private double maxLossPerTradePct = 0.003;
+    // Circuit breaker: auto-liquidate all stocks + halt when daily loss exceeds this fraction (default 2%).
+    private double circuitBreakerPct = 0.02;
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
@@ -159,6 +165,18 @@ public class AppConfig {
                 config.overnightMinPremiumFrac = Double.parseDouble(
                         props.getProperty("options.overnight_min_premium_frac", "0.0"));
             } catch (NumberFormatException ignored) {}
+            try {
+                config.trailingStopPct = Double.parseDouble(
+                        props.getProperty("risk.trailing_stop_pct", "0.04"));
+            } catch (NumberFormatException ignored) {}
+            try {
+                config.maxLossPerTradePct = Double.parseDouble(
+                        props.getProperty("risk.max_loss_per_trade_pct", "0.003"));
+            } catch (NumberFormatException ignored) {}
+            try {
+                config.circuitBreakerPct = Double.parseDouble(
+                        props.getProperty("risk.circuit_breaker_pct", "0.02"));
+            } catch (NumberFormatException ignored) {}
         } catch (IOException ignored) {}
         return config;
     }
@@ -190,6 +208,9 @@ public class AppConfig {
             props.setProperty("options.entry_cutoff", optionsEntryCutoff != null ? optionsEntryCutoff.toString() : "");
             props.setProperty("options.entry_confirmation_ticks", String.valueOf(entryConfirmationTicks));
             props.setProperty("options.overnight_min_premium_frac", String.valueOf(overnightMinPremiumFrac));
+            props.setProperty("risk.trailing_stop_pct", String.valueOf(trailingStopPct));
+            props.setProperty("risk.max_loss_per_trade_pct", String.valueOf(maxLossPerTradePct));
+            props.setProperty("risk.circuit_breaker_pct", String.valueOf(circuitBreakerPct));
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
             }
@@ -291,6 +312,15 @@ public class AppConfig {
 
     public double getOvernightMinPremiumFrac() { return overnightMinPremiumFrac; }
     public void setOvernightMinPremiumFrac(double frac) { this.overnightMinPremiumFrac = frac; }
+
+    public double getTrailingStopPct() { return trailingStopPct; }
+    public void setTrailingStopPct(double pct) { this.trailingStopPct = pct; }
+
+    public double getMaxLossPerTradePct() { return maxLossPerTradePct; }
+    public void setMaxLossPerTradePct(double pct) { this.maxLossPerTradePct = pct; }
+
+    public double getCircuitBreakerPct() { return circuitBreakerPct; }
+    public void setCircuitBreakerPct(double pct) { this.circuitBreakerPct = pct; }
 
     public boolean isAlpacaBroker() {
         return brokerType == BrokerType.ALPACA_PAPER || brokerType == BrokerType.ALPACA_LIVE;

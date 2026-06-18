@@ -169,6 +169,9 @@ public class DashboardController implements Initializable {
                     tradingLoop.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
                     tradingLoop.setMarketRegimeFilterEnabled(cfg.isMarketRegimeFilterEnabled());
                     tradingLoop.setEarningsBlackoutDays(cfg.getEarningsBlackoutDays());
+                    tradingLoop.setTrailingStopPct(cfg.getTrailingStopPct());
+                    tradingLoop.setMaxLossPerTradePct(cfg.getMaxLossPerTradePct());
+                    tradingLoop.setCircuitBreakerPct(cfg.getCircuitBreakerPct());
                 }
                 if (optionsRouter != null) {
                     optionsRouter.setTradingEnabled(cfg.isOptionsTradingEnabled());
@@ -339,6 +342,9 @@ public class DashboardController implements Initializable {
         optionsRouter.setClosePositionsOnHalt(true);
         tradingLoop.setAccurateOptionsValuation(true);
         tradingLoop.setStockTradingEnabled(appConfig.isStockTradingEnabled());
+        tradingLoop.setTrailingStopPct(appConfig.getTrailingStopPct());
+        tradingLoop.setMaxLossPerTradePct(appConfig.getMaxLossPerTradePct());
+        tradingLoop.setCircuitBreakerPct(appConfig.getCircuitBreakerPct());
 
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "trading-loop");

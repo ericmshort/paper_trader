@@ -143,6 +143,15 @@
                style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
     </HBox>
 
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Circuit Breaker:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="circuitBreakerField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="2.0"/>
+        <Label text="% daily loss — auto-liquidate all stocks + halt trading (0 = disabled)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+    </HBox>
+
     <Separator/>
 
     <!-- Stock Strategies section -->
@@ -160,6 +169,24 @@
         <CheckBox fx:id="strategyStochasticReversal" text="Stochastic Reversal" style="-fx-text-fill: #e0e0e0;"/>
         <CheckBox fx:id="strategyRelativeStrengthDivergence" text="RS Divergence" style="-fx-text-fill: #e0e0e0;"/>
         <CheckBox fx:id="strategyMacdCrossover" text="MACD Crossover" style="-fx-text-fill: #e0e0e0;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Trailing Stop:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="trailingStopField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="4"/>
+        <Label text="% — close position when price falls this % from its peak (1–15)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Max Loss/Trade:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="maxLossPerTradeField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="0.30"/>
+        <Label text="% of portfolio risked per stock trade — sizes each position (0.1–1.0)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
     </HBox>
 
     <Separator/>

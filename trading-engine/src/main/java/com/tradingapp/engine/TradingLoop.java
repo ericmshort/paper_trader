@@ -87,6 +87,10 @@ public class TradingLoop implements Runnable {
     private final Map<String, Double> entryPrices = new HashMap<>();
     private final Map<String, ZonedDateTime> lossCooldowns = new HashMap<>();
     private final Map<String, Boolean> prevOrbBuy = new HashMap<>();
+    private final Map<String, SignalResult.Direction> prevVwapSide = new HashMap<>();
+    private double maxLossPerTradePct = 0.003;
+    private double circuitBreakerPct = 0.02;
+    private boolean circuitBreakerFired = false;
     private CandleHistory candleHistory;
     private NewsSentimentCache sentimentCache;
 
@@ -182,6 +186,9 @@ public class TradingLoop implements Runnable {
     public void setMinHoldMinutes(int minutes) { this.minHoldMinutes = minutes; }
     public void setCandleHistory(CandleHistory history) { this.candleHistory = history; }
     public void setNewsSentimentCache(NewsSentimentCache cache) { this.sentimentCache = cache; }
+    public void setTrailingStopPct(double pct) { trailingStop.setTrailingStopPct(pct); }
+    public void setMaxLossPerTradePct(double pct) { this.maxLossPerTradePct = pct; }
+    public void setCircuitBreakerPct(double pct) { this.circuitBreakerPct = pct; }
 
     @Override
     public void run() {
@@ -249,6 +256,8 @@ public class TradingLoop implements Runnable {
                 }
                 lossCooldowns.clear();
                 prevOrbBuy.clear();
+                prevVwapSide.clear();
+                circuitBreakerFired = false;
             }
             List<QuoteModel> quotes = dataClient.getQuotes(watchList);
 
@@ -309,6 +318,35 @@ public class TradingLoop implements Runnable {
                 }
             }
 
+            // Circuit breaker: auto-liquidate all stock positions if portfolio drops circuitBreakerPct.
+            if (!circuitBreakerFired && circuitBreakerPct > 0 && dayStartValue > 0
+                    && !account.isDailyLossHalted()) {
+                double cbOptValue = accurateOptionsValuation
+                        ? account.getOptionsPositions().values().stream()
+                                .mapToDouble(p -> {
+                                    double mp = p.getCurrentMarketPrice();
+                                    return (mp >= 0 ? mp : (p.getContracts() > 0 ? p.getPremiumPaid() : 0.0))
+                                            * 100 * p.getContracts();
+                                }).sum()
+                        : account.getOptionsPositions().values().stream()
+                                .filter(p -> p.getContracts() > 0)
+                                .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts()).sum();
+                double cbStkValue = account.getPositions().values().stream()
+                        .mapToDouble(Position::getMarketValue).sum();
+                double cbCurrentValue = account.getBalance() + cbStkValue + cbOptValue;
+                if (cbCurrentValue < dayStartValue * (1 - circuitBreakerPct)) {
+                    circuitBreakerFired = true;
+                    account.setDailyLossHalted(true);
+                    flattenAllStockPositions(String.format(
+                            "Circuit breaker: portfolio down %.1f%% — all positions closed",
+                            circuitBreakerPct * 100));
+                    researchCallback.accept(String.format(
+                            "⛔ CIRCUIT BREAKER (%.0f%%) — all stock positions flattened, trading halted",
+                            circuitBreakerPct * 100));
+                    uiRefreshCallback.run();
+                }
+            }
+
             // Pass 2: run per-symbol signal evaluation, entries/exits, and router logic.
             // Price history and mark-to-market were already updated in Pass 1.
             for (QuoteModel quote : quotes) {
@@ -355,6 +393,24 @@ public class TradingLoop implements Runnable {
                             signals.add(SignalResult.sell("RELATIVE_STRENGTH", divergence));
                     }
                 }
+                // VWAP cross: only count the signal on the tick where price crosses the VWAP line.
+                // Stripping it on non-crossing ticks prevents VWAP from adding 1 vote every tick
+                // above/below (which biases entries in trending markets).
+                SignalResult vwapSignal = signals.stream()
+                        .filter(s -> "VWAP".equals(s.getIndicatorName())).findFirst().orElse(null);
+                if (vwapSignal != null) {
+                    SignalResult.Direction prevSide = prevVwapSide.get(symbol);
+                    boolean isCrossing = prevSide != null
+                            && prevSide != vwapSignal.getDirection()
+                            && vwapSignal.getDirection() != SignalResult.Direction.NEUTRAL;
+                    if (!isCrossing) {
+                        signals = signals.stream()
+                                .filter(s -> !"VWAP".equals(s.getIndicatorName()))
+                                .collect(Collectors.toList());
+                    }
+                    prevVwapSide.put(symbol, vwapSignal.getDirection());
+                }
+
                 // Candlestick is useful for confirming entries but too noisy as an exit trigger —
                 // a single red candle should not close a position. Exclude it from sell scoring.
                 List<SignalResult> sellSignals = signals.stream()
@@ -375,7 +431,8 @@ public class TradingLoop implements Runnable {
                 if (trailingStop.check(symbol, price) && hasPosition) {
                     // Trailing stop always fires regardless of hold time — it's a loss-protection rule.
                     Position pos = account.getPositions().get(symbol);
-                    brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr, "Trailing stop: 4% drawdown from peak");
+                    brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr,
+                            String.format("Trailing stop: %.0f%% drawdown from peak", trailingStop.getTrailingStopPct() * 100));
                     account.removePosition(symbol);
                     trailingStop.reset(symbol);
                     entryTimes.remove(symbol);
@@ -451,7 +508,12 @@ public class TradingLoop implements Runnable {
                         researchCallback.accept(symbol + " BUY skipped: VIX spike above "
                                 + (int) VIX_BLOCK_THRESHOLD + " — widened spreads, panic conditions");
                     } else if (stockTradingEnabled) {
-                        int shares = fees.maxShares(account.getBalance(), price);
+                        double portfolioValue = account.getBalance()
+                                + account.getPositions().values().stream()
+                                        .mapToDouble(Position::getMarketValue).sum();
+                        int shares = fees.riskBasedShares(portfolioValue, price,
+                                trailingStop.getTrailingStopPct(), maxLossPerTradePct);
+                        if (shares == 0) shares = fees.maxShares(account.getBalance(), price);
                         if (shares > 0) {
                             brokerClient.submitBuy(symbol, shares, price, signalStr,
                                     "Signals: " + buys + "/" + signals.size() + " BUY", featureCsv);
@@ -496,6 +558,18 @@ public class TradingLoop implements Runnable {
             uiRefreshCallback.run();
         } catch (Exception e) {
             researchCallback.accept("TradingLoop error: " + e.getMessage());
+        }
+    }
+
+    private void flattenAllStockPositions(String reason) {
+        for (String sym : new ArrayList<>(account.getPositions().keySet())) {
+            Position pos = account.getPositions().get(sym);
+            if (pos == null) continue;
+            double price = lastKnownPrices.getOrDefault(sym, pos.getAverageCost());
+            brokerClient.submitSell(sym, pos.getQuantity(), price, "", reason);
+            trailingStop.reset(sym);
+            entryTimes.remove(sym);
+            entryPrices.remove(sym);
         }
     }
 

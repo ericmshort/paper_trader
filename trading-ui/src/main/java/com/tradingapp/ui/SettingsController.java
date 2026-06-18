@@ -59,6 +59,9 @@ public class SettingsController implements Initializable {
     @FXML private TextField callsDisabledField;
     @FXML private TextField putsDisabledField;
     @FXML private PasswordField claudeApiKeyField;
+    @FXML private TextField trailingStopField;
+    @FXML private TextField maxLossPerTradeField;
+    @FXML private TextField circuitBreakerField;
     @FXML private Button testConnectionButton;
     @FXML private Label statusLabel;
 
@@ -135,6 +138,9 @@ public class SettingsController implements Initializable {
         overnightFloorField.setText(String.valueOf((int) Math.round(cfg.getOvernightMinPremiumFrac() * 100)));
         callsDisabledField.setText(String.join(",", cfg.getOptionsCallsDisabled()));
         putsDisabledField.setText(String.join(",", cfg.getOptionsPutsDisabled()));
+        trailingStopField.setText(String.format("%.0f", cfg.getTrailingStopPct() * 100));
+        maxLossPerTradeField.setText(String.format("%.2f", cfg.getMaxLossPerTradePct() * 100));
+        circuitBreakerField.setText(String.format("%.1f", cfg.getCircuitBreakerPct() * 100));
         updateAlpacaFieldVisibility();
         updateQuoteNote();
         updateStockStrategyCheckboxStates();
@@ -392,6 +398,18 @@ public class SettingsController implements Initializable {
         } catch (NumberFormatException ignored) {}
         cfg.setOptionsCallsDisabled(parseSymbolSet(callsDisabledField.getText()));
         cfg.setOptionsPutsDisabled(parseSymbolSet(putsDisabledField.getText()));
+        try {
+            double pct = Double.parseDouble(trailingStopField.getText().strip());
+            cfg.setTrailingStopPct(Math.min(15, Math.max(1, pct)) / 100.0);
+        } catch (NumberFormatException ignored) {}
+        try {
+            double pct = Double.parseDouble(maxLossPerTradeField.getText().strip());
+            cfg.setMaxLossPerTradePct(Math.min(1.0, Math.max(0.1, pct)) / 100.0);
+        } catch (NumberFormatException ignored) {}
+        try {
+            double pct = Double.parseDouble(circuitBreakerField.getText().strip());
+            cfg.setCircuitBreakerPct(Math.min(10, Math.max(0, pct)) / 100.0);
+        } catch (NumberFormatException ignored) {}
         return cfg;
     }
 

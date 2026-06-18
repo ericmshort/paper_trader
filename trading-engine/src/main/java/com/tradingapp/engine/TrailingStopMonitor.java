@@ -6,6 +6,7 @@ import java.util.Map;
 public class TrailingStopMonitor {
 
     private final Map<String, Double> peaks = new HashMap<>();
+    private double trailingStopPct = 0.04;
 
     public void updatePeak(String symbol, double price) {
         peaks.put(symbol, Math.max(price, peaks.getOrDefault(symbol, price)));
@@ -17,7 +18,7 @@ public class TrailingStopMonitor {
             peaks.put(symbol, currentPrice);
             return false;
         }
-        return currentPrice <= peak * 0.96;
+        return currentPrice <= peak * (1 - trailingStopPct);
     }
 
     public void reset(String symbol) {
@@ -27,4 +28,7 @@ public class TrailingStopMonitor {
     public void resetAll() {
         peaks.clear();
     }
+
+    public double getTrailingStopPct() { return trailingStopPct; }
+    public void setTrailingStopPct(double pct) { this.trailingStopPct = pct; }
 }
