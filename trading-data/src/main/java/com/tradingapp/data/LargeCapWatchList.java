@@ -6,16 +6,13 @@ import java.util.List;
 
 public class LargeCapWatchList {
     public static final List<String> SYMBOLS = Collections.unmodifiableList(Arrays.asList(
-        "AAPL", "MSFT", "GOOGL", "AMZN", "META",
-        "NVDA", "BRK-B", "TSLA", "UNH", "XOM",
-        "JPM", "JNJ", "V", "PG", "MA",
-        "HD", "CVX", "MRK", "LLY", "ABBV",
-        "PEP", "KO", "AVGO", "COST", "WMT",
-        "BAC", "DIS", "CSCO", "TMO", "ACN",
+        "AAPL", "MSFT", "AMZN", "META", "NVDA",
+        "BRK-B", "TSLA", "UNH", "XOM", "JNJ",
+        "PG", "MA", "HD", "CVX", "LLY",
+        "ABBV", "PEP", "WMT", "CSCO", "TMO",
         "ABT", "MCD", "NKE", "DHR", "ADBE",
-        "CRM", "TXN", "NEE", "PM", "RTX",
-        "QCOM", "HON", "LOW", "UPS", "IBM",
-        "LIN", "AMGN", "SBUX", "MDLZ", "CAT"
+        "CRM", "TXN", "NEE", "PM", "UPS",
+        "QCOM", "LIN", "MDLZ", "CAT"
     ));
 
     private LargeCapWatchList() {}
