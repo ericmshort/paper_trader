@@ -118,6 +118,10 @@
     <!-- Strategies -->
     <Label text="Strategies"
            style="-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #aaaaaa;"/>
+
+    <CheckBox fx:id="optionsTradingEnabledCheck" text="Enable Options Trading"
+              style="-fx-text-fill: #e0e0e0;"/>
+
     <Label text="Select which strategies can open new positions. Disabled strategies still close existing positions."
            style="-fx-font-size: 11px; -fx-text-fill: #888888;" wrapText="true" maxWidth="520"/>
 

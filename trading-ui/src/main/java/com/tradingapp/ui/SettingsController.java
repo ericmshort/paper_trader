@@ -31,6 +31,7 @@ public class SettingsController implements Initializable {
     @FXML private CheckBox avoidOvernightCheck;
     @FXML private CheckBox marketRegimeFilterCheck;
     @FXML private TextField earningsBlackoutField;
+    @FXML private CheckBox optionsTradingEnabledCheck;
     @FXML private CheckBox strategyCoveredCall;
     @FXML private CheckBox strategyBullPutSpread;
     @FXML private CheckBox strategyBearCallSpread;
@@ -60,6 +61,7 @@ public class SettingsController implements Initializable {
 
         brokerTypeCombo.setOnAction(e -> updateAlpacaFieldVisibility());
         quoteProviderCombo.setOnAction(e -> updateQuoteNote());
+        optionsTradingEnabledCheck.setOnAction(e -> updateStrategyCheckboxStates());
     }
 
     public void setActiveBrokerType(AppConfig.BrokerType type) {
@@ -89,6 +91,7 @@ public class SettingsController implements Initializable {
         avoidOvernightCheck.setSelected(cfg.isAvoidOvernightHolds());
         marketRegimeFilterCheck.setSelected(cfg.isMarketRegimeFilterEnabled());
         earningsBlackoutField.setText(String.valueOf(cfg.getEarningsBlackoutDays()));
+        optionsTradingEnabledCheck.setSelected(cfg.isOptionsTradingEnabled());
         Set<String> enabled = cfg.getEnabledStrategies();
         strategyCoveredCall.setSelected(enabled.contains("COVERED_CALL"));
         strategyBullPutSpread.setSelected(enabled.contains("BULL_PUT_SPREAD"));
@@ -102,6 +105,7 @@ public class SettingsController implements Initializable {
         strategyZeroDte.setSelected(enabled.contains("ZERO_DTE"));
         updateAlpacaFieldVisibility();
         updateQuoteNote();
+        updateStrategyCheckboxStates();
     }
 
     private void updateAlpacaFieldVisibility() {
@@ -245,6 +249,7 @@ public class SettingsController implements Initializable {
         } catch (NumberFormatException ignored) {}
         cfg.setAvoidOvernightHolds(avoidOvernightCheck.isSelected());
         cfg.setMarketRegimeFilterEnabled(marketRegimeFilterCheck.isSelected());
+        cfg.setOptionsTradingEnabled(optionsTradingEnabledCheck.isSelected());
         try {
             int days = Integer.parseInt(earningsBlackoutField.getText().strip());
             cfg.setEarningsBlackoutDays(Math.max(0, days));
@@ -269,6 +274,20 @@ public class SettingsController implements Initializable {
         statusLabel.setStyle(success
                 ? "-fx-font-size: 12px; -fx-text-fill: #00ff88;"
                 : "-fx-font-size: 12px; -fx-text-fill: #ff4444;");
+    }
+
+    private void updateStrategyCheckboxStates() {
+        boolean enabled = optionsTradingEnabledCheck.isSelected();
+        strategyCoveredCall.setDisable(!enabled);
+        strategyBullPutSpread.setDisable(!enabled);
+        strategyBearCallSpread.setDisable(!enabled);
+        strategyIronCondor.setDisable(!enabled);
+        strategyLongCall.setDisable(!enabled);
+        strategyLongPut.setDisable(!enabled);
+        strategyHighDeltaScalp.setDisable(!enabled);
+        strategyMomentumNearTerm.setDisable(!enabled);
+        strategyStraddle.setDisable(!enabled);
+        strategyZeroDte.setDisable(!enabled);
     }
 
     private void clearStatus() { statusLabel.setText(""); }

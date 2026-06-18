@@ -33,6 +33,7 @@ public class AppConfig {
     private boolean avoidOvernightHolds = true;
     private boolean marketRegimeFilterEnabled = true;
     private int earningsBlackoutDays = 3;
+    private boolean optionsTradingEnabled = true;
     // Strategies enabled for live trading. Defaults to conservative set.
     private Set<String> enabledStrategies = new LinkedHashSet<>(
             Arrays.asList("COVERED_CALL", "BULL_PUT_SPREAD"));
@@ -66,6 +67,8 @@ public class AppConfig {
                     props.getProperty("risk.avoid_overnight_holds", "true"));
             config.marketRegimeFilterEnabled = Boolean.parseBoolean(
                     props.getProperty("risk.market_regime_filter", "true"));
+            config.optionsTradingEnabled = Boolean.parseBoolean(
+                    props.getProperty("trading.options_enabled", "true"));
             try {
                 config.earningsBlackoutDays = Integer.parseInt(
                         props.getProperty("risk.earnings_blackout_days", "3"));
@@ -93,6 +96,7 @@ public class AppConfig {
             props.setProperty("risk.avoid_overnight_holds", String.valueOf(avoidOvernightHolds));
             props.setProperty("risk.market_regime_filter", String.valueOf(marketRegimeFilterEnabled));
             props.setProperty("risk.earnings_blackout_days", String.valueOf(earningsBlackoutDays));
+            props.setProperty("trading.options_enabled", String.valueOf(optionsTradingEnabled));
             props.setProperty("strategy.enabled", String.join(",", enabledStrategies));
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
@@ -128,6 +132,9 @@ public class AppConfig {
 
     public int getEarningsBlackoutDays() { return earningsBlackoutDays; }
     public void setEarningsBlackoutDays(int days) { this.earningsBlackoutDays = days; }
+
+    public boolean isOptionsTradingEnabled() { return optionsTradingEnabled; }
+    public void setOptionsTradingEnabled(boolean v) { this.optionsTradingEnabled = v; }
 
     public Set<String> getEnabledStrategies() { return enabledStrategies; }
     public void setEnabledStrategies(Set<String> strategies) { this.enabledStrategies = new LinkedHashSet<>(strategies); }

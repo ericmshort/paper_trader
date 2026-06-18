@@ -154,6 +154,7 @@ public class DashboardController implements Initializable {
                     tradingLoop.setEarningsBlackoutDays(cfg.getEarningsBlackoutDays());
                 }
                 if (optionsRouter != null) {
+                    optionsRouter.setTradingEnabled(cfg.isOptionsTradingEnabled());
                     optionsRouter.setMaxPortfolioExposure(cfg.getMaxPortfolioExposurePct() / 100.0);
                     optionsRouter.setEnabledStrategies(cfg.getEnabledStrategies());
                 }
@@ -242,6 +243,7 @@ public class DashboardController implements Initializable {
         tradingLoop.setTransactionLog(transactionLog);
         tradingLoop.setDailyLossLimitPct(appConfig.getDailyLossLimitPct() / 100.0);
         tradingLoop.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
+        optionsRouter.setTradingEnabled(appConfig.isOptionsTradingEnabled());
         optionsRouter.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
         optionsRouter.setEnabledStrategies(appConfig.getEnabledStrategies());
         tradingLoop.setAvoidOvernightHolds(appConfig.isAvoidOvernightHolds());

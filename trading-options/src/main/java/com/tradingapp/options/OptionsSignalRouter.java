@@ -65,10 +65,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private LocalDate stopLossResetDate;
     private BooleanSupplier uptrendSupplier;
     private Set<String> enabledStrategies = new HashSet<>(); // empty = all enabled; populated from AppConfig at startup
+    private volatile boolean tradingEnabled = true;
 
     public void setUptrendSupplier(BooleanSupplier s) { this.uptrendSupplier = s; }
     public void setMaxPortfolioExposure(double fraction) { this.maxPortfolioExposure = fraction; }
     public void setEnabledStrategies(Set<String> strategies) { this.enabledStrategies = new HashSet<>(strategies); }
+    public void setTradingEnabled(boolean enabled) { this.tradingEnabled = enabled; }
     private boolean isStrategyEnabled(String name) { return enabledStrategies.isEmpty() || enabledStrategies.contains(name); }
 
     public OptionsSignalRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
@@ -91,6 +93,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     @Override
     public void evaluate(String symbol, double price, int buySignals, int sellSignals,
                          String signalStr, String featureCsv) {
+        if (!tradingEnabled) return;
         resetIfNewDay();
 
         // ── Position keys ─────────────────────────────────────────────────────────
