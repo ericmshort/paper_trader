@@ -189,6 +189,15 @@
                style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
     </HBox>
 
+    <VBox spacing="4">
+        <Label text="Stock Watchlist:" style="-fx-text-fill: #e0e0e0;"/>
+        <TextArea fx:id="stockWatchlistArea" prefHeight="72" wrapText="true"
+                  style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0; -fx-font-size: 11px;"
+                  promptText="AAPL, MSFT, NVDA, ..."/>
+        <Label text="Comma-separated list of symbols to trade stocks on. Leave blank to use all watchlist symbols."
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;" wrapText="true" maxWidth="520"/>
+    </VBox>
+
     <Separator/>
 
     <!-- Options Strategies section -->

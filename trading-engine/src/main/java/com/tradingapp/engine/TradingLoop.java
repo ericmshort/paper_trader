@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -91,6 +92,7 @@ public class TradingLoop implements Runnable {
     private double maxLossPerTradePct = 0.003;
     private double circuitBreakerPct = 0.02;
     private boolean circuitBreakerFired = false;
+    private Set<String> stockWatchlist = null; // null = all symbols eligible
     private CandleHistory candleHistory;
     private NewsSentimentCache sentimentCache;
 
@@ -189,6 +191,9 @@ public class TradingLoop implements Runnable {
     public void setTrailingStopPct(double pct) { trailingStop.setTrailingStopPct(pct); }
     public void setMaxLossPerTradePct(double pct) { this.maxLossPerTradePct = pct; }
     public void setCircuitBreakerPct(double pct) { this.circuitBreakerPct = pct; }
+    public void setStockWatchlist(java.util.Collection<String> symbols) {
+        this.stockWatchlist = symbols == null || symbols.isEmpty() ? null : new HashSet<>(symbols);
+    }
 
     @Override
     public void run() {
@@ -465,6 +470,7 @@ public class TradingLoop implements Runnable {
                         uiRefreshCallback.run();
                     }
                 } else if (!hasPosition && !orbFormationPeriod && !time.isAfter(LAST_ENTRY_TIME)
+                        && (stockWatchlist == null || stockWatchlist.contains(symbol))
                         && (weightedBuys >= SIGNAL_THRESHOLD
                                 || (signals.stream().anyMatch(s -> "ORB".equals(s.getIndicatorName())
                                         && s.getDirection() == SignalResult.Direction.BUY)

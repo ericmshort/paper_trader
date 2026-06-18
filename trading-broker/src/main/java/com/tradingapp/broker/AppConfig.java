@@ -12,8 +12,10 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -73,6 +75,8 @@ public class AppConfig {
     private double maxLossPerTradePct = 0.003;
     // Circuit breaker: auto-liquidate all stocks + halt when daily loss exceeds this fraction (default 2%).
     private double circuitBreakerPct = 0.02;
+    // Symbols eligible for stock trading. Empty = use LargeCapWatchList default.
+    private List<String> stockWatchlist = new ArrayList<>();
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
@@ -177,6 +181,12 @@ public class AppConfig {
                 config.circuitBreakerPct = Double.parseDouble(
                         props.getProperty("risk.circuit_breaker_pct", "0.02"));
             } catch (NumberFormatException ignored) {}
+            String stockWatchlistRaw = props.getProperty("stock.watchlist", "");
+            if (!stockWatchlistRaw.isBlank()) {
+                config.stockWatchlist = Arrays.stream(stockWatchlistRaw.split(","))
+                        .map(String::strip).filter(s -> !s.isEmpty())
+                        .collect(Collectors.toCollection(ArrayList::new));
+            }
         } catch (IOException ignored) {}
         return config;
     }
@@ -211,6 +221,7 @@ public class AppConfig {
             props.setProperty("risk.trailing_stop_pct", String.valueOf(trailingStopPct));
             props.setProperty("risk.max_loss_per_trade_pct", String.valueOf(maxLossPerTradePct));
             props.setProperty("risk.circuit_breaker_pct", String.valueOf(circuitBreakerPct));
+            props.setProperty("stock.watchlist", String.join(",", stockWatchlist));
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
             }
@@ -321,6 +332,9 @@ public class AppConfig {
 
     public double getCircuitBreakerPct() { return circuitBreakerPct; }
     public void setCircuitBreakerPct(double pct) { this.circuitBreakerPct = pct; }
+
+    public List<String> getStockWatchlist() { return stockWatchlist; }
+    public void setStockWatchlist(List<String> symbols) { this.stockWatchlist = new ArrayList<>(symbols); }
 
     public boolean isAlpacaBroker() {
         return brokerType == BrokerType.ALPACA_PAPER || brokerType == BrokerType.ALPACA_LIVE;

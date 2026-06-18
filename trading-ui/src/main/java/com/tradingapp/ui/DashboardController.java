@@ -172,6 +172,7 @@ public class DashboardController implements Initializable {
                     tradingLoop.setTrailingStopPct(cfg.getTrailingStopPct());
                     tradingLoop.setMaxLossPerTradePct(cfg.getMaxLossPerTradePct());
                     tradingLoop.setCircuitBreakerPct(cfg.getCircuitBreakerPct());
+                    tradingLoop.setStockWatchlist(cfg.getStockWatchlist());
                 }
                 if (optionsRouter != null) {
                     optionsRouter.setTradingEnabled(cfg.isOptionsTradingEnabled());
@@ -345,6 +346,7 @@ public class DashboardController implements Initializable {
         tradingLoop.setTrailingStopPct(appConfig.getTrailingStopPct());
         tradingLoop.setMaxLossPerTradePct(appConfig.getMaxLossPerTradePct());
         tradingLoop.setCircuitBreakerPct(appConfig.getCircuitBreakerPct());
+        tradingLoop.setStockWatchlist(appConfig.getStockWatchlist());
 
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "trading-loop");

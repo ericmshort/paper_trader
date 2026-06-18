@@ -62,6 +62,7 @@ public class SettingsController implements Initializable {
     @FXML private TextField trailingStopField;
     @FXML private TextField maxLossPerTradeField;
     @FXML private TextField circuitBreakerField;
+    @FXML private TextArea  stockWatchlistArea;
     @FXML private Button testConnectionButton;
     @FXML private Label statusLabel;
 
@@ -141,6 +142,7 @@ public class SettingsController implements Initializable {
         trailingStopField.setText(String.format("%.0f", cfg.getTrailingStopPct() * 100));
         maxLossPerTradeField.setText(String.format("%.2f", cfg.getMaxLossPerTradePct() * 100));
         circuitBreakerField.setText(String.format("%.1f", cfg.getCircuitBreakerPct() * 100));
+        stockWatchlistArea.setText(String.join(", ", cfg.getStockWatchlist()));
         updateAlpacaFieldVisibility();
         updateQuoteNote();
         updateStockStrategyCheckboxStates();
@@ -410,6 +412,7 @@ public class SettingsController implements Initializable {
             double pct = Double.parseDouble(circuitBreakerField.getText().strip());
             cfg.setCircuitBreakerPct(Math.min(10, Math.max(0, pct)) / 100.0);
         } catch (NumberFormatException ignored) {}
+        cfg.setStockWatchlist(new java.util.ArrayList<>(parseSymbolSet(stockWatchlistArea.getText())));
         return cfg;
     }
 
