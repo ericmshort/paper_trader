@@ -165,6 +165,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                                PriceHistory sharedHistory, Supplier<ZonedDateTime> clock) {
         optExec.setTransactionLog(sharedLog);
         optExec.setAccount(sharedAccount);
+        optExec.setClock(() -> clock.get().toInstant().toEpochMilli());
         this.account = sharedAccount;
         this.priceHistory = sharedHistory;
         this.clock = clock;

@@ -23,6 +23,7 @@ public class OptionsOrderExecutor {
     private Account account;
     private TransactionLog transactionLog;
     private final OptionsSubmitter submitter;
+    private java.util.function.LongSupplier clockMs = System::currentTimeMillis;
 
     // Tracks stock legs of open covered-call positions (keyed by posKey)
     private final Map<String, Integer> coveredCallStockShares = new HashMap<>();
@@ -40,7 +41,10 @@ public class OptionsOrderExecutor {
 
     public void setTransactionLog(TransactionLog log) { this.transactionLog = log; }
     public void setAccount(Account account) { this.account = account; }
+    public void setClock(java.util.function.LongSupplier c) { this.clockMs = c; }
     public int closeAllFromBroker() { return submitter != null ? submitter.closeAllOptionsPositions() : -1; }
+
+    private TransactionRecord ts(TransactionRecord r) { r.setTimestamp(clockMs.getAsLong()); return r; }
 
     public void buyCall(String symbol, double strike, LocalDate expiry, int contracts,
                         double premium, String signalStr, String featureCsv) {
@@ -250,8 +254,8 @@ public class OptionsOrderExecutor {
         OptionsPosition pos = new OptionsPosition(symbol, optionType, strike, expiry, -contracts, fillPremium);
         account.addOptionsPosition(posKey, pos);
 
-        TransactionRecord rec = new TransactionRecord(symbol, action, contracts, fillPremium, fee,
-                account.getBalance(), optionType + " K=" + strike + " exp=" + expiry + " (SHORT)", signalStr);
+        TransactionRecord rec = ts(new TransactionRecord(symbol, action, contracts, fillPremium, fee,
+                account.getBalance(), optionType + " K=" + strike + " exp=" + expiry + " (SHORT)", signalStr));
         rec.setFeatures(featureCsv);
         try {
             transactionLog.insert(rec);
@@ -290,8 +294,8 @@ public class OptionsOrderExecutor {
         OptionsPosition pos = new OptionsPosition(symbol, optionType, strike, expiry, contracts, fillPremium);
         account.addOptionsPosition(posKey, pos);
 
-        TransactionRecord rec = new TransactionRecord(symbol, action, contracts, fillPremium, fee,
-                account.getBalance(), optionType + " K=" + strike + " exp=" + expiry, signalStr);
+        TransactionRecord rec = ts(new TransactionRecord(symbol, action, contracts, fillPremium, fee,
+                account.getBalance(), optionType + " K=" + strike + " exp=" + expiry, signalStr));
         rec.setFeatures(featureCsv);
         rec.setExternalId(externalId);
         try {
@@ -559,8 +563,8 @@ public class OptionsOrderExecutor {
         account.addRealizedPnL(pnl);
 
         TransactionAction action = pos.getType().equals("CALL") ? TransactionAction.CALL_SELL : TransactionAction.PUT_SELL;
-        TransactionRecord rec = new TransactionRecord(pos.getSymbol(), action, pos.getContracts(),
-                currentPremium, fee, account.getBalance(), reason, "");
+        TransactionRecord rec = ts(new TransactionRecord(pos.getSymbol(), action, pos.getContracts(),
+                currentPremium, fee, account.getBalance(), reason, ""));
         rec.setExternalId(externalId);
         rec.setGroupId(groupId);
         try {
@@ -611,8 +615,8 @@ public class OptionsOrderExecutor {
 
         String groupId = UUID.randomUUID().toString();
         String stockReason = "Covered call stock leg K=" + callStrike + " exp=" + callExpiry;
-        TransactionRecord stockRec = new TransactionRecord(symbol, TransactionAction.BUY,
-                stockShares, stockPrice, 0.0, account.getBalance(), stockReason, signalStr);
+        TransactionRecord stockRec = ts(new TransactionRecord(symbol, TransactionAction.BUY,
+                stockShares, stockPrice, 0.0, account.getBalance(), stockReason, signalStr));
         stockRec.setFeatures(featureCsv);
         stockRec.setExternalId(stockOrderId);
         stockRec.setGroupId(groupId);
@@ -621,8 +625,8 @@ public class OptionsOrderExecutor {
         }
 
         String callReason = "Covered call CALL K=" + callStrike + " exp=" + callExpiry + " (SHORT)";
-        TransactionRecord callRec = new TransactionRecord(symbol, TransactionAction.CALL_SELL,
-                -contracts, callPremium, 0.0, account.getBalance(), callReason, signalStr);
+        TransactionRecord callRec = ts(new TransactionRecord(symbol, TransactionAction.CALL_SELL,
+                -contracts, callPremium, 0.0, account.getBalance(), callReason, signalStr));
         callRec.setFeatures(featureCsv);
         callRec.setExternalId(callOrderId);
         callRec.setGroupId(groupId);
@@ -668,16 +672,16 @@ public class OptionsOrderExecutor {
         coveredCallStockEntries.remove(posKey);
 
         String groupId = UUID.randomUUID().toString();
-        TransactionRecord callRec = new TransactionRecord(symbol, TransactionAction.CALL_BUY,
-                contracts, callPremium, callFee, account.getBalance(), reason, "");
+        TransactionRecord callRec = ts(new TransactionRecord(symbol, TransactionAction.CALL_BUY,
+                contracts, callPremium, callFee, account.getBalance(), reason, ""));
         callRec.setExternalId(callOrderId);
         callRec.setGroupId(groupId);
         try { transactionLog.insert(callRec); } catch (Exception e) {
             LOG.warning("Covered call close call-buy log failed: " + e.getMessage());
         }
 
-        TransactionRecord stockRec = new TransactionRecord(symbol, TransactionAction.SELL,
-                stockShares, stockPrice, 0.0, account.getBalance(), reason, "");
+        TransactionRecord stockRec = ts(new TransactionRecord(symbol, TransactionAction.SELL,
+                stockShares, stockPrice, 0.0, account.getBalance(), reason, ""));
         stockRec.setExternalId(stockOrderId);
         stockRec.setGroupId(groupId);
         try { transactionLog.insert(stockRec); } catch (Exception e) {
@@ -698,8 +702,8 @@ public class OptionsOrderExecutor {
     private void logRecord(String symbol, TransactionAction action, int contracts, double premium,
                            double fee, String reason, String signalStr, String featureCsv,
                            String externalId, String groupId) {
-        TransactionRecord rec = new TransactionRecord(symbol, action, contracts, premium, fee,
-                account.getBalance(), reason, signalStr);
+        TransactionRecord rec = ts(new TransactionRecord(symbol, action, contracts, premium, fee,
+                account.getBalance(), reason, signalStr));
         rec.setFeatures(featureCsv);
         rec.setExternalId(externalId);
         rec.setGroupId(groupId);

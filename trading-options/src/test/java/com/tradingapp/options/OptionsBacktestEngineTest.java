@@ -148,6 +148,27 @@ public class OptionsBacktestEngineTest {
         assertTrue(engine.shouldExit(pos, 1000, 0, 0, LocalDate.now(), OptionsStrategy.LONG_CALL, PRICE));
     }
 
+    @Test
+    void overnightFloorTriggersWhenValueBelowThreshold() {
+        engine.setOvernightMinPremiumFrac(0.70);
+        LocalDate expiry = LocalDate.now().plusDays(30);
+        var pos = new OptionsBacktestEngine.OpenPosition(SYM, expiry, 1, SIGMA, 500, 0,
+                List.of(new OptionsBacktestEngine.Leg(K, true, true, 1)), 0, 0);
+        // currentValue = 60% of costBasis (< 70% floor) → should close
+        assertTrue(engine.shouldExit(pos, 300, 0, 0, LocalDate.now(), OptionsStrategy.LONG_CALL, PRICE));
+        // currentValue = 80% of costBasis (>= 70% floor) → should hold
+        assertFalse(engine.shouldExit(pos, 400, 0, 0, LocalDate.now(), OptionsStrategy.LONG_CALL, PRICE));
+    }
+
+    @Test
+    void overnightFloorDisabledByDefault() {
+        LocalDate expiry = LocalDate.now().plusDays(30);
+        var pos = new OptionsBacktestEngine.OpenPosition(SYM, expiry, 1, SIGMA, 500, 0,
+                List.of(new OptionsBacktestEngine.Leg(K, true, true, 1)), 0, 0);
+        // 60% of costBasis — above the 50% stop-loss so only the floor could trigger, but floor=0
+        assertFalse(engine.shouldExit(pos, 300, 0, 0, LocalDate.now(), OptionsStrategy.LONG_CALL, PRICE));
+    }
+
     // ---- integration: run() returns a valid BacktestResult ----
 
     @Test

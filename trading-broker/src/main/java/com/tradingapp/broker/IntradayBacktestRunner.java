@@ -133,15 +133,27 @@ public class IntradayBacktestRunner {
 
         double defaultLossLimitPct = cfg.getDailyLossLimitPct();
         record RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies,
-                      double dailyLossLimitPct, int reversalMinSignals, int reversalMinConsecutive, double profitTarget) {
-            // reversal-compare: explicit reversal settings, default profit target
+                      double dailyLossLimitPct, int reversalMinSignals, int reversalMinConsecutive, double profitTarget,
+                      double overnightMinPremiumFrac, Boolean avoidOvernightHolds) {
+            // reversal-compare: explicit reversal settings, default profit target, inherit floor/overnight from cfg
             RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies,
                    double dailyLossLimitPct, int reversalMinSignals, int reversalMinConsecutive) {
-                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, reversalMinSignals, reversalMinConsecutive, 2.5);
+                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, reversalMinSignals, reversalMinConsecutive, 2.5, -1, null);
             }
-            // most modes: optimal reversal settings + default profit target
+            // most modes: optimal reversal settings + default profit target, inherit floor/overnight from cfg
             RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies, double dailyLossLimitPct) {
-                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, 5, 2, 2.5);
+                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, 5, 2, 2.5, -1, null);
+            }
+            // profit-target-compare: explicit profit target, inherit floor/overnight
+            RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies,
+                   double dailyLossLimitPct, int reversalMinSignals, int reversalMinConsecutive, double profitTarget) {
+                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, reversalMinSignals, reversalMinConsecutive, profitTarget, -1, null);
+            }
+            // overnight-floor-compare: explicit floor, inherit overnight
+            RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies,
+                   double dailyLossLimitPct, int reversalMinSignals, int reversalMinConsecutive, double profitTarget,
+                   double overnightMinPremiumFrac) {
+                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, reversalMinSignals, reversalMinConsecutive, profitTarget, overnightMinPremiumFrac, null);
             }
         }
 
@@ -219,6 +231,48 @@ public class IntradayBacktestRunner {
             }
             runs.add(new RunCfg(String.format("%-40s", "profit target DISABLED            "),
                     baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct, 5, 2, 99.0));
+        } else if ("overnight-floor-compare".equals(mode)) {
+            double currentFloor = cfg.getOvernightMinPremiumFrac();
+            for (double frac : new double[]{0.35, 0.40, 0.50, 0.60, 0.70, 0.80}) {
+                String tag = frac == currentFloor ? " (current)" : "";
+                String label = String.format("%-44s", String.format(
+                        "overnight floor %.0f%%%s", frac * 100, tag));
+                runs.add(new RunCfg(label, baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(),
+                        defaultLossLimitPct, 5, 2, cfg.getProfitTarget(), frac));
+            }
+        } else if ("avoid-overnight-compare".equals(mode)) {
+            runs.add(new RunCfg(String.format("%-44s", "avoidOvernightHolds=false (baseline)"),
+                    baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct,
+                    5, 2, cfg.getProfitTarget(), cfg.getOvernightMinPremiumFrac(), false));
+            runs.add(new RunCfg(String.format("%-44s", "avoidOvernightHolds=true  (EOD force-close)"),
+                    baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct,
+                    5, 2, cfg.getProfitTarget(), cfg.getOvernightMinPremiumFrac(), true));
+        } else if ("orb-optimize".equals(mode)) {
+            // OPENING_BREAKOUT alone is the anchor; test each complement pair/triple.
+            Set<String> orb = Set.of("OPENING_BREAKOUT");
+            runs.add(new RunCfg(String.format("%-44s", "ORB alone"),
+                    baseWatchlist, BASE_OPTS, orb, defaultLossLimitPct));
+            for (String partner : List.of("MOMENTUM_NEAR_TERM", "LONG_CALL", "LONG_PUT",
+                                          "MACD_CROSSOVER", "STOCHASTIC_REVERSAL",
+                                          "RELATIVE_STRENGTH_DIVERGENCE", "HIGH_DELTA_SCALP")) {
+                Set<String> s = new java.util.LinkedHashSet<>(orb);
+                s.add(partner);
+                runs.add(new RunCfg(String.format("%-44s", "ORB + " + partner),
+                        baseWatchlist, BASE_OPTS, s, defaultLossLimitPct));
+            }
+            // Best-looking 2-strategy combos paired with ORB
+            for (String[] pair : new String[][]{
+                    {"MOMENTUM_NEAR_TERM", "MACD_CROSSOVER"},
+                    {"MOMENTUM_NEAR_TERM", "STOCHASTIC_REVERSAL"},
+                    {"MACD_CROSSOVER", "STOCHASTIC_REVERSAL"}}) {
+                Set<String> s = new java.util.LinkedHashSet<>(orb);
+                s.add(pair[0]); s.add(pair[1]);
+                runs.add(new RunCfg(String.format("%-44s", "ORB + " + pair[0] + " + " + pair[1]),
+                        baseWatchlist, BASE_OPTS, s, defaultLossLimitPct));
+            }
+            // Current full config as comparison baseline
+            runs.add(new RunCfg(String.format("%-44s", "CURRENT CONFIG (combined)"),
+                    baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct));
         } else if ("today-compare".equals(mode)) {
             runs.add(new RunCfg("TODAY " + endDate + ": current config", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct));
         } else if (newCandidates.isEmpty()) {
@@ -253,7 +307,8 @@ public class IntradayBacktestRunner {
             router.setMaxPortfolioExposure(maxExposure);
             router.setEnabledStrategies(cfg2.strategies());
             router.setStopLossFrac(cfg.getOptionsStopLossFrac());
-            router.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
+            boolean avoidOvernight = cfg2.avoidOvernightHolds() != null ? cfg2.avoidOvernightHolds() : cfg.isAvoidOvernightHolds();
+            router.setAvoidOvernightHolds(avoidOvernight);
             if (cfg.getOptionsEntryCutoff() != null) router.setEntryCutoff(cfg.getOptionsEntryCutoff());
             router.setOptionsAllowlist(cfg2.optAllowlist());
             router.setCallsDisabledSymbols(CALLS_DISABLED);
@@ -263,7 +318,8 @@ public class IntradayBacktestRunner {
             router.setReversalMinConsecutive(cfg2.reversalMinConsecutive());
             router.setProfitTarget(cfg2.profitTarget());
             router.setEntryConfirmationTicks(1); // backtest uses 1-min bars; no tick confirmation needed
-            router.setOvernightMinPremiumFrac(cfg.getOvernightMinPremiumFrac());
+            double floorFrac = cfg2.overnightMinPremiumFrac() >= 0 ? cfg2.overnightMinPremiumFrac() : cfg.getOvernightMinPremiumFrac();
+            router.setOvernightMinPremiumFrac(floorFrac);
 
             long t0 = System.currentTimeMillis();
             IntradayBacktestResult r = engine.run(cfg2.watchlist(), barsBySymbol, 100_000.0, router, msg -> {},
@@ -285,7 +341,9 @@ public class IntradayBacktestRunner {
             boolean keepFull = newCandidates.isEmpty() || cfg2.label().startsWith("ALL:")
                     || "loss-limit-compare".equals(mode) || "add-candidates".equals(mode)
                     || "today-compare".equals(mode);
-            if (!keepFull || "strategy-compare".equals(mode) || "reversal-compare".equals(mode)) {
+            if (!keepFull || "strategy-compare".equals(mode) || "reversal-compare".equals(mode)
+                    || "overnight-floor-compare".equals(mode) || "avoid-overnight-compare".equals(mode)
+                    || "orb-optimize".equals(mode)) {
                 summaries.add(new RunSummary(cfg2.label().trim(), cfg2.strategies(),
                         r.getTotalReturnPct(), r.getMaxDrawdownPct(),
                         r.getTotalTrades(), r.getWins(), r.getLosses()));
@@ -308,6 +366,20 @@ public class IntradayBacktestRunner {
             return;
         }
 
+        if ("orb-optimize".equals(mode)) {
+            summaries.sort(Comparator.comparingDouble(RunSummary::returnPct).reversed());
+            System.out.printf("%n%-46s  %8s  %8s  %7s  %7s%n", "ORB Combination", "Return", "MaxDD", "Trades", "WinRate");
+            System.out.println("-".repeat(89));
+            for (RunSummary s : summaries) {
+                double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
+                System.out.printf("%-46s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
+                        s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
+            }
+            appendHistorySummaries(cfg, summaries, startDate, endDate);
+            System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
+            return;
+        }
+
         if ("reversal-compare".equals(mode)) {
             System.out.printf("%n%-42s  %8s  %8s  %7s  %7s%n", "Reversal Config", "Return", "MaxDD", "Trades", "WinRate");
             System.out.println("-".repeat(85));
@@ -317,6 +389,33 @@ public class IntradayBacktestRunner {
                         s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
             }
             appendHistorySummaries(cfg, summaries, startDate, endDate);
+            System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
+            return;
+        }
+
+        if ("avoid-overnight-compare".equals(mode)) {
+            System.out.printf("%n%-46s  %8s  %8s  %7s  %7s%n", "avoidOvernightHolds Config", "Return", "MaxDD", "Trades", "WinRate");
+            System.out.println("-".repeat(89));
+            for (RunSummary s : summaries) {
+                double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
+                System.out.printf("%-46s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
+                        s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
+            }
+            appendHistorySummaries(cfg, summaries, startDate, endDate);
+            System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
+            return;
+        }
+
+        if ("overnight-floor-compare".equals(mode)) {
+            System.out.printf("%n%-46s  %8s  %8s  %7s  %7s%n", "Overnight Floor Config", "Return", "MaxDD", "Trades", "WinRate");
+            System.out.println("-".repeat(89));
+            double[] floors = new double[]{0.35, 0.40, 0.50, 0.60, 0.70, 0.80};
+            for (RunSummary s : summaries) {
+                double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
+                System.out.printf("%-46s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
+                        s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
+            }
+            appendHistorySummaries(cfg, summaries, startDate, endDate, floors);
             System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
             return;
         }
@@ -591,24 +690,33 @@ public class IntradayBacktestRunner {
 
     private static void appendHistorySummaries(AppConfig cfg, java.util.List<RunSummary> summaries,
                                                LocalDate startDate, LocalDate endDate) {
+        appendHistorySummaries(cfg, summaries, startDate, endDate, null);
+    }
+
+    private static void appendHistorySummaries(AppConfig cfg, java.util.List<RunSummary> summaries,
+                                               LocalDate startDate, LocalDate endDate,
+                                               double[] perRunFloors) {
         try {
             Path histPath = Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv");
             boolean isNew = !Files.exists(histPath);
             try (PrintWriter h = new PrintWriter(Files.newBufferedWriter(histPath,
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND))) {
                 if (isNew) {
-                    h.println("timestamp\tperiod\tstrategies\tstop_loss\tentry_cutoff\tallowlist_count\tlabel\treturn_pct\tmax_drawdown\ttrades\twin_rate");
+                    h.println("timestamp\tperiod\tstrategies\tstop_loss\tentry_cutoff\tallowlist_count\tovernight_floor\tlabel\treturn_pct\tmax_drawdown\ttrades\twin_rate");
                 }
                 String ts = ZonedDateTime.now(ET).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
                 String period = startDate + " to " + endDate;
                 String stopLoss = String.valueOf(cfg.getOptionsStopLossFrac());
                 String cutoff = cfg.getOptionsEntryCutoff() != null ? cfg.getOptionsEntryCutoff().toString() : "";
                 int allowlistCount = cfg.getOptionsSymbolAllowlist().size();
-                for (RunSummary s : summaries) {
+                for (int i = 0; i < summaries.size(); i++) {
+                    RunSummary s = summaries.get(i);
+                    double floor = (perRunFloors != null && i < perRunFloors.length)
+                            ? perRunFloors[i] : cfg.getOvernightMinPremiumFrac();
                     double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
-                    h.printf("%s\t%s\t%s\t%s\t%s\t%d\t%s\t%.2f\t%.2f\t%d\t%.1f%n",
+                    h.printf("%s\t%s\t%s\t%s\t%s\t%d\t%.2f\t%s\t%.2f\t%.2f\t%d\t%.1f%n",
                             ts, period, String.join("|", s.strategies()),
-                            stopLoss, cutoff, allowlistCount,
+                            stopLoss, cutoff, allowlistCount, floor,
                             s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
                 }
             }
@@ -625,19 +733,20 @@ public class IntradayBacktestRunner {
             try (PrintWriter h = new PrintWriter(Files.newBufferedWriter(histPath,
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND))) {
                 if (isNew) {
-                    h.println("timestamp\tperiod\tstrategies\tstop_loss\tentry_cutoff\tallowlist_count\tlabel\treturn_pct\tmax_drawdown\ttrades\twin_rate");
+                    h.println("timestamp\tperiod\tstrategies\tstop_loss\tentry_cutoff\tallowlist_count\tovernight_floor\tlabel\treturn_pct\tmax_drawdown\ttrades\twin_rate");
                 }
                 String ts = ZonedDateTime.now(ET).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
                 String period = startDate + " to " + endDate;
                 String stopLoss = String.valueOf(cfg.getOptionsStopLossFrac());
                 String cutoff = cfg.getOptionsEntryCutoff() != null ? cfg.getOptionsEntryCutoff().toString() : "";
                 int allowlistCount = cfg.getOptionsSymbolAllowlist().size();
+                double floor = cfg.getOvernightMinPremiumFrac();
                 for (RunResult rr : results) {
                     IntradayBacktestResult r = rr.result();
                     double wr = r.getTotalTrades() > 0 ? 100.0 * r.getWins() / r.getTotalTrades() : 0.0;
                     String strategies = String.join("|", rr.strategies());
-                    h.printf("%s\t%s\t%s\t%s\t%s\t%d\t%s\t%.2f\t%.2f\t%d\t%.1f%n",
-                            ts, period, strategies, stopLoss, cutoff, allowlistCount,
+                    h.printf("%s\t%s\t%s\t%s\t%s\t%d\t%.2f\t%s\t%.2f\t%.2f\t%d\t%.1f%n",
+                            ts, period, strategies, stopLoss, cutoff, allowlistCount, floor,
                             rr.label().trim(), r.getTotalReturnPct(), r.getMaxDrawdownPct(),
                             r.getTotalTrades(), wr);
                 }

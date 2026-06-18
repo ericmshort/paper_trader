@@ -32,6 +32,12 @@ public class OptionsBacktestEngine {
     private final BlackScholesEngine bsEngine;
     private final FeeCalculator feeCalc;
 
+    // Mirrors OptionsSignalRouter.overnightMinPremiumFrac: close EOD if value < costBasis * frac.
+    // Default 0.0 = disabled (hold everything), matching the live app default.
+    private double overnightMinPremiumFrac = 0.0;
+
+    public void setOvernightMinPremiumFrac(double frac) { this.overnightMinPremiumFrac = frac; }
+
     public OptionsBacktestEngine(IndicatorEngine indicatorEngine,
                                   BlackScholesEngine bsEngine,
                                   FeeCalculator feeCalc) {
@@ -251,6 +257,12 @@ public class OptionsBacktestEngine {
         if (daysLeft < 3) return true;
 
         if (pos.totalCostBasis > 0 && currentValue <= pos.totalCostBasis * STOP_LOSS_FRACTION) {
+            return true;
+        }
+
+        // EOD floor: close if value has fallen below the overnight hold threshold (mirrors live app).
+        if (overnightMinPremiumFrac > 0 && pos.totalCostBasis > 0
+                && currentValue < pos.totalCostBasis * overnightMinPremiumFrac) {
             return true;
         }
 
