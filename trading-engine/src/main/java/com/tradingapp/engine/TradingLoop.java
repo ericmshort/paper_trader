@@ -464,19 +464,21 @@ public class TradingLoop implements Runnable {
                         }
                         uiRefreshCallback.run();
                     }
-                } else if (weightedBuys >= SIGNAL_THRESHOLD && !hasPosition
-                        && !orbFormationPeriod && !time.isAfter(LAST_ENTRY_TIME)) {
+                } else if (!hasPosition && !orbFormationPeriod && !time.isAfter(LAST_ENTRY_TIME)
+                        && (weightedBuys >= SIGNAL_THRESHOLD
+                                || (signals.stream().anyMatch(s -> "ORB".equals(s.getIndicatorName())
+                                        && s.getDirection() == SignalResult.Direction.BUY)
+                                    && prevOrbBuy.getOrDefault(symbol, false)))) {
                     int daysToEarnings = earningsCalendar != null
                             ? earningsCalendar.daysUntilEarnings(symbol) : Integer.MAX_VALUE;
                     boolean inCooldown = lossCooldowns.containsKey(symbol)
                             && Duration.between(lossCooldowns.get(symbol), now).toMinutes() < lossCooldownMinutes;
-                    // Require ORB to have been BUY on the previous tick as well — filters single-tick
-                    // false breakouts that cross the ORB level and immediately reverse.
-                    // Only enforced when ORB is actively signaling BUY; neutral ORB (e.g. no candle
-                    // data) does not block entry so other indicators can still trade.
                     boolean orbBuyNow = signals.stream().anyMatch(
                             s -> "ORB".equals(s.getIndicatorName())
                                     && s.getDirection() == SignalResult.Direction.BUY);
+                    // ORB standalone: confirmed on 2 consecutive ticks — no other signals required.
+                    // Multi-signal path: require ORB confirmation only when ORB is actively voting BUY.
+                    boolean orbStandaloneEntry = orbBuyNow && prevOrbBuy.getOrDefault(symbol, false);
                     boolean orbConfirmedTwice = !orbBuyNow || prevOrbBuy.getOrDefault(symbol, false);
                     // Skip entry if RSI is active and overbought — avoids buying into exhausted moves.
                     boolean rsiOverbought = signals.stream()
@@ -484,7 +486,7 @@ public class TradingLoop implements Runnable {
                                     && s.getDirection() == SignalResult.Direction.SELL);
                     if (inCooldown) {
                         researchCallback.accept(symbol + " BUY skipped: 60-min re-entry cooldown after loss");
-                    } else if (!orbConfirmedTwice) {
+                    } else if (!orbStandaloneEntry && !orbConfirmedTwice) {
                         // Silent — fires on nearly every ORB-false-breakout tick; logging would flood the feed.
                     } else if (rsiOverbought) {
                         researchCallback.accept(symbol + " BUY skipped: RSI overbought");
@@ -515,8 +517,11 @@ public class TradingLoop implements Runnable {
                                 trailingStop.getTrailingStopPct(), maxLossPerTradePct);
                         if (shares == 0) shares = fees.maxShares(account.getBalance(), price);
                         if (shares > 0) {
+                            String entryReason = orbStandaloneEntry && weightedBuys < SIGNAL_THRESHOLD
+                                    ? "ORB breakout (standalone)"
+                                    : "Signals: " + buys + "/" + signals.size() + " BUY";
                             brokerClient.submitBuy(symbol, shares, price, signalStr,
-                                    "Signals: " + buys + "/" + signals.size() + " BUY", featureCsv);
+                                    entryReason, featureCsv);
                             entryTimes.put(symbol, now);
                             entryPrices.put(symbol, price);
                             // Reset peak to entry price so the 2% trailing stop is measured
