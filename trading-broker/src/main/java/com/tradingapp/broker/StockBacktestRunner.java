@@ -44,7 +44,9 @@ public class StockBacktestRunner {
 
         // Find the most recent date that the majority of watchlist symbols have cached,
         // to avoid any API calls for missing days.
-        List<String> watchlistForScan = new ArrayList<>(LargeCapWatchList.SYMBOLS);
+        List<String> baseSymbols = cfg.getStockWatchlist().isEmpty()
+                ? LargeCapWatchList.SYMBOLS : cfg.getStockWatchlist();
+        List<String> watchlistForScan = new ArrayList<>(baseSymbols);
         if (!watchlistForScan.contains("SPY")) watchlistForScan.add("SPY");
         Path cacheRoot = Path.of(System.getProperty("user.home"), ".tradingapp", "bar-cache", "1min");
         Map<LocalDate, Integer> lastDateCounts = new HashMap<>();
@@ -88,7 +90,7 @@ public class StockBacktestRunner {
 
         AlpacaHistoricalClient client = new AlpacaHistoricalClient(cfg);
 
-        List<String> watchlist = new ArrayList<>(LargeCapWatchList.SYMBOLS);
+        List<String> watchlist = new ArrayList<>(baseSymbols);
         if (!watchlist.contains("SPY")) watchlist.add("SPY");
 
         Map<String, List<IntradayBar>> barsBySymbol = new LinkedHashMap<>();
