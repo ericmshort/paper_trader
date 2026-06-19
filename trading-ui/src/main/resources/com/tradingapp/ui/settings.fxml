@@ -166,9 +166,7 @@
 
     <HBox spacing="20" alignment="CENTER_LEFT">
         <CheckBox fx:id="strategyOpeningBreakout" text="Opening Breakout" style="-fx-text-fill: #e0e0e0;"/>
-        <CheckBox fx:id="strategyStochasticReversal" text="Stochastic Reversal" style="-fx-text-fill: #e0e0e0;"/>
         <CheckBox fx:id="strategyRelativeStrengthDivergence" text="RS Divergence" style="-fx-text-fill: #e0e0e0;"/>
-        <CheckBox fx:id="strategyMacdCrossover" text="MACD Crossover" style="-fx-text-fill: #e0e0e0;"/>
     </HBox>
 
     <HBox spacing="12" alignment="CENTER_LEFT">
@@ -226,6 +224,10 @@
         <CheckBox fx:id="strategyLongPut" text="Long Put" style="-fx-text-fill: #e0e0e0;"/>
         <CheckBox fx:id="strategyZeroDte" text="Zero-DTE (Fridays)" style="-fx-text-fill: #e0e0e0;"/>
     </HBox>
+    <HBox spacing="20" alignment="CENTER_LEFT">
+        <CheckBox fx:id="strategyStochasticReversal" text="Stochastic Reversal" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="strategyMacdCrossover" text="MACD Crossover" style="-fx-text-fill: #e0e0e0;"/>
+    </HBox>
 
     <HBox spacing="12" alignment="CENTER_LEFT">
         <Label text="Options Stop-Loss:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
@@ -251,6 +253,15 @@
                    style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
                    promptText="5"/>
         <Label text="opposing signals required per tick to trigger reversal exit (1–6)"
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Entry Start:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <TextField fx:id="entryStartTimeField" prefWidth="60"
+                   style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
+                   promptText="10:30"/>
+        <Label text="ET — no new positions before this time (HH:mm, leave blank for market open)"
                style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
     </HBox>
 

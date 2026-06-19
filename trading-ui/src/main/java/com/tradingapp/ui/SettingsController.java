@@ -50,6 +50,7 @@ public class SettingsController implements Initializable {
     @FXML private CheckBox optionsTradingEnabledCheck;
     @FXML private TextField optionsStopLossField;
     @FXML private TextField downtrendPutMinSignalsField;
+    @FXML private TextField entryStartTimeField;
     @FXML private TextField entryCutoffField;
     @FXML private TextField profitTargetField;
     @FXML private TextField reversalMinSignalsField;
@@ -131,6 +132,7 @@ public class SettingsController implements Initializable {
         optionsTradingEnabledCheck.setSelected(cfg.isOptionsTradingEnabled());
         optionsStopLossField.setText(String.valueOf((int) Math.round(cfg.getOptionsStopLossFrac() * 100)));
         downtrendPutMinSignalsField.setText(String.valueOf(cfg.getDowntrendPutMinSignals()));
+        entryStartTimeField.setText(cfg.getOptionsEntryStartTime() != null ? cfg.getOptionsEntryStartTime().toString() : "");
         entryCutoffField.setText(cfg.getOptionsEntryCutoff() != null ? cfg.getOptionsEntryCutoff().toString() : "");
         profitTargetField.setText(String.valueOf(cfg.getProfitTarget()));
         reversalMinSignalsField.setText(String.valueOf(cfg.getReversalMinSignals()));
@@ -376,6 +378,11 @@ public class SettingsController implements Initializable {
             int n = Integer.parseInt(downtrendPutMinSignalsField.getText().strip());
             cfg.setDowntrendPutMinSignals(Math.min(6, Math.max(1, n)));
         } catch (NumberFormatException ignored) {}
+        String startTimeText = entryStartTimeField.getText().strip();
+        if (!startTimeText.isBlank()) {
+            try { cfg.setOptionsEntryStartTime(LocalTime.parse(startTimeText)); }
+            catch (DateTimeParseException ignored) {}
+        }
         String cutoffText = entryCutoffField.getText().strip();
         if (!cutoffText.isBlank()) {
             try { cfg.setOptionsEntryCutoff(LocalTime.parse(cutoffText)); }
@@ -431,9 +438,7 @@ public class SettingsController implements Initializable {
     private void updateStockStrategyCheckboxStates() {
         boolean enabled = stockTradingEnabledCheck.isSelected();
         strategyOpeningBreakout.setDisable(!enabled);
-        strategyStochasticReversal.setDisable(!enabled);
         strategyRelativeStrengthDivergence.setDisable(!enabled);
-        strategyMacdCrossover.setDisable(!enabled);
     }
 
     private void updateOptionsStrategyCheckboxStates() {
@@ -443,6 +448,8 @@ public class SettingsController implements Initializable {
         strategyLongCall.setDisable(!enabled);
         strategyLongPut.setDisable(!enabled);
         strategyZeroDte.setDisable(!enabled);
+        strategyStochasticReversal.setDisable(!enabled);
+        strategyMacdCrossover.setDisable(!enabled);
     }
 
     private void setStatus(String msg, boolean success) {
