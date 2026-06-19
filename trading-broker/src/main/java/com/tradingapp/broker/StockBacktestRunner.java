@@ -81,6 +81,8 @@ public class StockBacktestRunner {
         final double CIRCUIT_BREAKER_PCT  = 0.02;
         final int    MAX_POSITIONS        = 8;
 
+        String mode = System.getProperty("backtest.mode", "");
+
         System.out.println("=== Stock-Only Intraday Backtest ===");
         System.out.println("Period  : " + startDate + " → " + endDate);
         System.out.println("Config  : trailing stop=4%  max loss/trade=0.30%  circuit breaker=2%"
@@ -123,6 +125,38 @@ public class StockBacktestRunner {
             loop.setMaxConcurrentStockPositions(MAX_POSITIONS);
             loop.setAccurateOptionsValuation(false);
         };
+
+        if ("max-loss-compare".equals(mode)) {
+            double[] maxLossValues = { 0.001, 0.002, 0.003, 0.005, 0.010 };
+            record Summary(double maxLoss, double returnPct, double maxDd, int trades, int wins) {}
+            List<Summary> summaries = new ArrayList<>();
+            for (double ml : maxLossValues) {
+                String label = String.format("max loss/trade=%.2f%%", ml * 100);
+                System.out.println("Running: " + label + (ml == MAX_LOSS_PER_TRADE ? " (current)" : "") + "...");
+                long t = System.currentTimeMillis();
+                final double mlFinal = ml;
+                IntradayBacktestResult r = engine.run(
+                        new ArrayList<>(barsBySymbol.keySet()), barsBySymbol, 100_000.0,
+                        null, msg -> {}, java.util.Set.of(),
+                        loop -> { baseConfig.accept(loop); loop.setMaxLossPerTradePct(mlFinal); loop.setRegimeMaDays(5); });
+                System.out.printf("  Done in %.1fs  Return: %+.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
+                        (System.currentTimeMillis() - t) / 1000.0,
+                        r.getTotalReturnPct(), r.getMaxDrawdownPct(),
+                        r.getTotalTrades(), r.getWins(), r.getLosses());
+                summaries.add(new Summary(ml, r.getTotalReturnPct(), r.getMaxDrawdownPct(), r.getTotalTrades(), r.getWins()));
+            }
+            System.out.println();
+            System.out.printf("%-28s  %8s  %8s  %7s  %7s%n", "Max Loss/Trade", "Return", "MaxDD", "Trades", "WinRate");
+            System.out.println("-".repeat(68));
+            for (Summary s : summaries) {
+                double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0;
+                String current = s.maxLoss() == MAX_LOSS_PER_TRADE ? " ← current" : "";
+                System.out.printf("%-28s  %+7.2f%%  %7.2f%%  %7d  %6.1f%%%s%n",
+                        String.format("%.2f%% of portfolio", s.maxLoss() * 100),
+                        s.returnPct(), s.maxDd(), s.trades(), wr, current);
+            }
+            return;
+        }
 
         System.out.println("Running pass 1/2: baseline (5-day SPY MA)...");
         long t0 = System.currentTimeMillis();
