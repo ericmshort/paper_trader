@@ -76,12 +76,10 @@ public class AppConfig {
     private double circuitBreakerPct = 0.02;
     private List<String> stockWatchlist = new ArrayList<>(Arrays.asList(
         "AAPL", "MSFT", "AMZN", "META", "NVDA",
-        "BRK-B", "TSLA", "UNH", "XOM", "JNJ",
-        "PG", "MA", "CVX", "LLY", "ABBV",
-        "PEP", "WMT", "CSCO", "TMO", "ABT",
-        "MCD", "DHR", "ADBE", "CRM", "TXN",
-        "NEE", "PM", "UPS", "QCOM", "LIN",
-        "MDLZ", "CAT"
+        "XOM", "JNJ", "PG", "CVX", "LLY",
+        "ABBV", "PEP", "WMT", "CSCO", "TMO",
+        "ADBE", "TXN", "NEE", "PM", "QCOM",
+        "LIN", "MDLZ", "CAT"
     ));
     private List<String> optionsWatchlist = new ArrayList<>(Arrays.asList(
         "SPY", "NOC", "NVDA", "MSFT", "COST",
