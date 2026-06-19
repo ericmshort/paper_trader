@@ -50,7 +50,6 @@ public class SettingsController implements Initializable {
     @FXML private CheckBox optionsTradingEnabledCheck;
     @FXML private TextField optionsStopLossField;
     @FXML private TextField downtrendPutMinSignalsField;
-    @FXML private TextArea  optionsAllowlistArea;
     @FXML private TextField entryCutoffField;
     @FXML private TextField profitTargetField;
     @FXML private TextField reversalMinSignalsField;
@@ -63,6 +62,7 @@ public class SettingsController implements Initializable {
     @FXML private TextField maxLossPerTradeField;
     @FXML private TextField circuitBreakerField;
     @FXML private TextArea  stockWatchlistArea;
+    @FXML private TextArea  optionsWatchlistArea;
     @FXML private Button testConnectionButton;
     @FXML private Label statusLabel;
 
@@ -131,7 +131,6 @@ public class SettingsController implements Initializable {
         optionsTradingEnabledCheck.setSelected(cfg.isOptionsTradingEnabled());
         optionsStopLossField.setText(String.valueOf((int) Math.round(cfg.getOptionsStopLossFrac() * 100)));
         downtrendPutMinSignalsField.setText(String.valueOf(cfg.getDowntrendPutMinSignals()));
-        optionsAllowlistArea.setText(String.join(",", cfg.getOptionsSymbolAllowlist()));
         entryCutoffField.setText(cfg.getOptionsEntryCutoff() != null ? cfg.getOptionsEntryCutoff().toString() : "");
         profitTargetField.setText(String.valueOf(cfg.getProfitTarget()));
         reversalMinSignalsField.setText(String.valueOf(cfg.getReversalMinSignals()));
@@ -143,6 +142,7 @@ public class SettingsController implements Initializable {
         maxLossPerTradeField.setText(String.format("%.2f", cfg.getMaxLossPerTradePct() * 100));
         circuitBreakerField.setText(String.format("%.1f", cfg.getCircuitBreakerPct() * 100));
         stockWatchlistArea.setText(String.join(", ", cfg.getStockWatchlist()));
+        optionsWatchlistArea.setText(String.join(", ", cfg.getOptionsWatchlist()));
         updateAlpacaFieldVisibility();
         updateQuoteNote();
         updateStockStrategyCheckboxStates();
@@ -376,7 +376,6 @@ public class SettingsController implements Initializable {
             int n = Integer.parseInt(downtrendPutMinSignalsField.getText().strip());
             cfg.setDowntrendPutMinSignals(Math.min(6, Math.max(1, n)));
         } catch (NumberFormatException ignored) {}
-        cfg.setOptionsSymbolAllowlist(parseSymbolSet(optionsAllowlistArea.getText()));
         String cutoffText = entryCutoffField.getText().strip();
         if (!cutoffText.isBlank()) {
             try { cfg.setOptionsEntryCutoff(LocalTime.parse(cutoffText)); }
@@ -413,6 +412,7 @@ public class SettingsController implements Initializable {
             cfg.setCircuitBreakerPct(Math.min(10, Math.max(0, pct)) / 100.0);
         } catch (NumberFormatException ignored) {}
         cfg.setStockWatchlist(new java.util.ArrayList<>(parseSymbolSet(stockWatchlistArea.getText())));
+        cfg.setOptionsWatchlist(new java.util.ArrayList<>(parseSymbolSet(optionsWatchlistArea.getText())));
         return cfg;
     }
 

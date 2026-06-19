@@ -207,6 +207,15 @@
     <CheckBox fx:id="optionsTradingEnabledCheck" text="Enable Options Trading"
               style="-fx-text-fill: #e0e0e0;"/>
 
+    <VBox spacing="4">
+        <Label text="Options Watchlist:" style="-fx-text-fill: #e0e0e0;"/>
+        <TextArea fx:id="optionsWatchlistArea" prefHeight="72" wrapText="true"
+                  style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0; -fx-font-size: 11px;"
+                  promptText="SPY, NVDA, MSFT, ..."/>
+        <Label text="Comma-separated list of symbols eligible for options trading."
+               style="-fx-text-fill: #888888; -fx-font-size: 11px;" wrapText="true" maxWidth="520"/>
+    </VBox>
+
     <Label text="Select which options strategies can open new positions. Disabled strategies still close existing positions."
            style="-fx-font-size: 11px; -fx-text-fill: #888888;" wrapText="true" maxWidth="520"/>
 
@@ -270,18 +279,6 @@
                    promptText="3"/>
         <Label text="sell signals required to open a put during SPY downtrend (1–6)"
                style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
-    </HBox>
-
-    <HBox spacing="12" alignment="TOP_LEFT">
-        <Label text="Options Allowlist:" style="-fx-text-fill: #e0e0e0;" prefWidth="140" prefHeight="24"/>
-        <VBox spacing="4">
-            <TextArea fx:id="optionsAllowlistArea" prefWidth="380" prefHeight="72"
-                      wrapText="true"
-                      style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
-                      promptText="SPY,AAPL,MSFT,…  (leave blank to allow all symbols)"/>
-            <Label text="Comma-separated symbols allowed to trade options. Leave blank to allow all."
-                   style="-fx-font-size: 11px; -fx-text-fill: #888888;"/>
-        </VBox>
     </HBox>
 
     <HBox spacing="12" alignment="CENTER_LEFT">

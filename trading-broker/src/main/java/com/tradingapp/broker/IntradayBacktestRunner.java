@@ -124,7 +124,7 @@ public class IntradayBacktestRunner {
         double maxExposure = cfg.getMaxPortfolioExposurePct() / 100.0;
         IntradayBacktestEngine engine = new IntradayBacktestEngine(new IndicatorEngine(), new FeeCalculator());
 
-        Set<String> BASE_OPTS      = cfg.getOptionsSymbolAllowlist();
+        Set<String> BASE_OPTS      = new java.util.HashSet<>(cfg.getOptionsWatchlist());
         Set<String> CALLS_DISABLED = cfg.getOptionsCallsDisabled();
 
         // Candidates for symbol-scan mode: MasterUniverse symbols not in current allowlist, with cached bars
@@ -713,7 +713,7 @@ public class IntradayBacktestRunner {
                 String period = startDate + " to " + endDate;
                 String stopLoss = String.valueOf(cfg.getOptionsStopLossFrac());
                 String cutoff = cfg.getOptionsEntryCutoff() != null ? cfg.getOptionsEntryCutoff().toString() : "";
-                int allowlistCount = cfg.getOptionsSymbolAllowlist().size();
+                int allowlistCount = cfg.getOptionsWatchlist().size();
                 for (int i = 0; i < summaries.size(); i++) {
                     RunSummary s = summaries.get(i);
                     double floor = (perRunFloors != null && i < perRunFloors.length)
@@ -744,7 +744,7 @@ public class IntradayBacktestRunner {
                 String period = startDate + " to " + endDate;
                 String stopLoss = String.valueOf(cfg.getOptionsStopLossFrac());
                 String cutoff = cfg.getOptionsEntryCutoff() != null ? cfg.getOptionsEntryCutoff().toString() : "";
-                int allowlistCount = cfg.getOptionsSymbolAllowlist().size();
+                int allowlistCount = cfg.getOptionsWatchlist().size();
                 double floor = cfg.getOvernightMinPremiumFrac();
                 for (RunResult rr : results) {
                     IntradayBacktestResult r = rr.result();

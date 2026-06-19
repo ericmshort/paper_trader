@@ -47,8 +47,6 @@ public class AppConfig {
     // Strategies enabled for live trading.
     private Set<String> enabledStrategies = new LinkedHashSet<>(
             Arrays.asList("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM", "LONG_CALL", "LONG_PUT", "ZERO_DTE"));
-    // If non-empty, only these symbols may trade options. Empty = all symbols allowed.
-    private Set<String> optionsSymbolAllowlist = new LinkedHashSet<>();
     // Symbols in this set may trade puts but not calls.
     private Set<String> optionsCallsDisabled   = new LinkedHashSet<>();
     // Symbols in this set may trade calls but not puts.
@@ -75,8 +73,25 @@ public class AppConfig {
     private double maxLossPerTradePct = 0.003;
     // Circuit breaker: auto-liquidate all stocks + halt when daily loss exceeds this fraction (default 2%).
     private double circuitBreakerPct = 0.02;
-    // Symbols eligible for stock trading. Empty = use LargeCapWatchList default.
-    private List<String> stockWatchlist = new ArrayList<>();
+    // Symbols eligible for stock trading.
+    private List<String> stockWatchlist = new ArrayList<>(Arrays.asList(
+        "AAPL", "MSFT", "AMZN", "META", "NVDA",
+        "BRK-B", "TSLA", "UNH", "XOM", "JNJ",
+        "PG", "MA", "HD", "CVX", "LLY",
+        "ABBV", "PEP", "WMT", "CSCO", "TMO",
+        "ABT", "MCD", "NKE", "DHR", "ADBE",
+        "CRM", "TXN", "NEE", "PM", "UPS",
+        "QCOM", "LIN", "MDLZ", "CAT"
+    ));
+    // Symbols eligible for options trading (30-symbol backtested list from DayTraderWatchList).
+    private List<String> optionsWatchlist = new ArrayList<>(Arrays.asList(
+        "SPY", "NOC", "NVDA", "MSFT", "COST",
+        "VRTX", "AMGN", "CRWD", "GS", "PLTR",
+        "LRCX", "DE", "ORCL", "LLY", "BLK",
+        "NOW", "MA", "REGN", "META", "AMAT",
+        "KLAC", "CAT", "NFLX", "UNH", "LMT",
+        "JPM", "MU", "HD", "MCD", "V"
+    ));
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
@@ -117,12 +132,6 @@ public class AppConfig {
             String strategiesRaw = props.getProperty("strategy.enabled", "");
             if (!strategiesRaw.isBlank()) {
                 config.enabledStrategies = Arrays.stream(strategiesRaw.split(","))
-                        .map(String::strip).filter(s -> !s.isEmpty())
-                        .collect(Collectors.toCollection(LinkedHashSet::new));
-            }
-            String allowlistRaw = props.getProperty("options.symbol.allowlist", "");
-            if (!allowlistRaw.isBlank()) {
-                config.optionsSymbolAllowlist = Arrays.stream(allowlistRaw.split(","))
                         .map(String::strip).filter(s -> !s.isEmpty())
                         .collect(Collectors.toCollection(LinkedHashSet::new));
             }
@@ -187,6 +196,12 @@ public class AppConfig {
                         .map(String::strip).filter(s -> !s.isEmpty())
                         .collect(Collectors.toCollection(ArrayList::new));
             }
+            String optionsWatchlistRaw = props.getProperty("options.watchlist", "");
+            if (!optionsWatchlistRaw.isBlank()) {
+                config.optionsWatchlist = Arrays.stream(optionsWatchlistRaw.split(","))
+                        .map(String::strip).filter(s -> !s.isEmpty())
+                        .collect(Collectors.toCollection(ArrayList::new));
+            }
         } catch (IOException ignored) {}
         return config;
     }
@@ -207,7 +222,6 @@ public class AppConfig {
             props.setProperty("risk.earnings_blackout_days", String.valueOf(earningsBlackoutDays));
             props.setProperty("trading.options_enabled", String.valueOf(optionsTradingEnabled));
             props.setProperty("strategy.enabled", String.join(",", enabledStrategies));
-            props.setProperty("options.symbol.allowlist", String.join(",", optionsSymbolAllowlist));
             props.setProperty("options.calls.disabled", String.join(",", optionsCallsDisabled));
             props.setProperty("options.puts.disabled",  String.join(",", optionsPutsDisabled));
             props.setProperty("options.downtrend_put_min_signals", String.valueOf(downtrendPutMinSignals));
@@ -222,6 +236,7 @@ public class AppConfig {
             props.setProperty("risk.max_loss_per_trade_pct", String.valueOf(maxLossPerTradePct));
             props.setProperty("risk.circuit_breaker_pct", String.valueOf(circuitBreakerPct));
             props.setProperty("stock.watchlist", String.join(",", stockWatchlist));
+            props.setProperty("options.watchlist", String.join(",", optionsWatchlist));
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
             }
@@ -249,7 +264,7 @@ public class AppConfig {
                         optionsEntryCutoff != null ? optionsEntryCutoff.toString() : "",
                         dailyLossLimitPct,
                         maxPortfolioExposurePct,
-                        optionsSymbolAllowlist.size(),
+                        0,
                         downtrendPutMinSignals);
             }
         } catch (Exception ignored) {}
@@ -306,8 +321,6 @@ public class AppConfig {
     public String getClaudeApiKey() { return claudeApiKey; }
     public void setClaudeApiKey(String key) { this.claudeApiKey = key; }
 
-    public Set<String> getOptionsSymbolAllowlist() { return optionsSymbolAllowlist; }
-    public void setOptionsSymbolAllowlist(Set<String> symbols) { this.optionsSymbolAllowlist = new LinkedHashSet<>(symbols); }
 
     public Set<String> getOptionsCallsDisabled() { return optionsCallsDisabled; }
     public void setOptionsCallsDisabled(Set<String> symbols) { this.optionsCallsDisabled = new LinkedHashSet<>(symbols); }
@@ -335,6 +348,9 @@ public class AppConfig {
 
     public List<String> getStockWatchlist() { return stockWatchlist; }
     public void setStockWatchlist(List<String> symbols) { this.stockWatchlist = new ArrayList<>(symbols); }
+
+    public List<String> getOptionsWatchlist() { return optionsWatchlist; }
+    public void setOptionsWatchlist(List<String> symbols) { this.optionsWatchlist = new ArrayList<>(symbols); }
 
     public boolean isAlpacaBroker() {
         return brokerType == BrokerType.ALPACA_PAPER || brokerType == BrokerType.ALPACA_LIVE;

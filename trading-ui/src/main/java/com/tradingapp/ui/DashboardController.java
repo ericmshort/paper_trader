@@ -186,7 +186,7 @@ public class DashboardController implements Initializable {
                     optionsRouter.setReversalMinSignals(cfg.getReversalMinSignals());
                     optionsRouter.setDowntrendPutMinSignals(cfg.getDowntrendPutMinSignals());
                     optionsRouter.setEntryCutoff(cfg.getOptionsEntryCutoff());
-                    optionsRouter.setOptionsAllowlist(cfg.getOptionsSymbolAllowlist());
+                    optionsRouter.setOptionsAllowlist(new java.util.HashSet<>(cfg.getOptionsWatchlist()));
                     optionsRouter.setCallsDisabledSymbols(cfg.getOptionsCallsDisabled());
                     optionsRouter.setPutsDisabledSymbols(cfg.getOptionsPutsDisabled());
                 }
@@ -274,7 +274,7 @@ public class DashboardController implements Initializable {
                 : quoteProvider;
         optionsRouter = new OptionsSignalRouter(
                 bsEngine, optExec, account, priceHistory, researchCb, optionsDataClient);
-        optionsRouter.setOptionsAllowlist(appConfig.getOptionsSymbolAllowlist());
+        optionsRouter.setOptionsAllowlist(new java.util.HashSet<>(appConfig.getOptionsWatchlist()));
         optionsRouter.setCallsDisabledSymbols(appConfig.getOptionsCallsDisabled());
         optionsRouter.setPutsDisabledSymbols(appConfig.getOptionsPutsDisabled());
         if (appConfig.isAlpacaBroker()) {
