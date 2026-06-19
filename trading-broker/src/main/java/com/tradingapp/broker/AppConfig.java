@@ -72,7 +72,7 @@ public class AppConfig {
     private double overnightMinPremiumFrac = 0.8;
     private boolean optionsTradingEnabled = true;
     private double trailingStopPct = 0.04;
-    private double maxLossPerTradePct = 0.003;
+    private double maxLossPerTradePct = 0.005;
     private double circuitBreakerPct = 0.02;
     private List<String> stockWatchlist = new ArrayList<>(Arrays.asList(
         "AAPL", "MSFT", "AMZN", "META", "NVDA",
