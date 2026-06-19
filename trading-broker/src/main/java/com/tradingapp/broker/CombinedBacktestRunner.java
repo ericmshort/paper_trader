@@ -63,12 +63,16 @@ public class CombinedBacktestRunner {
         }
         if (!allSymbols.contains("SPY")) allSymbols.add("SPY");
 
+        // Symbol lists passed to each pass (bars are fetched once for the full union)
+        List<String> stockPassSymbols = new ArrayList<>(stockSymbols);
+        if (!stockPassSymbols.contains("SPY")) stockPassSymbols.add("SPY");
+
         // --- Date range: 2 years back from most-recent cached date ---
         LocalDate endDate = LocalDate.now(ET).minusDays(1);
         while (endDate.getDayOfWeek() == DayOfWeek.SATURDAY || endDate.getDayOfWeek() == DayOfWeek.SUNDAY) {
             endDate = endDate.minusDays(1);
         }
-        LocalDate startDate = endDate.minusDays(730);
+        LocalDate startDate = endDate.minusDays(800);
 
         System.out.println("=== Combined Stock + Options Backtest ===");
         System.out.printf("Period       : %s → %s%n", startDate, endDate);
@@ -123,7 +127,7 @@ public class CombinedBacktestRunner {
         System.out.println("Pass 1/3: Stocks only...");
         long t0 = System.currentTimeMillis();
         IntradayBacktestResult stocksResult = engine.run(
-                new ArrayList<>(barsBySymbol.keySet()), barsBySymbol, 100_000.0,
+                stockPassSymbols, barsBySymbol, 100_000.0,
                 null, msg -> {}, Set.of(),
                 loop -> { stockConfig.accept(loop); });
         System.out.printf("  Done in %.1fs  Return: %+.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n%n",
@@ -136,13 +140,14 @@ public class CombinedBacktestRunner {
         long t1 = System.currentTimeMillis();
         OptionsSignalRouter router2 = buildRouter(cfg, vixCache, optAllowlist);
         IntradayBacktestResult optionsResult = engine.run(
-                new ArrayList<>(barsBySymbol.keySet()), barsBySymbol, 100_000.0,
+                new ArrayList<>(optionsSymbols), barsBySymbol, 100_000.0,
                 router2, msg -> {}, Set.of(),
                 loop -> {
                     router2.setUptrendSupplier(loop::isUptrend);
                     loop.setStockTradingEnabled(false);
+                    loop.setMaxConcurrentStockPositions(10);
+                    loop.setAvoidOvernightHolds(false);
                     loop.setDailyLossLimitPct(cfg.getDailyLossLimitPct() / 100.0);
-                    loop.setMaxPortfolioExposure(cfg.getMaxPortfolioExposurePct() / 100.0);
                     loop.setAccurateOptionsValuation(true);
                     router2.setClosePositionsOnHalt(true);
                 });
@@ -216,6 +221,7 @@ public class CombinedBacktestRunner {
         router.setPutsDisabledSymbols(cfg.getOptionsPutsDisabled());
         router.setDowntrendPutMinSignals(cfg.getDowntrendPutMinSignals());
         router.setReversalMinSignals(cfg.getReversalMinSignals());
+        router.setReversalMinConsecutive(2);
         router.setProfitTarget(cfg.getProfitTarget());
         router.setEntryConfirmationTicks(1);
         router.setOvernightMinPremiumFrac(cfg.getOvernightMinPremiumFrac());

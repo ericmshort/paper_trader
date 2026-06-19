@@ -47,7 +47,10 @@ public class IntradayBacktestRunner {
     private static final ZoneId ET = ZoneId.of("America/New_York");
     private static final DateTimeFormatter DT_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ET);
 
-    record RunResult(String label, IntradayBacktestResult result, Set<String> strategies) {}
+    record RunResult(String label, IntradayBacktestResult result, Set<String> strategies,
+                     List<String> watchlist, double profitTarget, int reversalMinSignals,
+                     int reversalMinConsecutive, double dailyLossLimitPct,
+                     double overnightMinPremiumFrac, boolean avoidOvernightHolds) {}
 
     // Lightweight summary kept between runs in strategy-compare mode (avoids holding full result in memory)
     record RunSummary(String label, Set<String> strategies, double returnPct, double maxDd, int trades, int wins, int losses) {}
@@ -370,7 +373,10 @@ public class IntradayBacktestRunner {
                         r.getTotalReturnPct(), r.getMaxDrawdownPct(),
                         r.getTotalTrades(), r.getWins(), r.getLosses()));
             } else {
-                results.add(new RunResult(cfg2.label(), r, cfg2.strategies()));
+                results.add(new RunResult(cfg2.label(), r, cfg2.strategies(),
+                        cfg2.watchlist(), cfg2.profitTarget(), cfg2.reversalMinSignals(),
+                        cfg2.reversalMinConsecutive(), cfg2.dailyLossLimitPct(),
+                        floorFrac, avoidOvernight));
             }
         }
 
@@ -476,10 +482,16 @@ public class IntradayBacktestRunner {
             RunResult best = results.stream()
                     .max(Comparator.comparingDouble(rr -> rr.result().getTotalReturnPct()))
                     .orElseThrow();
-            try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(reportPath))) {
-                writeReport(out, best.result(), startDate, endDate);
+            String runTs = ZonedDateTime.now(ET).format(DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmm"));
+            Path timedPath = reportPath.getParent().resolve("backtest-" + runTs + ".txt");
+            for (Path p : List.of(timedPath, reportPath)) {
+                try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(p))) {
+                    writeReport(out, best.result(), startDate, endDate, cfg, best);
+                }
             }
-            System.out.println("\nReport written for best run (" + best.label() + "): " + reportPath);
+            System.out.println("\nReport written for best run (" + best.label().trim() + "):");
+            System.out.println("  Timestamped : " + timedPath);
+            System.out.println("  Latest      : " + reportPath);
 
             if ("symbol-scan".equals(mode) && !scanCandidates.isEmpty()) {
                 printCandidateRanking(best.result(), new java.util.HashSet<>(scanCandidates));
@@ -794,10 +806,41 @@ public class IntradayBacktestRunner {
     }
 
     private static void writeReport(PrintWriter out, IntradayBacktestResult result,
-                                    LocalDate startDate, LocalDate endDate) {
+                                    LocalDate startDate, LocalDate endDate,
+                                    AppConfig cfg, RunResult rr) {
         out.println("=== INTRADAY BACKTEST REPORT ===");
         out.println("Period : " + startDate + " to " + endDate);
         out.println("Generated: " + ZonedDateTime.now(ET).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z")));
+        out.println();
+
+        // --- Configuration ---
+        out.println("--- CONFIGURATION ---");
+        out.printf("Label              : %s%n", rr.label().trim());
+        out.printf("Strategies         : %s%n", String.join(", ", rr.strategies()));
+        out.printf("Watchlist          : %d symbols (%s)%n",
+                rr.watchlist().size(), String.join(", ", rr.watchlist()));
+        out.printf("Options Allowlist  : %d symbols (%s)%n",
+                cfg.getOptionsSymbolAllowlist().size(), String.join(", ", cfg.getOptionsSymbolAllowlist()));
+        String entryStart = cfg.getOptionsEntryStartTime() != null
+                ? cfg.getOptionsEntryStartTime() + " ET" : "market open";
+        String entryCutoff = cfg.getOptionsEntryCutoff() != null
+                ? cfg.getOptionsEntryCutoff() + " ET" : "none";
+        out.printf("Entry Window       : %s - %s%n", entryStart, entryCutoff);
+        out.printf("Stop Loss          : %.0f%% of premium%n", cfg.getOptionsStopLossFrac() * 100);
+        out.printf("Profit Target      : %.2fx (%.0f%% gain)%n",
+                rr.profitTarget(), (rr.profitTarget() - 1.0) * 100);
+        out.printf("Reversal Exit      : signals>=%d for %d consecutive ticks%n",
+                rr.reversalMinSignals(), rr.reversalMinConsecutive());
+        out.printf("Avoid Overnight    : %s%n", rr.avoidOvernightHolds());
+        out.printf("Overnight Floor    : %.0f%% of entry premium%n", rr.overnightMinPremiumFrac() * 100);
+        out.printf("Daily Loss Limit   : %.1f%%%n", rr.dailyLossLimitPct());
+        out.printf("Max Portfolio Exp. : %.1f%%%n", cfg.getMaxPortfolioExposurePct());
+        out.printf("Calls Disabled     : %s%n",
+                cfg.getOptionsCallsDisabled().isEmpty() ? "none" : String.join(", ", cfg.getOptionsCallsDisabled()));
+        out.printf("Puts Disabled      : %s%n",
+                cfg.getOptionsPutsDisabled().isEmpty() ? "none" : String.join(", ", cfg.getOptionsPutsDisabled()));
+        out.printf("Downtrend Put Min  : %d signals%n", cfg.getDowntrendPutMinSignals());
+        out.printf("Market Regime Filt : %s%n", cfg.isMarketRegimeFilterEnabled());
         out.println();
 
         // --- Summary stats ---

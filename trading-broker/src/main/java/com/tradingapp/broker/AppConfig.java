@@ -87,7 +87,7 @@ public class AppConfig {
         "LRCX", "DE", "ORCL", "LLY", "BLK",
         "NOW", "MA", "REGN", "META", "AMAT",
         "KLAC", "CAT", "UNH", "LMT", "JPM",
-        "MU", "HD", "MCD", "V"
+        "MU", "HD", "MCD", "V", "NFLX"
     ));
 
     public static AppConfig load() {
