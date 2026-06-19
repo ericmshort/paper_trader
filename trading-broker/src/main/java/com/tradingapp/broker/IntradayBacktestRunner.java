@@ -84,7 +84,8 @@ public class IntradayBacktestRunner {
         List<String> newCandidates = candidatesStr.isBlank() ? List.of()
                 : Arrays.stream(candidatesStr.split(",")).map(String::trim).filter(s -> !s.isEmpty()).toList();
 
-        List<String> baseWatchlist = new ArrayList<>(DayTraderWatchList.SYMBOLS);
+        List<String> baseWatchlist = new ArrayList<>(
+                cfg.getOptionsWatchlist().isEmpty() ? DayTraderWatchList.SYMBOLS : cfg.getOptionsWatchlist());
         List<String> allSymbols = new ArrayList<>(baseWatchlist);
         allSymbols.addAll(newCandidates);
 
