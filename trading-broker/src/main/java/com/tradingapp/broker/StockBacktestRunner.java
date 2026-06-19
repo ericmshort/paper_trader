@@ -126,6 +126,38 @@ public class StockBacktestRunner {
             loop.setAccurateOptionsValuation(false);
         };
 
+        if ("trailing-stop-compare".equals(mode)) {
+            double[] trailingStopValues = { 0.02, 0.03, 0.04, 0.05, 0.06, 0.08 };
+            record Summary(double ts, double returnPct, double maxDd, int trades, int wins) {}
+            List<Summary> summaries = new ArrayList<>();
+            for (double ts : trailingStopValues) {
+                String label = String.format("trailing stop=%.0f%%", ts * 100);
+                System.out.println("Running: " + label + (ts == TRAILING_STOP_PCT ? " (current)" : "") + "...");
+                long t = System.currentTimeMillis();
+                final double tsFinal = ts;
+                IntradayBacktestResult r = engine.run(
+                        new ArrayList<>(barsBySymbol.keySet()), barsBySymbol, 100_000.0,
+                        null, msg -> {}, java.util.Set.of(),
+                        loop -> { baseConfig.accept(loop); loop.setTrailingStopPct(tsFinal); loop.setRegimeMaDays(5); });
+                System.out.printf("  Done in %.1fs  Return: %+.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
+                        (System.currentTimeMillis() - t) / 1000.0,
+                        r.getTotalReturnPct(), r.getMaxDrawdownPct(),
+                        r.getTotalTrades(), r.getWins(), r.getLosses());
+                summaries.add(new Summary(ts, r.getTotalReturnPct(), r.getMaxDrawdownPct(), r.getTotalTrades(), r.getWins()));
+            }
+            System.out.println();
+            System.out.printf("%-22s  %8s  %8s  %7s  %7s%n", "Trailing Stop", "Return", "MaxDD", "Trades", "WinRate");
+            System.out.println("-".repeat(62));
+            for (Summary s : summaries) {
+                double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0;
+                String current = s.ts() == TRAILING_STOP_PCT ? " ← current" : "";
+                System.out.printf("%-22s  %+7.2f%%  %7.2f%%  %7d  %6.1f%%%s%n",
+                        String.format("%.0f%%", s.ts() * 100),
+                        s.returnPct(), s.maxDd(), s.trades(), wr, current);
+            }
+            return;
+        }
+
         if ("max-loss-compare".equals(mode)) {
             double[] maxLossValues = { 0.001, 0.002, 0.003, 0.005, 0.010 };
             record Summary(double maxLoss, double returnPct, double maxDd, int trades, int wins) {}
