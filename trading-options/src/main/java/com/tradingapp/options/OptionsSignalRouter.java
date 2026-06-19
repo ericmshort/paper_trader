@@ -116,9 +116,6 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     // Virtual clock: ET in live trading; virtual clock in backtest.
     private Supplier<ZonedDateTime> clock = () -> ZonedDateTime.now(ET);
 
-    private volatile boolean tradingEnabled = true;
-    public void setTradingEnabled(boolean v) { this.tradingEnabled = v; }
-
     public void setUptrendSupplier(BooleanSupplier s) { this.uptrendSupplier = s; }
     public void setMaxPortfolioExposure(double fraction) { this.maxPortfolioExposure = fraction; }
     public void setEnabledStrategies(Set<String> strategies) { this.enabledStrategies = new HashSet<>(strategies); }
@@ -274,7 +271,6 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     public void evaluateWithSignals(String symbol, double price, int buySignals, int sellSignals,
                                     String signalStr, String featureCsv,
                                     List<com.tradingapp.engine.SignalResult> rawSignals) {
-        if (!tradingEnabled) return;
         resetIfNewDay();
 
         // ── Pre-close: force-close all, or apply overnight floor ─────────────

@@ -169,13 +169,8 @@ public class DashboardController implements Initializable {
                     tradingLoop.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
                     tradingLoop.setMarketRegimeFilterEnabled(cfg.isMarketRegimeFilterEnabled());
                     tradingLoop.setEarningsBlackoutDays(cfg.getEarningsBlackoutDays());
-                    tradingLoop.setTrailingStopPct(cfg.getTrailingStopPct());
-                    tradingLoop.setMaxLossPerTradePct(cfg.getMaxLossPerTradePct());
-                    tradingLoop.setCircuitBreakerPct(cfg.getCircuitBreakerPct());
-                    tradingLoop.setStockWatchlist(cfg.getStockWatchlist());
                 }
                 if (optionsRouter != null) {
-                    optionsRouter.setTradingEnabled(cfg.isOptionsTradingEnabled());
                     optionsRouter.setMaxPortfolioExposure(cfg.getMaxPortfolioExposurePct() / 100.0);
                     optionsRouter.setEnabledStrategies(cfg.getEnabledStrategies());
                     optionsRouter.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
@@ -186,7 +181,8 @@ public class DashboardController implements Initializable {
                     optionsRouter.setReversalMinSignals(cfg.getReversalMinSignals());
                     optionsRouter.setDowntrendPutMinSignals(cfg.getDowntrendPutMinSignals());
                     optionsRouter.setEntryCutoff(cfg.getOptionsEntryCutoff());
-                    optionsRouter.setOptionsAllowlist(new java.util.HashSet<>(cfg.getOptionsWatchlist()));
+                    optionsRouter.setEntryStartTime(cfg.getOptionsEntryStartTime());
+                    optionsRouter.setOptionsAllowlist(cfg.getOptionsSymbolAllowlist());
                     optionsRouter.setCallsDisabledSymbols(cfg.getOptionsCallsDisabled());
                     optionsRouter.setPutsDisabledSymbols(cfg.getOptionsPutsDisabled());
                 }
@@ -274,7 +270,7 @@ public class DashboardController implements Initializable {
                 : quoteProvider;
         optionsRouter = new OptionsSignalRouter(
                 bsEngine, optExec, account, priceHistory, researchCb, optionsDataClient);
-        optionsRouter.setOptionsAllowlist(new java.util.HashSet<>(appConfig.getOptionsWatchlist()));
+        optionsRouter.setOptionsAllowlist(appConfig.getOptionsSymbolAllowlist());
         optionsRouter.setCallsDisabledSymbols(appConfig.getOptionsCallsDisabled());
         optionsRouter.setPutsDisabledSymbols(appConfig.getOptionsPutsDisabled());
         if (appConfig.isAlpacaBroker()) {
@@ -324,7 +320,6 @@ public class DashboardController implements Initializable {
         }
         tradingLoop.setDailyLossLimitPct(appConfig.getDailyLossLimitPct() / 100.0);
         tradingLoop.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
-        optionsRouter.setTradingEnabled(appConfig.isOptionsTradingEnabled());
         optionsRouter.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
         optionsRouter.setEnabledStrategies(appConfig.getEnabledStrategies());
         optionsRouter.setDowntrendPutMinSignals(appConfig.getDowntrendPutMinSignals());
@@ -340,13 +335,10 @@ public class DashboardController implements Initializable {
         optionsRouter.setUptrendSupplier(tradingLoop::isUptrend);
         optionsRouter.setStopLossFrac(appConfig.getOptionsStopLossFrac());
         optionsRouter.setEntryCutoff(appConfig.getOptionsEntryCutoff());
+        optionsRouter.setEntryStartTime(appConfig.getOptionsEntryStartTime());
         optionsRouter.setClosePositionsOnHalt(true);
         tradingLoop.setAccurateOptionsValuation(true);
         tradingLoop.setStockTradingEnabled(appConfig.isStockTradingEnabled());
-        tradingLoop.setTrailingStopPct(appConfig.getTrailingStopPct());
-        tradingLoop.setMaxLossPerTradePct(appConfig.getMaxLossPerTradePct());
-        tradingLoop.setCircuitBreakerPct(appConfig.getCircuitBreakerPct());
-        tradingLoop.setStockWatchlist(appConfig.getStockWatchlist());
 
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "trading-loop");

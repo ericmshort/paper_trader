@@ -12,10 +12,8 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -25,7 +23,7 @@ public class AppConfig {
     public enum BrokerType { SIMULATED, ALPACA_PAPER, ALPACA_LIVE }
     public enum QuoteProviderType { YAHOO, ALPACA, ALPACA_WEBSOCKET_FREE }
 
-    public static final String APP_PROFILE = "paper-trader";
+    public static final String APP_PROFILE = "day-trader";
 
     public static Path getDataDir() {
         return Path.of(System.getProperty("user.home"), ".tradingapp", APP_PROFILE);
@@ -43,10 +41,11 @@ public class AppConfig {
     private boolean avoidOvernightHolds = true;
     private boolean marketRegimeFilterEnabled = true;
     private int earningsBlackoutDays = 3;
-    private boolean optionsTradingEnabled = true;
-    // Strategies enabled for live trading.
+    // Strategies enabled for live trading. Defaults to day-trading set.
     private Set<String> enabledStrategies = new LinkedHashSet<>(
             Arrays.asList("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM", "LONG_CALL", "LONG_PUT", "ZERO_DTE"));
+    // If non-empty, only these symbols may trade options. Empty = all symbols allowed.
+    private Set<String> optionsSymbolAllowlist = new LinkedHashSet<>();
     // Symbols in this set may trade puts but not calls.
     private Set<String> optionsCallsDisabled   = new LinkedHashSet<>();
     // Symbols in this set may trade calls but not puts.
@@ -63,35 +62,12 @@ public class AppConfig {
     private double optionsStopLossFrac = 0.50;
     // No new options entries after this ET time (null = no cutoff).
     private LocalTime optionsEntryCutoff = null;
+    // No new options entries before this ET time (null = no delay).
+    private LocalTime optionsEntryStartTime = null;
     // Consecutive same-direction ticks required before opening a new options position (default 1 = no filter).
     private int entryConfirmationTicks = 1;
     // When avoidOvernightHolds=false, close EOD positions below this fraction of entry premium (0.0 = hold all).
     private double overnightMinPremiumFrac = 0.8;
-    // Trailing stop: close position when price falls this fraction from its peak (default 4%).
-    private double trailingStopPct = 0.04;
-    // Risk sizing: max fraction of portfolio to risk on a single stock trade (default 0.3%).
-    private double maxLossPerTradePct = 0.003;
-    // Circuit breaker: auto-liquidate all stocks + halt when daily loss exceeds this fraction (default 2%).
-    private double circuitBreakerPct = 0.02;
-    // Symbols eligible for stock trading.
-    private List<String> stockWatchlist = new ArrayList<>(Arrays.asList(
-        "AAPL", "MSFT", "AMZN", "META", "NVDA",
-        "BRK-B", "TSLA", "UNH", "XOM", "JNJ",
-        "PG", "MA", "HD", "CVX", "LLY",
-        "ABBV", "PEP", "WMT", "CSCO", "TMO",
-        "ABT", "MCD", "NKE", "DHR", "ADBE",
-        "CRM", "TXN", "NEE", "PM", "UPS",
-        "QCOM", "LIN", "MDLZ", "CAT"
-    ));
-    // Symbols eligible for options trading (30-symbol backtested list from DayTraderWatchList).
-    private List<String> optionsWatchlist = new ArrayList<>(Arrays.asList(
-        "SPY", "NOC", "NVDA", "MSFT", "COST",
-        "VRTX", "AMGN", "CRWD", "GS", "PLTR",
-        "LRCX", "DE", "ORCL", "LLY", "BLK",
-        "NOW", "MA", "REGN", "META", "AMAT",
-        "KLAC", "CAT", "NFLX", "UNH", "LMT",
-        "JPM", "MU", "HD", "MCD", "V"
-    ));
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
@@ -123,8 +99,6 @@ public class AppConfig {
                     props.getProperty("risk.avoid_overnight_holds", "true"));
             config.marketRegimeFilterEnabled = Boolean.parseBoolean(
                     props.getProperty("risk.market_regime_filter", "true"));
-            config.optionsTradingEnabled = Boolean.parseBoolean(
-                    props.getProperty("trading.options_enabled", "true"));
             try {
                 config.earningsBlackoutDays = Integer.parseInt(
                         props.getProperty("risk.earnings_blackout_days", "3"));
@@ -132,6 +106,12 @@ public class AppConfig {
             String strategiesRaw = props.getProperty("strategy.enabled", "");
             if (!strategiesRaw.isBlank()) {
                 config.enabledStrategies = Arrays.stream(strategiesRaw.split(","))
+                        .map(String::strip).filter(s -> !s.isEmpty())
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
+            }
+            String allowlistRaw = props.getProperty("options.symbol.allowlist", "");
+            if (!allowlistRaw.isBlank()) {
+                config.optionsSymbolAllowlist = Arrays.stream(allowlistRaw.split(","))
                         .map(String::strip).filter(s -> !s.isEmpty())
                         .collect(Collectors.toCollection(LinkedHashSet::new));
             }
@@ -170,6 +150,11 @@ public class AppConfig {
                 try { config.optionsEntryCutoff = LocalTime.parse(cutoffRaw); }
                 catch (DateTimeParseException ignored) {}
             }
+            String startTimeRaw = props.getProperty("options.entry_start_time", "");
+            if (!startTimeRaw.isBlank()) {
+                try { config.optionsEntryStartTime = LocalTime.parse(startTimeRaw); }
+                catch (DateTimeParseException ignored) {}
+            }
             try {
                 config.entryConfirmationTicks = Integer.parseInt(
                         props.getProperty("options.entry_confirmation_ticks", "1"));
@@ -178,30 +163,6 @@ public class AppConfig {
                 config.overnightMinPremiumFrac = Double.parseDouble(
                         props.getProperty("options.overnight_min_premium_frac", "0.0"));
             } catch (NumberFormatException ignored) {}
-            try {
-                config.trailingStopPct = Double.parseDouble(
-                        props.getProperty("risk.trailing_stop_pct", "0.04"));
-            } catch (NumberFormatException ignored) {}
-            try {
-                config.maxLossPerTradePct = Double.parseDouble(
-                        props.getProperty("risk.max_loss_per_trade_pct", "0.003"));
-            } catch (NumberFormatException ignored) {}
-            try {
-                config.circuitBreakerPct = Double.parseDouble(
-                        props.getProperty("risk.circuit_breaker_pct", "0.02"));
-            } catch (NumberFormatException ignored) {}
-            String stockWatchlistRaw = props.getProperty("stock.watchlist", "");
-            if (!stockWatchlistRaw.isBlank()) {
-                config.stockWatchlist = Arrays.stream(stockWatchlistRaw.split(","))
-                        .map(String::strip).filter(s -> !s.isEmpty())
-                        .collect(Collectors.toCollection(ArrayList::new));
-            }
-            String optionsWatchlistRaw = props.getProperty("options.watchlist", "");
-            if (!optionsWatchlistRaw.isBlank()) {
-                config.optionsWatchlist = Arrays.stream(optionsWatchlistRaw.split(","))
-                        .map(String::strip).filter(s -> !s.isEmpty())
-                        .collect(Collectors.toCollection(ArrayList::new));
-            }
         } catch (IOException ignored) {}
         return config;
     }
@@ -220,8 +181,8 @@ public class AppConfig {
             props.setProperty("risk.avoid_overnight_holds", String.valueOf(avoidOvernightHolds));
             props.setProperty("risk.market_regime_filter", String.valueOf(marketRegimeFilterEnabled));
             props.setProperty("risk.earnings_blackout_days", String.valueOf(earningsBlackoutDays));
-            props.setProperty("trading.options_enabled", String.valueOf(optionsTradingEnabled));
             props.setProperty("strategy.enabled", String.join(",", enabledStrategies));
+            props.setProperty("options.symbol.allowlist", String.join(",", optionsSymbolAllowlist));
             props.setProperty("options.calls.disabled", String.join(",", optionsCallsDisabled));
             props.setProperty("options.puts.disabled",  String.join(",", optionsPutsDisabled));
             props.setProperty("options.downtrend_put_min_signals", String.valueOf(downtrendPutMinSignals));
@@ -230,13 +191,9 @@ public class AppConfig {
             props.setProperty("stock.trading.enabled", String.valueOf(stockTradingEnabled));
             props.setProperty("options.stop_loss_frac", String.valueOf(optionsStopLossFrac));
             props.setProperty("options.entry_cutoff", optionsEntryCutoff != null ? optionsEntryCutoff.toString() : "");
+            props.setProperty("options.entry_start_time", optionsEntryStartTime != null ? optionsEntryStartTime.toString() : "");
             props.setProperty("options.entry_confirmation_ticks", String.valueOf(entryConfirmationTicks));
             props.setProperty("options.overnight_min_premium_frac", String.valueOf(overnightMinPremiumFrac));
-            props.setProperty("risk.trailing_stop_pct", String.valueOf(trailingStopPct));
-            props.setProperty("risk.max_loss_per_trade_pct", String.valueOf(maxLossPerTradePct));
-            props.setProperty("risk.circuit_breaker_pct", String.valueOf(circuitBreakerPct));
-            props.setProperty("stock.watchlist", String.join(",", stockWatchlist));
-            props.setProperty("options.watchlist", String.join(",", optionsWatchlist));
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
                 props.store(out, "Trading App Configuration — do not commit this file");
             }
@@ -264,7 +221,7 @@ public class AppConfig {
                         optionsEntryCutoff != null ? optionsEntryCutoff.toString() : "",
                         dailyLossLimitPct,
                         maxPortfolioExposurePct,
-                        0,
+                        optionsSymbolAllowlist.size(),
                         downtrendPutMinSignals);
             }
         } catch (Exception ignored) {}
@@ -297,9 +254,6 @@ public class AppConfig {
     public int getEarningsBlackoutDays() { return earningsBlackoutDays; }
     public void setEarningsBlackoutDays(int days) { this.earningsBlackoutDays = days; }
 
-    public boolean isOptionsTradingEnabled() { return optionsTradingEnabled; }
-    public void setOptionsTradingEnabled(boolean v) { this.optionsTradingEnabled = v; }
-
     public Set<String> getEnabledStrategies() { return enabledStrategies; }
     public void setEnabledStrategies(Set<String> strategies) { this.enabledStrategies = new LinkedHashSet<>(strategies); }
     public boolean isStrategyEnabled(String name) { return enabledStrategies.contains(name); }
@@ -321,6 +275,8 @@ public class AppConfig {
     public String getClaudeApiKey() { return claudeApiKey; }
     public void setClaudeApiKey(String key) { this.claudeApiKey = key; }
 
+    public Set<String> getOptionsSymbolAllowlist() { return optionsSymbolAllowlist; }
+    public void setOptionsSymbolAllowlist(Set<String> symbols) { this.optionsSymbolAllowlist = new LinkedHashSet<>(symbols); }
 
     public Set<String> getOptionsCallsDisabled() { return optionsCallsDisabled; }
     public void setOptionsCallsDisabled(Set<String> symbols) { this.optionsCallsDisabled = new LinkedHashSet<>(symbols); }
@@ -331,26 +287,14 @@ public class AppConfig {
     public LocalTime getOptionsEntryCutoff() { return optionsEntryCutoff; }
     public void setOptionsEntryCutoff(LocalTime t) { this.optionsEntryCutoff = t; }
 
+    public LocalTime getOptionsEntryStartTime() { return optionsEntryStartTime; }
+    public void setOptionsEntryStartTime(LocalTime t) { this.optionsEntryStartTime = t; }
+
     public int getEntryConfirmationTicks() { return entryConfirmationTicks; }
     public void setEntryConfirmationTicks(int n) { this.entryConfirmationTicks = n; }
 
     public double getOvernightMinPremiumFrac() { return overnightMinPremiumFrac; }
     public void setOvernightMinPremiumFrac(double frac) { this.overnightMinPremiumFrac = frac; }
-
-    public double getTrailingStopPct() { return trailingStopPct; }
-    public void setTrailingStopPct(double pct) { this.trailingStopPct = pct; }
-
-    public double getMaxLossPerTradePct() { return maxLossPerTradePct; }
-    public void setMaxLossPerTradePct(double pct) { this.maxLossPerTradePct = pct; }
-
-    public double getCircuitBreakerPct() { return circuitBreakerPct; }
-    public void setCircuitBreakerPct(double pct) { this.circuitBreakerPct = pct; }
-
-    public List<String> getStockWatchlist() { return stockWatchlist; }
-    public void setStockWatchlist(List<String> symbols) { this.stockWatchlist = new ArrayList<>(symbols); }
-
-    public List<String> getOptionsWatchlist() { return optionsWatchlist; }
-    public void setOptionsWatchlist(List<String> symbols) { this.optionsWatchlist = new ArrayList<>(symbols); }
 
     public boolean isAlpacaBroker() {
         return brokerType == BrokerType.ALPACA_PAPER || brokerType == BrokerType.ALPACA_LIVE;

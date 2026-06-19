@@ -22,6 +22,7 @@ import java.nio.file.StandardOpenOption;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -121,10 +122,21 @@ public class IntradayBacktestRunner {
         VixCache vixCache = new VixCache();
         vixCache.load(startDate, endDate);
 
+        // Entry-start delay: from -Dbacktest.entryStartTime=HH:mm or app.properties
+        String entryStartProp = System.getProperty("backtest.entryStartTime", "");
+        LocalTime backtestEntryStartTime = entryStartProp.isBlank()
+                ? cfg.getOptionsEntryStartTime()
+                : LocalTime.parse(entryStartProp, java.time.format.DateTimeFormatter.ofPattern("H:mm"));
+
+        // Optional strategy exclusions: -Dbacktest.disableStrategies=OPENING_BREAKOUT,ZERO_DTE,...
+        String disableProp = System.getProperty("backtest.disableStrategies", "");
+        Set<String> disabledStrategies = disableProp.isBlank() ? Set.of()
+                : Arrays.stream(disableProp.split(",")).map(String::trim).collect(Collectors.toSet());
+
         double maxExposure = cfg.getMaxPortfolioExposurePct() / 100.0;
         IntradayBacktestEngine engine = new IntradayBacktestEngine(new IndicatorEngine(), new FeeCalculator());
 
-        Set<String> BASE_OPTS      = new java.util.HashSet<>(cfg.getOptionsWatchlist());
+        Set<String> BASE_OPTS      = cfg.getOptionsSymbolAllowlist();
         Set<String> CALLS_DISABLED = cfg.getOptionsCallsDisabled();
 
         // Candidates for symbol-scan mode: MasterUniverse symbols not in current allowlist, with cached bars
@@ -310,7 +322,11 @@ public class IntradayBacktestRunner {
             OptionsSignalRouter router = new OptionsSignalRouter(
                     bs, optExec, new Account(), new PriceHistory(), msg -> {}, null);
             router.setMaxPortfolioExposure(maxExposure);
-            router.setEnabledStrategies(cfg2.strategies());
+            Set<String> runStrategies = disabledStrategies.isEmpty() ? cfg2.strategies()
+                    : cfg2.strategies().stream().filter(s -> !disabledStrategies.contains(s))
+                            .collect(Collectors.toSet());
+            router.setEnabledStrategies(runStrategies);
+            if (backtestEntryStartTime != null) router.setEntryStartTime(backtestEntryStartTime);
             router.setStopLossFrac(cfg.getOptionsStopLossFrac());
             boolean avoidOvernight = cfg2.avoidOvernightHolds() != null ? cfg2.avoidOvernightHolds() : cfg.isAvoidOvernightHolds();
             router.setAvoidOvernightHolds(avoidOvernight);
@@ -713,7 +729,7 @@ public class IntradayBacktestRunner {
                 String period = startDate + " to " + endDate;
                 String stopLoss = String.valueOf(cfg.getOptionsStopLossFrac());
                 String cutoff = cfg.getOptionsEntryCutoff() != null ? cfg.getOptionsEntryCutoff().toString() : "";
-                int allowlistCount = cfg.getOptionsWatchlist().size();
+                int allowlistCount = cfg.getOptionsSymbolAllowlist().size();
                 for (int i = 0; i < summaries.size(); i++) {
                     RunSummary s = summaries.get(i);
                     double floor = (perRunFloors != null && i < perRunFloors.length)
@@ -744,7 +760,7 @@ public class IntradayBacktestRunner {
                 String period = startDate + " to " + endDate;
                 String stopLoss = String.valueOf(cfg.getOptionsStopLossFrac());
                 String cutoff = cfg.getOptionsEntryCutoff() != null ? cfg.getOptionsEntryCutoff().toString() : "";
-                int allowlistCount = cfg.getOptionsWatchlist().size();
+                int allowlistCount = cfg.getOptionsSymbolAllowlist().size();
                 double floor = cfg.getOvernightMinPremiumFrac();
                 for (RunResult rr : results) {
                     IntradayBacktestResult r = rr.result();
