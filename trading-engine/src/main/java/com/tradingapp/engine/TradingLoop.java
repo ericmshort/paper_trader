@@ -75,6 +75,7 @@ public class TradingLoop implements Runnable {
     private TransactionLog transactionLog;
     private boolean avoidOvernightHolds = true;
     private boolean marketRegimeFilterEnabled = true;
+    private int regimeMaDays = 5;
     private Set<String> inverseEtfSymbols = Set.of();
     private boolean stockTradingEnabled = true;
     private EarningsCalendar earningsCalendar;
@@ -179,6 +180,7 @@ public class TradingLoop implements Runnable {
     public void setTransactionLog(TransactionLog log) { this.transactionLog = log; }
     public void setAvoidOvernightHolds(boolean v) { this.avoidOvernightHolds = v; }
     public void setMarketRegimeFilterEnabled(boolean v) { this.marketRegimeFilterEnabled = v; }
+    public void setRegimeMaDays(int days) { this.regimeMaDays = Math.max(2, days); }
     public void setInverseEtfSymbols(Set<String> symbols) { this.inverseEtfSymbols = symbols; }
     public void setMaxConcurrentStockPositions(int n) { this.maxConcurrentStockPositions = n; }
     public void setStockTradingEnabled(boolean v) { this.stockTradingEnabled = v; }
@@ -587,10 +589,10 @@ public class TradingLoop implements Runnable {
     private boolean isMarketInUptrend() {
         if (!marketRegimeFilterEnabled) return true;
         List<Double> spyPrices = priceHistory.getDailyPrices("SPY");
-        if (spyPrices.size() < 5) return true; // insufficient data — don't block trades
-        double ma5 = spyPrices.subList(spyPrices.size() - 5, spyPrices.size())
+        if (spyPrices.size() < regimeMaDays) return true;
+        double ma = spyPrices.subList(spyPrices.size() - regimeMaDays, spyPrices.size())
                 .stream().mapToDouble(Double::doubleValue).average().orElse(0);
-        return spyPrices.get(spyPrices.size() - 1) >= ma5;
+        return spyPrices.get(spyPrices.size() - 1) >= ma;
     }
 
     private boolean isVixSpiking() {

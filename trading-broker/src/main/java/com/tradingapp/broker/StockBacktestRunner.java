@@ -72,11 +72,16 @@ public class StockBacktestRunner {
 
         Path reportPath = Path.of("backtest-stocks-report.txt");
 
+        // Risk parameters (hardcoded — AppConfig carries options config, not stock risk)
+        final double TRAILING_STOP_PCT    = 0.04;
+        final double MAX_LOSS_PER_TRADE   = 0.003;
+        final double CIRCUIT_BREAKER_PCT  = 0.02;
+        final int    MAX_POSITIONS        = 8;
+
         System.out.println("=== Stock-Only Intraday Backtest ===");
         System.out.println("Period  : " + startDate + " → " + endDate);
-        System.out.println("Config  : trailing stop=" + String.format("%.0f%%", cfg.getTrailingStopPct() * 100)
-                + "  max loss/trade=" + String.format("%.2f%%", cfg.getMaxLossPerTradePct() * 100)
-                + "  circuit breaker=" + String.format("%.0f%%", cfg.getCircuitBreakerPct() * 100)
+        System.out.println("Config  : trailing stop=4%  max loss/trade=0.30%  circuit breaker=2%"
+                + "  max positions=" + MAX_POSITIONS
                 + "  daily loss limit=" + String.format("%.0f%%", cfg.getDailyLossLimitPct()));
         System.out.println("Report  : " + reportPath.toAbsolutePath());
 
