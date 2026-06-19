@@ -71,7 +71,7 @@ public class AppConfig {
     // When avoidOvernightHolds=false, close EOD positions below this fraction of entry premium (0.0 = hold all).
     private double overnightMinPremiumFrac = 0.8;
     private boolean optionsTradingEnabled = true;
-    private double trailingStopPct = 0.04;
+    private double trailingStopPct = 0.02;
     private double maxLossPerTradePct = 0.005;
     private double circuitBreakerPct = 0.02;
     private List<String> stockWatchlist = new ArrayList<>(Arrays.asList(
