@@ -25,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
@@ -108,36 +109,49 @@ public class StockBacktestRunner {
 
         IntradayBacktestEngine engine = new IntradayBacktestEngine(new IndicatorEngine(), new FeeCalculator());
 
-        long t0 = System.currentTimeMillis();
-        IntradayBacktestResult result = engine.run(
-                new ArrayList<>(barsBySymbol.keySet()),
-                barsBySymbol,
-                100_000.0,
-                null,   // no options evaluator
-                msg -> {},
-                java.util.Set.of(),
-                loop -> {
-                    loop.setStockTradingEnabled(true);
-                    loop.setTrailingStopPct(cfg.getTrailingStopPct());
-                    loop.setMaxLossPerTradePct(cfg.getMaxLossPerTradePct());
-                    loop.setCircuitBreakerPct(cfg.getCircuitBreakerPct());
-                    loop.setDailyLossLimitPct(cfg.getDailyLossLimitPct() / 100.0);
-                    loop.setMaxPortfolioExposure(cfg.getMaxPortfolioExposurePct() / 100.0);
-                    loop.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
-                    loop.setMarketRegimeFilterEnabled(cfg.isMarketRegimeFilterEnabled());
-                    loop.setMaxConcurrentStockPositions(5);
-                    loop.setAccurateOptionsValuation(false);
-                });
+        Consumer<com.tradingapp.engine.TradingLoop> baseConfig = loop -> {
+            loop.setStockTradingEnabled(true);
+            loop.setTrailingStopPct(TRAILING_STOP_PCT);
+            loop.setMaxLossPerTradePct(MAX_LOSS_PER_TRADE);
+            loop.setCircuitBreakerPct(CIRCUIT_BREAKER_PCT);
+            loop.setDailyLossLimitPct(cfg.getDailyLossLimitPct() / 100.0);
+            loop.setMaxPortfolioExposure(cfg.getMaxPortfolioExposurePct() / 100.0);
+            loop.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
+            loop.setMarketRegimeFilterEnabled(cfg.isMarketRegimeFilterEnabled());
+            loop.setMaxConcurrentStockPositions(MAX_POSITIONS);
+            loop.setAccurateOptionsValuation(false);
+        };
 
-        System.out.printf("Done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
+        System.out.println("Running pass 1/2: baseline (5-day SPY MA)...");
+        long t0 = System.currentTimeMillis();
+        IntradayBacktestResult result1 = engine.run(
+                new ArrayList<>(barsBySymbol.keySet()), barsBySymbol, 100_000.0,
+                null, msg -> {}, java.util.Set.of(),
+                loop -> { baseConfig.accept(loop); loop.setRegimeMaDays(5); });
+
+        System.out.printf("Pass 1 done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
                 (System.currentTimeMillis() - t0) / 1000.0,
-                result.getTotalReturnPct(), result.getMaxDrawdownPct(),
-                result.getTotalTrades(), result.getWins(), result.getLosses());
+                result1.getTotalReturnPct(), result1.getMaxDrawdownPct(),
+                result1.getTotalTrades(), result1.getWins(), result1.getLosses());
+
+        System.out.println("Running pass 2/2: eased (20-day SPY MA)...");
+        long t1 = System.currentTimeMillis();
+        IntradayBacktestResult result2 = engine.run(
+                new ArrayList<>(barsBySymbol.keySet()), barsBySymbol, 100_000.0,
+                null, msg -> {}, java.util.Set.of(),
+                loop -> { baseConfig.accept(loop); loop.setRegimeMaDays(20); });
+
+        System.out.printf("Pass 2 done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
+                (System.currentTimeMillis() - t1) / 1000.0,
+                result2.getTotalReturnPct(), result2.getMaxDrawdownPct(),
+                result2.getTotalTrades(), result2.getWins(), result2.getLosses());
 
         double spyReturn = computeSpyReturn(barsBySymbol);
 
         try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(reportPath))) {
-            writeReport(out, result, cfg, startDate, endDate, spyReturn, barsBySymbol.size());
+            writeReport(out, result1, result2, cfg, startDate, endDate, spyReturn,
+                    barsBySymbol.size(), TRAILING_STOP_PCT, MAX_LOSS_PER_TRADE,
+                    CIRCUIT_BREAKER_PCT, MAX_POSITIONS);
         }
         System.out.println("Report written to: " + reportPath.toAbsolutePath());
     }
@@ -152,8 +166,11 @@ public class StockBacktestRunner {
     }
 
     private static void writeReport(PrintWriter out, IntradayBacktestResult result,
-                                    AppConfig cfg, LocalDate startDate, LocalDate endDate,
-                                    double spyReturn, int symbolCount) {
+                                    IntradayBacktestResult result2, AppConfig cfg,
+                                    LocalDate startDate, LocalDate endDate,
+                                    double spyReturn, int symbolCount,
+                                    double trailingStopPct, double maxLossPerTradePct,
+                                    double circuitBreakerPct, int maxPositions) {
         out.println("=== STOCK-ONLY INTRADAY BACKTEST REPORT ===");
         out.println("Period    : " + startDate + " to " + endDate);
         out.println("Universe  : " + symbolCount + " symbols (LargeCapWatchList + SPY)");
@@ -161,13 +178,38 @@ public class StockBacktestRunner {
         out.println();
 
         out.println("--- CONFIGURATION ---");
-        out.printf("Trailing Stop       : %.0f%%%n", cfg.getTrailingStopPct() * 100);
-        out.printf("Max Loss / Trade    : %.2f%% of portfolio%n", cfg.getMaxLossPerTradePct() * 100);
-        out.printf("Circuit Breaker     : %.0f%% daily loss → auto-liquidate%n", cfg.getCircuitBreakerPct() * 100);
+        out.printf("Trailing Stop       : %.0f%%%n", trailingStopPct * 100);
+        out.printf("Max Loss / Trade    : %.2f%% of portfolio%n", maxLossPerTradePct * 100);
+        out.printf("Circuit Breaker     : %.0f%% daily loss → auto-liquidate%n", circuitBreakerPct * 100);
+        out.printf("Max Positions       : %d concurrent%n", maxPositions);
         out.printf("Daily Loss Limit    : %.0f%% → halt new entries%n", cfg.getDailyLossLimitPct());
         out.printf("Max Portfolio Exp.  : %.0f%%%n", cfg.getMaxPortfolioExposurePct());
         out.printf("Avoid Overnight     : %s%n", cfg.isAvoidOvernightHolds());
         out.printf("Market Regime Filter: %s%n", cfg.isMarketRegimeFilterEnabled());
+        out.println();
+
+        // --- Regime filter comparison ---
+        double spy1 = Double.isNaN(spyReturn) ? 0 : spyReturn;
+        double wr1 = result.getTotalTrades()  > 0 ? 100.0 * result.getWins()  / result.getTotalTrades()  : 0;
+        double wr2 = result2.getTotalTrades() > 0 ? 100.0 * result2.getWins() / result2.getTotalTrades() : 0;
+        out.println("--- REGIME FILTER COMPARISON ---");
+        out.printf("  %-26s  %20s  %20s%n", "", "5-Day MA (baseline)", "20-Day MA (eased)");
+        out.println("  " + "-".repeat(70));
+        out.printf("  %-26s  %+19.2f%%  %+19.2f%%%n", "Total Return",
+                result.getTotalReturnPct(), result2.getTotalReturnPct());
+        out.printf("  %-26s  %20.2f%%  %20.2f%%%n", "Max Drawdown",
+                result.getMaxDrawdownPct(), result2.getMaxDrawdownPct());
+        out.printf("  %-26s  %20d  %20d%n", "Total Trades",
+                result.getTotalTrades(), result2.getTotalTrades());
+        out.printf("  %-26s  %19.1f%%  %19.1f%%%n", "Win Rate", wr1, wr2);
+        if (!Double.isNaN(spyReturn)) {
+            out.printf("  %-26s  %+19.2f pp  %+19.2f pp%n", "Alpha vs SPY",
+                    result.getTotalReturnPct() - spy1, result2.getTotalReturnPct() - spy1);
+        }
+        out.printf("  %-26s  %20.2f%%  %20.2f%%%n", "Final Balance Return",
+                result.getTotalReturnPct(), result2.getTotalReturnPct());
+        out.println();
+        out.println("=== DETAILED RESULTS: 5-DAY MA (BASELINE) ===");
         out.println();
 
         out.println("--- SUMMARY ---");
@@ -380,6 +422,48 @@ public class StockBacktestRunner {
             haltLines.stream().limit(20).forEach(l -> out.println("  " + l));
             out.println();
         }
+
+        // --- Eased regime filter summary (20-day MA) ---
+        out.println("=== SUMMARY: 20-DAY MA (EASED REGIME FILTER) ===");
+        out.println();
+        out.printf("Starting Balance   : $100,000.00%n");
+        out.printf("Final Balance      : $%,.2f%n", result2.getFinalBalance());
+        out.printf("Total Return       : %+.2f%%%n", result2.getTotalReturnPct());
+        if (!Double.isNaN(spyReturn)) {
+            out.printf("SPY Benchmark      : %+.2f%%%n", spyReturn);
+            out.printf("Alpha vs SPY       : %+.2f pp%n", result2.getTotalReturnPct() - spyReturn);
+        }
+        out.printf("Max Drawdown       : %.2f%%%n", result2.getMaxDrawdownPct());
+        out.printf("Total Trades       : %d (wins=%d losses=%d)%n",
+                result2.getTotalTrades(), result2.getWins(), result2.getLosses());
+        if (result2.getTotalTrades() > 0) {
+            out.printf("Win Rate           : %.1f%%%n",
+                    100.0 * result2.getWins() / result2.getTotalTrades());
+        }
+        List<BacktestDataPoint> curve2 = result2.getEquityCurve();
+        if (curve2.size() >= 2) {
+            double annualized2 = result2.getTotalReturnPct() / curve2.size() * 252;
+            out.printf("Trading Days       : %d%n", curve2.size());
+            out.printf("Annualized Return  : %+.2f%% (252-day scale)%n", annualized2);
+        }
+        out.println();
+
+        out.println("--- MONTHLY PERFORMANCE (20-DAY MA) ---");
+        out.printf("  %-10s  %12s  %12s  %8s%n", "Month", "Start Value", "End Value", "Return");
+        out.println("  " + "-".repeat(50));
+        Map<String, List<BacktestDataPoint>> byMonth2 = new java.util.LinkedHashMap<>();
+        for (BacktestDataPoint pt : curve2) {
+            byMonth2.computeIfAbsent(pt.getDate().toString().substring(0, 7), k -> new ArrayList<>()).add(pt);
+        }
+        double ms2 = 100_000.0;
+        for (Map.Entry<String, List<BacktestDataPoint>> e : byMonth2.entrySet()) {
+            List<BacktestDataPoint> days = e.getValue();
+            double me2 = days.get(days.size() - 1).getPortfolioValue();
+            out.printf("  %-10s  $%,10.2f  $%,10.2f  %+7.2f%%%n",
+                    e.getKey(), ms2, me2, (me2 - ms2) / ms2 * 100.0);
+            ms2 = me2;
+        }
+        out.println();
     }
 
     private static String normalizeExitReason(String reason) {
