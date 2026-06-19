@@ -66,6 +66,8 @@ public class AppConfig {
     private LocalTime optionsEntryCutoff = null;
     // No new options entries before this ET time (null = no delay).
     private LocalTime optionsEntryStartTime = null;
+    // EOD force-close time for options positions (null = use default 15:45).
+    private LocalTime optionsForceCloseTime = null;
     // Consecutive same-direction ticks required before opening a new options position (default 1 = no filter).
     private int entryConfirmationTicks = 1;
     // When avoidOvernightHolds=false, close EOD positions below this fraction of entry premium (0.0 = hold all).
@@ -176,6 +178,11 @@ public class AppConfig {
                 try { config.optionsEntryStartTime = LocalTime.parse(startTimeRaw); }
                 catch (DateTimeParseException ignored) {}
             }
+            String forceCloseRaw = props.getProperty("options.force_close_time", "");
+            if (!forceCloseRaw.isBlank()) {
+                try { config.optionsForceCloseTime = LocalTime.parse(forceCloseRaw); }
+                catch (DateTimeParseException ignored) {}
+            }
             try {
                 config.entryConfirmationTicks = Integer.parseInt(
                         props.getProperty("options.entry_confirmation_ticks", "1"));
@@ -239,6 +246,7 @@ public class AppConfig {
             props.setProperty("options.stop_loss_frac", String.valueOf(optionsStopLossFrac));
             props.setProperty("options.entry_cutoff", optionsEntryCutoff != null ? optionsEntryCutoff.toString() : "");
             props.setProperty("options.entry_start_time", optionsEntryStartTime != null ? optionsEntryStartTime.toString() : "");
+            props.setProperty("options.force_close_time", optionsForceCloseTime != null ? optionsForceCloseTime.toString() : "");
             props.setProperty("options.entry_confirmation_ticks", String.valueOf(entryConfirmationTicks));
             props.setProperty("options.overnight_min_premium_frac", String.valueOf(overnightMinPremiumFrac));
             props.setProperty("options.trading.enabled", String.valueOf(optionsTradingEnabled));
@@ -342,6 +350,8 @@ public class AppConfig {
 
     public LocalTime getOptionsEntryStartTime() { return optionsEntryStartTime; }
     public void setOptionsEntryStartTime(LocalTime t) { this.optionsEntryStartTime = t; }
+    public LocalTime getOptionsForceCloseTime() { return optionsForceCloseTime; }
+    public void setOptionsForceCloseTime(LocalTime t) { this.optionsForceCloseTime = t; }
 
     public int getEntryConfirmationTicks() { return entryConfirmationTicks; }
     public void setEntryConfirmationTicks(int n) { this.entryConfirmationTicks = n; }

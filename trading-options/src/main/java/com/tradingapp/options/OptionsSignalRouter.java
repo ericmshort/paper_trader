@@ -90,6 +90,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private int downtrendPutMinSignals        = 4;
     private boolean avoidOvernightHolds      = true;
     // Effective force-close time — overridden to 12:30 on market half-days.
+    private LocalTime normalForceCloseTime    = PRE_CLOSE_CUTOFF;
     private LocalTime effectiveForceCloseTime = PRE_CLOSE_CUTOFF;
     // Saved normal entry cutoff so it can be restored after a half-day session.
     private LocalTime normalEntryCutoff       = null;
@@ -137,6 +138,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     public void setClosePositionsOnHalt(boolean v)            { this.closePositionsOnHalt = v; }
     public void setReversalMinSignals(int n)                  { this.reversalMinSignals = n; }
     public void setReversalMinConsecutive(int n)              { this.reversalMinConsecutive = n; }
+    public void setForceCloseTime(LocalTime t)               { this.normalForceCloseTime = t; this.effectiveForceCloseTime = t; }
     public void setEntryConfirmationTicks(int n)              { this.entryConfirmationTicks = n; }
     public void setOvernightMinPremiumFrac(double frac)       { this.overnightMinPremiumFrac = frac; }
     private boolean isStrategyEnabled(String name) { return enabledStrategies.isEmpty() || enabledStrategies.contains(name); }
@@ -199,7 +201,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             effectiveForceCloseTime = MarketCalendar.HALF_DAY_FORCE_CLOSE;
             entryCutoff = MarketCalendar.HALF_DAY_ENTRY_CUTOFF;
         } else {
-            effectiveForceCloseTime = PRE_CLOSE_CUTOFF;
+            effectiveForceCloseTime = normalForceCloseTime;
             entryCutoff = normalEntryCutoff;
         }
     }
