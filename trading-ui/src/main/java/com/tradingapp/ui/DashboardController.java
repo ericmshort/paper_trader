@@ -299,9 +299,16 @@ public class DashboardController implements Initializable {
         List<String> allSymbols;
         if (useWsProvider) {
             allSymbols = new ArrayList<>(DayTraderWatchList.SYMBOLS);
+            List<String> stockWatchlist = appConfig.getStockWatchlist();
+            if (!stockWatchlist.isEmpty()) {
+                for (String sym : stockWatchlist) {
+                    if (!allSymbols.contains(sym)) allSymbols.add(sym);
+                }
+            }
         } else {
             allSymbols = new ArrayList<>();
-            allSymbols.addAll(LargeCapWatchList.SYMBOLS);
+            List<String> stockWatchlist = appConfig.getStockWatchlist();
+            allSymbols.addAll(stockWatchlist.isEmpty() ? LargeCapWatchList.SYMBOLS : stockWatchlist);
             allSymbols.addAll(SmallCapWatchList.SYMBOLS);
         }
 

@@ -412,7 +412,9 @@ public class SettingsController implements Initializable {
             cfg.setCircuitBreakerPct(Math.min(10, Math.max(0, pct)) / 100.0);
         } catch (NumberFormatException ignored) {}
         cfg.setStockWatchlist(new java.util.ArrayList<>(parseSymbolSet(stockWatchlistArea.getText())));
-        cfg.setOptionsWatchlist(new java.util.ArrayList<>(parseSymbolSet(optionsWatchlistArea.getText())));
+        Set<String> optWatchlist = parseSymbolSet(optionsWatchlistArea.getText());
+        cfg.setOptionsWatchlist(new java.util.ArrayList<>(optWatchlist));
+        cfg.setOptionsSymbolAllowlist(optWatchlist);
         return cfg;
     }
 
