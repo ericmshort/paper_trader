@@ -186,6 +186,8 @@ public class DashboardController implements Initializable {
                     optionsRouter.setEntryCutoff(cfg.getOptionsEntryCutoff());
                     optionsRouter.setEntryStartTime(cfg.getOptionsEntryStartTime());
                     if (cfg.getOptionsForceCloseTime() != null) optionsRouter.setForceCloseTime(cfg.getOptionsForceCloseTime());
+                    optionsRouter.setPositionBudgetFrac(cfg.getPositionBudgetFrac());
+                    optionsRouter.setMaxContractsPerTrade(cfg.getMaxContractsPerTrade());
                     optionsRouter.setOptionsAllowlist(cfg.getOptionsSymbolAllowlist());
                     optionsRouter.setCallsDisabledSymbols(cfg.getOptionsCallsDisabled());
                     optionsRouter.setPutsDisabledSymbols(cfg.getOptionsPutsDisabled());
@@ -348,6 +350,8 @@ public class DashboardController implements Initializable {
         optionsRouter.setEntryCutoff(appConfig.getOptionsEntryCutoff());
         optionsRouter.setEntryStartTime(appConfig.getOptionsEntryStartTime());
         if (appConfig.getOptionsForceCloseTime() != null) optionsRouter.setForceCloseTime(appConfig.getOptionsForceCloseTime());
+        optionsRouter.setPositionBudgetFrac(appConfig.getPositionBudgetFrac());
+        optionsRouter.setMaxContractsPerTrade(appConfig.getMaxContractsPerTrade());
         optionsRouter.setClosePositionsOnHalt(true);
         tradingLoop.setAccurateOptionsValuation(true);
         tradingLoop.setStockTradingEnabled(appConfig.isStockTradingEnabled());

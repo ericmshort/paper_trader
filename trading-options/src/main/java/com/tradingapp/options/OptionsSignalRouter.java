@@ -104,6 +104,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     // Require this many consecutive same-direction ticks before opening a new position.
     // Default 1 (no confirmation). Set to 12 on live to match ~60s of 1-min bar consensus.
     private int entryConfirmationTicks        = 1;
+    // Per-trade position sizing: budget as a fraction of account balance (standard tier).
+    // High-conviction strategies (HIGH_DELTA, NEARTERM_MOMENTUM) use 1.6× this value.
+    private double positionBudgetFrac   = 0.05;
+    private int    maxContractsPerTrade = 5;
     // When avoidOvernightHolds=false, close any position whose EOD premium is below this
     // fraction of entry (0.0 = hold everything). Cuts losers while letting winners run overnight.
     private double overnightMinPremiumFrac    = 0.0;
@@ -139,6 +143,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     public void setReversalMinSignals(int n)                  { this.reversalMinSignals = n; }
     public void setReversalMinConsecutive(int n)              { this.reversalMinConsecutive = n; }
     public void setForceCloseTime(LocalTime t)               { this.normalForceCloseTime = t; this.effectiveForceCloseTime = t; }
+    public void setPositionBudgetFrac(double frac)           { this.positionBudgetFrac = frac; }
+    public void setMaxContractsPerTrade(int n)               { this.maxContractsPerTrade = n; }
     public void setEntryConfirmationTicks(int n)              { this.entryConfirmationTicks = n; }
     public void setOvernightMinPremiumFrac(double frac)       { this.overnightMinPremiumFrac = frac; }
     private boolean isStrategyEnabled(String name) { return enabledStrategies.isEmpty() || enabledStrategies.contains(name); }
@@ -540,10 +546,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             if (breakoutT <= 0) breakoutT = 5.0 / 365.0;
             if (orbBuy && buySignals >= 2 && callsAllowed && !inDowntrend && canEnterBull) {
                 tryOpenDirectional(symbol, price, true, breakoutCallKey, "OPENING-BREAKOUT",
-                        breakoutExpiry, breakoutT, K, sigma, 0.05, 5, signalStr, featureCsv);
+                        breakoutExpiry, breakoutT, K, sigma, positionBudgetFrac, maxContractsPerTrade, signalStr, featureCsv);
             } else if (orbSell && sellSignals >= 2 && putsAllowed && sellSignals >= putMin && canEnterBear) {
                 tryOpenDirectional(symbol, price, false, breakoutPutKey, "OPENING-BREAKOUT",
-                        breakoutExpiry, breakoutT, K, sigma, 0.05, 5, signalStr, featureCsv);
+                        breakoutExpiry, breakoutT, K, sigma, positionBudgetFrac, maxContractsPerTrade, signalStr, featureCsv);
             }
         }
 
@@ -568,10 +574,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             if (stochT <= 0) stochT = 5.0 / 365.0;
             if (stochBuy && buySignals >= 1 && callsAllowed && !inDowntrend && canEnterBull) {
                 tryOpenDirectional(symbol, price, true, stochCallKey, "STOCH-REVERSAL",
-                        stochExpiry, stochT, K, sigma, 0.05, 5, signalStr, featureCsv);
+                        stochExpiry, stochT, K, sigma, positionBudgetFrac, maxContractsPerTrade, signalStr, featureCsv);
             } else if (stochSell && sellSignals >= 1 && putsAllowed && sellSignals >= putMin && canEnterBear) {
                 tryOpenDirectional(symbol, price, false, stochPutKey, "STOCH-REVERSAL",
-                        stochExpiry, stochT, K, sigma, 0.05, 5, signalStr, featureCsv);
+                        stochExpiry, stochT, K, sigma, positionBudgetFrac, maxContractsPerTrade, signalStr, featureCsv);
             }
         }
 
@@ -593,10 +599,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                     s -> "RELATIVE_STRENGTH".equals(s.getIndicatorName()) && s.getDirection() == com.tradingapp.engine.SignalResult.Direction.SELL);
             if (rsBuy && buySignals >= 2 && callsAllowed && !inDowntrend && canEnterBull) {
                 tryOpenDirectional(symbol, price, true, rsCallKey, "RS-DIVERGENCE",
-                        expiry, T, K, sigma, 0.05, 5, signalStr, featureCsv);
+                        expiry, T, K, sigma, positionBudgetFrac, maxContractsPerTrade, signalStr, featureCsv);
             } else if (rsSell && sellSignals >= 2 && putsAllowed && sellSignals >= putMin && canEnterBear) {
                 tryOpenDirectional(symbol, price, false, rsPutKey, "RS-DIVERGENCE",
-                        expiry, T, K, sigma, 0.05, 5, signalStr, featureCsv);
+                        expiry, T, K, sigma, positionBudgetFrac, maxContractsPerTrade, signalStr, featureCsv);
             }
         }
 
@@ -621,10 +627,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             if (macdT <= 0) macdT = 7.0 / 365.0;
             if (macdBuy && buySignals >= 1 && callsAllowed && !inDowntrend && canEnterBull) {
                 tryOpenDirectional(symbol, price, true, macdCallKey, "MACD-CROSSOVER",
-                        macdExpiry, macdT, K, sigma, 0.05, 5, signalStr, featureCsv);
+                        macdExpiry, macdT, K, sigma, positionBudgetFrac, maxContractsPerTrade, signalStr, featureCsv);
             } else if (macdSell && sellSignals >= 1 && putsAllowed && sellSignals >= putMin && canEnterBear) {
                 tryOpenDirectional(symbol, price, false, macdPutKey, "MACD-CROSSOVER",
-                        macdExpiry, macdT, K, sigma, 0.05, 5, signalStr, featureCsv);
+                        macdExpiry, macdT, K, sigma, positionBudgetFrac, maxContractsPerTrade, signalStr, featureCsv);
             }
         }
     }
@@ -835,7 +841,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             researchCallback.accept(symbol + " CALL skip: premium too low (" + String.format("%.4f", premium) + ")");
             return;
         }
-        int contracts = Math.min(5, (int) (account.getBalance() * 0.05 / (premium * 100)));
+        int contracts = Math.min(maxContractsPerTrade, (int) (account.getBalance() * positionBudgetFrac / (premium * 100)));
         if (contracts < 1) return;
 
         optExec.buyCall(symbol, K, expiry, contracts, premium, signalStr, featureCsv);
@@ -865,14 +871,14 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             return;
         }
         double optionsBudget = account.getPositions().containsKey(symbol)
-                ? account.getBalance() * 0.025
-                : account.getBalance() * 0.05;
+                ? account.getBalance() * positionBudgetFrac * 0.5
+                : account.getBalance() * positionBudgetFrac;
         double premium = resolvePremium(symbol, K, expiry, false, T, sigma, price);
         if (premium < MIN_PREMIUM) {
             researchCallback.accept(symbol + " PUT skip: premium too low (" + String.format("%.4f", premium) + ")");
             return;
         }
-        int contracts = Math.min(5, (int) (optionsBudget / (premium * 100)));
+        int contracts = Math.min(maxContractsPerTrade, (int) (optionsBudget / (premium * 100)));
         if (contracts < 1) return;
 
         optExec.buyPut(symbol, K, expiry, contracts, premium, signalStr, featureCsv);
@@ -917,8 +923,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                     + " skip: premium too low (" + String.format("%.4f", premium) + ")");
             return;
         }
-        // 5+ signal entry — highest conviction; allocate 8% of balance, up to 8 contracts.
-        int contracts = Math.min(8, (int) (account.getBalance() * 0.08 / (premium * 100)));
+        // 5+ signal entry — highest conviction; allocate 1.6× standard budget, up to 1.6× max contracts.
+        int contracts = Math.min((int) (maxContractsPerTrade * 1.6), (int) (account.getBalance() * (positionBudgetFrac * 1.6) / (premium * 100)));
         if (contracts < 1) return;
 
         if (isCall) optExec.buyCallAs(posKey, symbol, deepK, nearExpiry, contracts, premium, signalStr, featureCsv);
@@ -964,8 +970,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             researchCallback.accept(symbol + (isCall ? " NEARTERM CALL" : " NEARTERM PUT") + " skip: premium too low");
             return;
         }
-        // 4-signal entry — strong conviction; allocate 8% of balance, up to 8 contracts.
-        int contracts = Math.min(8, (int) (account.getBalance() * 0.08 / (premium * 100)));
+        // 4-signal entry — strong conviction; allocate 1.6× standard budget, up to 1.6× max contracts.
+        int contracts = Math.min((int) (maxContractsPerTrade * 1.6), (int) (account.getBalance() * (positionBudgetFrac * 1.6) / (premium * 100)));
         if (contracts < 1) return;
 
         if (isCall) optExec.buyCallAs(posKey, symbol, K, nearExpiry, contracts, premium, signalStr, featureCsv);
@@ -1007,7 +1013,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             return;
         }
         double combinedPremium = callPremium + putPremium;
-        int contracts = Math.min(5, (int) (account.getBalance() * 0.05 / (combinedPremium * 100)));
+        int contracts = Math.min(maxContractsPerTrade, (int) (account.getBalance() * positionBudgetFrac / (combinedPremium * 100)));
         if (contracts < 1) {
             researchCallback.accept(symbol + " ZERO-DTE skip: insufficient budget");
             return;

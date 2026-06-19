@@ -154,26 +154,26 @@ public class IntradayBacktestRunner {
         record RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies,
                       double dailyLossLimitPct, int reversalMinSignals, int reversalMinConsecutive, double profitTarget,
                       double overnightMinPremiumFrac, Boolean avoidOvernightHolds, LocalTime entryStartTime,
-                      LocalTime forceCloseTime) {
+                      LocalTime forceCloseTime, double positionBudgetFrac, int maxContractsPerTrade) {
             // reversal-compare: explicit reversal settings, default profit target, inherit floor/overnight from cfg
             RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies,
                    double dailyLossLimitPct, int reversalMinSignals, int reversalMinConsecutive) {
-                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, reversalMinSignals, reversalMinConsecutive, 2.5, -1, null, null, null);
+                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, reversalMinSignals, reversalMinConsecutive, 2.5, -1, null, null, null, -1, 0);
             }
             // most modes: optimal reversal settings + default profit target, inherit floor/overnight from cfg
             RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies, double dailyLossLimitPct) {
-                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, 5, 2, 2.5, -1, null, null, null);
+                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, 5, 2, 2.5, -1, null, null, null, -1, 0);
             }
             // profit-target-compare: explicit profit target, inherit floor/overnight
             RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies,
                    double dailyLossLimitPct, int reversalMinSignals, int reversalMinConsecutive, double profitTarget) {
-                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, reversalMinSignals, reversalMinConsecutive, profitTarget, -1, null, null, null);
+                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, reversalMinSignals, reversalMinConsecutive, profitTarget, -1, null, null, null, -1, 0);
             }
             // overnight-floor-compare: explicit floor, inherit overnight
             RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies,
                    double dailyLossLimitPct, int reversalMinSignals, int reversalMinConsecutive, double profitTarget,
                    double overnightMinPremiumFrac) {
-                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, reversalMinSignals, reversalMinConsecutive, profitTarget, overnightMinPremiumFrac, null, null, null);
+                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, reversalMinSignals, reversalMinConsecutive, profitTarget, overnightMinPremiumFrac, null, null, null, -1, 0);
             }
         }
 
@@ -263,10 +263,10 @@ public class IntradayBacktestRunner {
         } else if ("avoid-overnight-compare".equals(mode)) {
             runs.add(new RunCfg(String.format("%-44s", "avoidOvernightHolds=false (baseline)"),
                     baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct,
-                    5, 2, cfg.getProfitTarget(), cfg.getOvernightMinPremiumFrac(), false, null, null));
+                    5, 2, cfg.getProfitTarget(), cfg.getOvernightMinPremiumFrac(), false, null, null, -1, 0));
             runs.add(new RunCfg(String.format("%-44s", "avoidOvernightHolds=true  (EOD force-close)"),
                     baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct,
-                    5, 2, cfg.getProfitTarget(), cfg.getOvernightMinPremiumFrac(), true, null, null));
+                    5, 2, cfg.getProfitTarget(), cfg.getOvernightMinPremiumFrac(), true, null, null, -1, 0));
         } else if ("orb-optimize".equals(mode)) {
             // OPENING_BREAKOUT alone is the anchor; test each complement pair/triple.
             Set<String> orb = Set.of("OPENING_BREAKOUT");
@@ -314,7 +314,7 @@ public class IntradayBacktestRunner {
                 String label = String.format("%-38s", "entry start " + tag);
                 runs.add(new RunCfg(label, baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(),
                         defaultLossLimitPct, 5, 2, cfg.getProfitTarget(),
-                        cfg.getOvernightMinPremiumFrac(), null, t, null));
+                        cfg.getOvernightMinPremiumFrac(), null, t, null, -1, 0));
             }
         } else if ("exit-cutoff-compare".equals(mode)) {
             // Vary the EOD force-close time (normally 15:45). Earlier = fewer overnight-ish risks;
@@ -334,7 +334,28 @@ public class IntradayBacktestRunner {
                 String label = String.format("%-38s", "force-close at " + fct + tag);
                 runs.add(new RunCfg(label, baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(),
                         defaultLossLimitPct, 5, 2, cfg.getProfitTarget(),
-                        cfg.getOvernightMinPremiumFrac(), null, null, fct));
+                        cfg.getOvernightMinPremiumFrac(), null, null, fct, -1, 0));
+            }
+        } else if ("position-size-compare".equals(mode)) {
+            // Vary per-trade position size (budget fraction + matching contract cap).
+            // Standard tier (CALL/PUT/STOCH/MACD/ORB) uses these values directly;
+            // high-conviction tier (HIGH_DELTA, NEARTERM_MOM) uses 1.6× both.
+            record SizeCfg(double budgetFrac, int maxContracts) {}
+            List<SizeCfg> sizes = List.of(
+                new SizeCfg(0.02,  2),
+                new SizeCfg(0.03,  3),
+                new SizeCfg(0.05,  5),   // current default
+                new SizeCfg(0.07,  7),
+                new SizeCfg(0.10, 10),
+                new SizeCfg(0.15, 15)
+            );
+            for (SizeCfg sc : sizes) {
+                String tag = sc.budgetFrac() == 0.05 ? " (current)" : "";
+                String label = String.format("%-42s", String.format("%.0f%% budget / %d contracts%s",
+                        sc.budgetFrac() * 100, sc.maxContracts(), tag));
+                runs.add(new RunCfg(label, baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(),
+                        defaultLossLimitPct, 5, 2, cfg.getProfitTarget(),
+                        cfg.getOvernightMinPremiumFrac(), null, null, null, sc.budgetFrac(), sc.maxContracts()));
             }
         } else if ("today-compare".equals(mode)) {
             runs.add(new RunCfg("TODAY " + endDate + ": current config", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct));
@@ -378,6 +399,10 @@ public class IntradayBacktestRunner {
             if (effectiveStartTime != null) router.setEntryStartTime(effectiveStartTime);
             LocalTime effectiveForceClose = cfg2.forceCloseTime() != null ? cfg2.forceCloseTime() : cfg.getOptionsForceCloseTime();
             if (effectiveForceClose != null) router.setForceCloseTime(effectiveForceClose);
+            double effectiveBudgetFrac = cfg2.positionBudgetFrac() > 0 ? cfg2.positionBudgetFrac() : cfg.getPositionBudgetFrac();
+            int effectiveMaxContracts  = cfg2.maxContractsPerTrade() > 0 ? cfg2.maxContractsPerTrade() : cfg.getMaxContractsPerTrade();
+            router.setPositionBudgetFrac(effectiveBudgetFrac);
+            router.setMaxContractsPerTrade(effectiveMaxContracts);
             router.setStopLossFrac(cfg.getOptionsStopLossFrac());
             boolean avoidOvernight = cfg2.avoidOvernightHolds() != null ? cfg2.avoidOvernightHolds() : cfg.isAvoidOvernightHolds();
             router.setAvoidOvernightHolds(avoidOvernight);
@@ -416,7 +441,7 @@ public class IntradayBacktestRunner {
             if (!keepFull || "strategy-compare".equals(mode) || "reversal-compare".equals(mode)
                     || "overnight-floor-compare".equals(mode) || "avoid-overnight-compare".equals(mode)
                     || "orb-optimize".equals(mode) || "entry-start-compare".equals(mode)
-                    || "exit-cutoff-compare".equals(mode)) {
+                    || "exit-cutoff-compare".equals(mode) || "position-size-compare".equals(mode)) {
                 summaries.add(new RunSummary(cfg2.label().trim(), cfg2.strategies(),
                         r.getTotalReturnPct(), r.getMaxDrawdownPct(),
                         r.getTotalTrades(), r.getWins(), r.getLosses()));
@@ -489,6 +514,20 @@ public class IntradayBacktestRunner {
             for (RunSummary s : summaries) {
                 double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
                 System.out.printf("%-40s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
+                        s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
+            }
+            appendHistorySummaries(cfg, summaries, startDate, endDate);
+            System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
+            return;
+        }
+
+        if ("position-size-compare".equals(mode)) {
+            summaries.sort(Comparator.comparingDouble(RunSummary::returnPct).reversed());
+            System.out.printf("%n%-44s  %8s  %8s  %7s  %7s%n", "Position Size Config", "Return", "MaxDD", "Trades", "WinRate");
+            System.out.println("-".repeat(87));
+            for (RunSummary s : summaries) {
+                double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
+                System.out.printf("%-44s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
                         s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
             }
             appendHistorySummaries(cfg, summaries, startDate, endDate);

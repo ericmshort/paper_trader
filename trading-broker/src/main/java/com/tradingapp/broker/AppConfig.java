@@ -68,6 +68,10 @@ public class AppConfig {
     private LocalTime optionsEntryStartTime = null;
     // EOD force-close time for options positions (null = use default 15:45).
     private LocalTime optionsForceCloseTime = null;
+    // Per-trade position sizing: budget fraction of account balance (standard tier, default 0.05).
+    private double positionBudgetFrac   = 0.05;
+    // Max contracts per trade for standard-tier strategies (default 5).
+    private int    maxContractsPerTrade = 5;
     // Consecutive same-direction ticks required before opening a new options position (default 1 = no filter).
     private int entryConfirmationTicks = 1;
     // When avoidOvernightHolds=false, close EOD positions below this fraction of entry premium (0.0 = hold all).
@@ -184,6 +188,14 @@ public class AppConfig {
                 catch (DateTimeParseException ignored) {}
             }
             try {
+                config.positionBudgetFrac = Double.parseDouble(
+                        props.getProperty("options.position_budget_frac", "0.05"));
+            } catch (NumberFormatException ignored) {}
+            try {
+                config.maxContractsPerTrade = Integer.parseInt(
+                        props.getProperty("options.max_contracts_per_trade", "5"));
+            } catch (NumberFormatException ignored) {}
+            try {
                 config.entryConfirmationTicks = Integer.parseInt(
                         props.getProperty("options.entry_confirmation_ticks", "1"));
             } catch (NumberFormatException ignored) {}
@@ -247,6 +259,8 @@ public class AppConfig {
             props.setProperty("options.entry_cutoff", optionsEntryCutoff != null ? optionsEntryCutoff.toString() : "");
             props.setProperty("options.entry_start_time", optionsEntryStartTime != null ? optionsEntryStartTime.toString() : "");
             props.setProperty("options.force_close_time", optionsForceCloseTime != null ? optionsForceCloseTime.toString() : "");
+            props.setProperty("options.position_budget_frac", String.valueOf(positionBudgetFrac));
+            props.setProperty("options.max_contracts_per_trade", String.valueOf(maxContractsPerTrade));
             props.setProperty("options.entry_confirmation_ticks", String.valueOf(entryConfirmationTicks));
             props.setProperty("options.overnight_min_premium_frac", String.valueOf(overnightMinPremiumFrac));
             props.setProperty("options.trading.enabled", String.valueOf(optionsTradingEnabled));
@@ -352,6 +366,10 @@ public class AppConfig {
     public void setOptionsEntryStartTime(LocalTime t) { this.optionsEntryStartTime = t; }
     public LocalTime getOptionsForceCloseTime() { return optionsForceCloseTime; }
     public void setOptionsForceCloseTime(LocalTime t) { this.optionsForceCloseTime = t; }
+    public double getPositionBudgetFrac() { return positionBudgetFrac; }
+    public void setPositionBudgetFrac(double v) { this.positionBudgetFrac = v; }
+    public int getMaxContractsPerTrade() { return maxContractsPerTrade; }
+    public void setMaxContractsPerTrade(int v) { this.maxContractsPerTrade = v; }
 
     public int getEntryConfirmationTicks() { return entryConfirmationTicks; }
     public void setEntryConfirmationTicks(int n) { this.entryConfirmationTicks = n; }
