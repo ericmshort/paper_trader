@@ -74,8 +74,23 @@ public class AppConfig {
     private double trailingStopPct = 0.04;
     private double maxLossPerTradePct = 0.003;
     private double circuitBreakerPct = 0.02;
-    private List<String> stockWatchlist = new ArrayList<>();
-    private List<String> optionsWatchlist = new ArrayList<>();
+    private List<String> stockWatchlist = new ArrayList<>(Arrays.asList(
+        "AAPL", "MSFT", "AMZN", "META", "NVDA",
+        "BRK-B", "TSLA", "UNH", "XOM", "JNJ",
+        "PG", "MA", "CVX", "LLY", "ABBV",
+        "PEP", "WMT", "CSCO", "TMO", "ABT",
+        "MCD", "DHR", "ADBE", "CRM", "TXN",
+        "NEE", "PM", "UPS", "QCOM", "LIN",
+        "MDLZ", "CAT"
+    ));
+    private List<String> optionsWatchlist = new ArrayList<>(Arrays.asList(
+        "SPY", "NOC", "NVDA", "MSFT", "COST",
+        "VRTX", "AMGN", "CRWD", "GS", "PLTR",
+        "LRCX", "DE", "ORCL", "LLY", "BLK",
+        "NOW", "MA", "REGN", "META", "AMAT",
+        "KLAC", "CAT", "UNH", "LMT", "JPM",
+        "MU", "HD", "MCD", "V"
+    ));
 
     public static AppConfig load() {
         AppConfig config = new AppConfig();
