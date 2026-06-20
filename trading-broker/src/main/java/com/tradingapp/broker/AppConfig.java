@@ -72,6 +72,9 @@ public class AppConfig {
     private double positionBudgetFrac   = 0.05;
     // Max contracts per trade for standard-tier strategies (default 5).
     private int    maxContractsPerTrade = 5;
+    // Bars the portfolio must stay below the daily loss threshold before the halt fires (0 = immediate).
+    // In live 5-second tick mode, 12 bars ≈ 1 minute — guards against momentary bad ticks.
+    private int lossLimitRecoveryBars = 0;
     // Consecutive same-direction ticks required before opening a new options position (default 1 = no filter).
     private int entryConfirmationTicks = 1;
     // When avoidOvernightHolds=false, close EOD positions below this fraction of entry premium (0.0 = hold all).
@@ -196,6 +199,10 @@ public class AppConfig {
                         props.getProperty("options.max_contracts_per_trade", "5"));
             } catch (NumberFormatException ignored) {}
             try {
+                config.lossLimitRecoveryBars = Integer.parseInt(
+                        props.getProperty("risk.loss_limit_recovery_bars", "0"));
+            } catch (NumberFormatException ignored) {}
+            try {
                 config.entryConfirmationTicks = Integer.parseInt(
                         props.getProperty("options.entry_confirmation_ticks", "1"));
             } catch (NumberFormatException ignored) {}
@@ -261,6 +268,7 @@ public class AppConfig {
             props.setProperty("options.force_close_time", optionsForceCloseTime != null ? optionsForceCloseTime.toString() : "");
             props.setProperty("options.position_budget_frac", String.valueOf(positionBudgetFrac));
             props.setProperty("options.max_contracts_per_trade", String.valueOf(maxContractsPerTrade));
+            props.setProperty("risk.loss_limit_recovery_bars", String.valueOf(lossLimitRecoveryBars));
             props.setProperty("options.entry_confirmation_ticks", String.valueOf(entryConfirmationTicks));
             props.setProperty("options.overnight_min_premium_frac", String.valueOf(overnightMinPremiumFrac));
             props.setProperty("options.trading.enabled", String.valueOf(optionsTradingEnabled));
@@ -370,6 +378,8 @@ public class AppConfig {
     public void setPositionBudgetFrac(double v) { this.positionBudgetFrac = v; }
     public int getMaxContractsPerTrade() { return maxContractsPerTrade; }
     public void setMaxContractsPerTrade(int v) { this.maxContractsPerTrade = v; }
+    public int getLossLimitRecoveryBars() { return lossLimitRecoveryBars; }
+    public void setLossLimitRecoveryBars(int v) { this.lossLimitRecoveryBars = v; }
 
     public int getEntryConfirmationTicks() { return entryConfirmationTicks; }
     public void setEntryConfirmationTicks(int n) { this.entryConfirmationTicks = n; }

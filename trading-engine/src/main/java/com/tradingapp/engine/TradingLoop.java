@@ -93,6 +93,10 @@ public class TradingLoop implements Runnable {
     private double maxLossPerTradePct = 0.003;
     private double circuitBreakerPct = 0.02;
     private boolean circuitBreakerFired = false;
+    // How many consecutive bars the portfolio must remain below the loss limit before the halt fires.
+    // 0 = immediate (current behavior). 1 = give it 1 bar (~1 min) to recover first.
+    private int lossLimitRecoveryBars = 0;
+    private int lossLimitBreachCount  = 0;
     private Set<String> stockWatchlist = null; // null = all symbols eligible
     private CandleHistory candleHistory;
     private NewsSentimentCache sentimentCache;
@@ -175,6 +179,7 @@ public class TradingLoop implements Runnable {
     }
 
     public void setDailyLossLimitPct(double pct) { this.dailyLossLimitPct = pct; }
+    public void setLossLimitRecoveryBars(int n)  { this.lossLimitRecoveryBars = n; }
     public void setAccurateOptionsValuation(boolean v) { this.accurateOptionsValuation = v; }
     public void setMaxPortfolioExposure(double fraction) { this.maxPortfolioExposure = fraction; }
     public void setTransactionLog(TransactionLog log) { this.transactionLog = log; }
@@ -242,6 +247,7 @@ public class TradingLoop implements Runnable {
                     dayStartValue = account.getBalance() + stockMV;
                 }
                 account.setDailyLossHalted(false);
+                lossLimitBreachCount = 0;
                 // Re-evaluate immediately: if the app was restarted after hitting the loss limit
                 // intraday, dayStartValue is set from yesterday's close but the portfolio is already
                 // depleted. Without this check, the halt is cleared and trading resumes from the
@@ -318,10 +324,15 @@ public class TradingLoop implements Runnable {
                         .mapToDouble(Position::getMarketValue).sum();
                 double currentValue = account.getBalance() + stockValue + optionsValue;
                 if (currentValue < dayStartValue * (1 - dailyLossLimitPct)) {
-                    account.setDailyLossHalted(true);
-                    researchCallback.accept(String.format(
-                            "DAILY LOSS LIMIT (%.0f%%) reached — no new positions for the rest of the session",
-                            dailyLossLimitPct * 100));
+                    lossLimitBreachCount++;
+                    if (lossLimitBreachCount > lossLimitRecoveryBars) {
+                        account.setDailyLossHalted(true);
+                        researchCallback.accept(String.format(
+                                "DAILY LOSS LIMIT (%.0f%%) reached — no new positions for the rest of the session",
+                                dailyLossLimitPct * 100));
+                    }
+                } else {
+                    lossLimitBreachCount = 0; // recovered within the window — reset
                 }
             }
 
