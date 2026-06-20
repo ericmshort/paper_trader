@@ -159,22 +159,22 @@ public class IntradayBacktestRunner {
             // reversal-compare: explicit reversal settings, default profit target, inherit floor/overnight from cfg
             RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies,
                    double dailyLossLimitPct, int reversalMinSignals, int reversalMinConsecutive) {
-                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, reversalMinSignals, reversalMinConsecutive, 2.5, -1, null, null, null, -1, 0, 0, 1);
+                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, reversalMinSignals, reversalMinConsecutive, 2.5, -1, null, null, null, -1, 0, 0, 0);
             }
             // most modes: optimal reversal settings + default profit target, inherit floor/overnight from cfg
             RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies, double dailyLossLimitPct) {
-                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, 5, 2, 2.5, -1, null, null, null, -1, 0, 0, 1);
+                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, 5, 2, 2.5, -1, null, null, null, -1, 0, 0, 0);
             }
             // profit-target-compare: explicit profit target, inherit floor/overnight
             RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies,
                    double dailyLossLimitPct, int reversalMinSignals, int reversalMinConsecutive, double profitTarget) {
-                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, reversalMinSignals, reversalMinConsecutive, profitTarget, -1, null, null, null, -1, 0, 0, 1);
+                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, reversalMinSignals, reversalMinConsecutive, profitTarget, -1, null, null, null, -1, 0, 0, 0);
             }
             // overnight-floor-compare: explicit floor, inherit overnight
             RunCfg(String label, List<String> watchlist, Set<String> optAllowlist, Set<String> strategies,
                    double dailyLossLimitPct, int reversalMinSignals, int reversalMinConsecutive, double profitTarget,
                    double overnightMinPremiumFrac) {
-                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, reversalMinSignals, reversalMinConsecutive, profitTarget, overnightMinPremiumFrac, null, null, null, -1, 0, 0, 1);
+                this(label, watchlist, optAllowlist, strategies, dailyLossLimitPct, reversalMinSignals, reversalMinConsecutive, profitTarget, overnightMinPremiumFrac, null, null, null, -1, 0, 0, 0);
             }
         }
 
@@ -264,10 +264,10 @@ public class IntradayBacktestRunner {
         } else if ("avoid-overnight-compare".equals(mode)) {
             runs.add(new RunCfg(String.format("%-44s", "avoidOvernightHolds=false (baseline)"),
                     baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct,
-                    5, 2, cfg.getProfitTarget(), cfg.getOvernightMinPremiumFrac(), false, null, null, -1, 0, 0, 1));
+                    5, 2, cfg.getProfitTarget(), cfg.getOvernightMinPremiumFrac(), false, null, null, -1, 0, 0, 0));
             runs.add(new RunCfg(String.format("%-44s", "avoidOvernightHolds=true  (EOD force-close)"),
                     baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct,
-                    5, 2, cfg.getProfitTarget(), cfg.getOvernightMinPremiumFrac(), true, null, null, -1, 0, 0, 1));
+                    5, 2, cfg.getProfitTarget(), cfg.getOvernightMinPremiumFrac(), true, null, null, -1, 0, 0, 0));
         } else if ("orb-optimize".equals(mode)) {
             // OPENING_BREAKOUT alone is the anchor; test each complement pair/triple.
             Set<String> orb = Set.of("OPENING_BREAKOUT");
@@ -315,7 +315,7 @@ public class IntradayBacktestRunner {
                 String label = String.format("%-38s", "entry start " + tag);
                 runs.add(new RunCfg(label, baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(),
                         defaultLossLimitPct, 5, 2, cfg.getProfitTarget(),
-                        cfg.getOvernightMinPremiumFrac(), null, t, null, -1, 0, 0, 1));
+                        cfg.getOvernightMinPremiumFrac(), null, t, null, -1, 0, 0, 0));
             }
         } else if ("exit-cutoff-compare".equals(mode)) {
             // Vary the EOD force-close time (normally 15:45). Earlier = fewer overnight-ish risks;
@@ -335,7 +335,7 @@ public class IntradayBacktestRunner {
                 String label = String.format("%-38s", "force-close at " + fct + tag);
                 runs.add(new RunCfg(label, baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(),
                         defaultLossLimitPct, 5, 2, cfg.getProfitTarget(),
-                        cfg.getOvernightMinPremiumFrac(), null, null, fct, -1, 0, 0, 1));
+                        cfg.getOvernightMinPremiumFrac(), null, null, fct, -1, 0, 0, 0));
             }
         } else if ("entry-confirmation-compare".equals(mode)) {
             // Each bar = 1 minute in the backtest. In live 5-second tick mode, multiply by 12
@@ -356,7 +356,7 @@ public class IntradayBacktestRunner {
                 String label = String.format("%-44s", "loss-limit recovery " + recoveryBars + tag);
                 runs.add(new RunCfg(label, baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(),
                         defaultLossLimitPct, 5, 2, cfg.getProfitTarget(),
-                        cfg.getOvernightMinPremiumFrac(), null, null, null, -1, 0, recoveryBars, 1));
+                        cfg.getOvernightMinPremiumFrac(), null, null, null, -1, 0, recoveryBars, 0));
             }
         } else if ("position-size-compare".equals(mode)) {
             // Vary per-trade position size (budget fraction + matching contract cap).
@@ -377,7 +377,7 @@ public class IntradayBacktestRunner {
                         sc.budgetFrac() * 100, sc.maxContracts(), tag));
                 runs.add(new RunCfg(label, baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(),
                         defaultLossLimitPct, 5, 2, cfg.getProfitTarget(),
-                        cfg.getOvernightMinPremiumFrac(), null, null, null, sc.budgetFrac(), sc.maxContracts(), 0, 1));
+                        cfg.getOvernightMinPremiumFrac(), null, null, null, sc.budgetFrac(), sc.maxContracts(), 0, 0));
             }
         } else if ("today-compare".equals(mode)) {
             runs.add(new RunCfg("TODAY " + endDate + ": current config", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct));
@@ -436,7 +436,12 @@ public class IntradayBacktestRunner {
             router.setReversalMinSignals(cfg2.reversalMinSignals());
             router.setReversalMinConsecutive(cfg2.reversalMinConsecutive());
             router.setProfitTarget(cfg2.profitTarget());
-            router.setEntryConfirmationTicks(cfg2.entryConfirmationTicks());
+            // cfg2.entryConfirmationTicks() is in 1-min bar units (backtest native).
+            // cfg.getEntryConfirmationTicks() is in live 5-second tick units — divide by 12 to convert to bars.
+            int effectiveConfirmBars = cfg2.entryConfirmationTicks() > 0
+                    ? cfg2.entryConfirmationTicks()
+                    : Math.max(1, cfg.getEntryConfirmationTicks() / 12);
+            router.setEntryConfirmationTicks(effectiveConfirmBars);
             double floorFrac = cfg2.overnightMinPremiumFrac() >= 0 ? cfg2.overnightMinPremiumFrac() : cfg.getOvernightMinPremiumFrac();
             router.setOvernightMinPremiumFrac(floorFrac);
 
