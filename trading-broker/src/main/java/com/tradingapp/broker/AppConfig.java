@@ -83,6 +83,8 @@ public class AppConfig {
     private double trailingStopPct = 0.02;
     private double maxLossPerTradePct = 0.005;
     private double circuitBreakerPct = 0.02;
+    // IV surge guard: block options entry when recent vol > N× long-term vol (default 1.5×).
+    private double ivSurgeThreshold = 1.5;
     private List<String> stockWatchlist = new ArrayList<>(Arrays.asList(
         "AAPL", "MSFT", "AMZN", "META", "NVDA",
         "XOM", "JNJ", "PG", "CVX", "LLY",
@@ -224,6 +226,10 @@ public class AppConfig {
                 config.circuitBreakerPct = Double.parseDouble(
                         props.getProperty("risk.circuit_breaker_pct", "0.02"));
             } catch (NumberFormatException ignored) {}
+            try {
+                config.ivSurgeThreshold = Double.parseDouble(
+                        props.getProperty("options.iv_surge_threshold", "1.5"));
+            } catch (NumberFormatException ignored) {}
             String stockWatchlistRaw = props.getProperty("stock.watchlist", "");
             if (!stockWatchlistRaw.isBlank()) {
                 config.stockWatchlist = Arrays.stream(stockWatchlistRaw.split(","))
@@ -275,6 +281,7 @@ public class AppConfig {
             props.setProperty("risk.trailing_stop_pct", String.valueOf(trailingStopPct));
             props.setProperty("risk.max_loss_per_trade_pct", String.valueOf(maxLossPerTradePct));
             props.setProperty("risk.circuit_breaker_pct", String.valueOf(circuitBreakerPct));
+            props.setProperty("options.iv_surge_threshold", String.valueOf(ivSurgeThreshold));
             props.setProperty("stock.watchlist", String.join(",", stockWatchlist));
             props.setProperty("options.watchlist", String.join(",", optionsWatchlist));
             try (OutputStream out = Files.newOutputStream(CONFIG_PATH)) {
@@ -385,6 +392,8 @@ public class AppConfig {
     public void setEntryConfirmationTicks(int n) { this.entryConfirmationTicks = n; }
 
     public double getOvernightMinPremiumFrac() { return overnightMinPremiumFrac; }
+    public double getIvSurgeThreshold() { return ivSurgeThreshold; }
+    public void setIvSurgeThreshold(double v) { this.ivSurgeThreshold = v; }
     public void setOvernightMinPremiumFrac(double frac) { this.overnightMinPremiumFrac = frac; }
 
     public boolean isOptionsTradingEnabled() { return optionsTradingEnabled; }

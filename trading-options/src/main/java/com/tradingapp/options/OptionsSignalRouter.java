@@ -54,8 +54,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     private static final double RISK_FREE_RATE  = 0.04;
     private static final double MIN_PREMIUM     = 1.50;  // $150/contract minimum to cover fees
     private double maxPortfolioExposure         = 0.60;
-    private static final double IV_SURGE_THRESHOLD = 1.2;  // skip if recent vol > 1.2x long-term (IV crush guard)
-    private static final int    IV_WINDOW          = 20;
+    private double ivSurgeThreshold              = 1.5;   // skip if recent vol > N× long-term (IV crush guard)
+    private static final int IV_WINDOW           = 20;
     // Exit when premium reaches this multiple of entry (configurable; default 2x).
     private double profitTarget                     = 2.0;
     // Exit when premium drops to this fraction of entry (configurable; default 50%).
@@ -147,6 +147,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     public void setMaxContractsPerTrade(int n)               { this.maxContractsPerTrade = n; }
     public void setEntryConfirmationTicks(int n)              { this.entryConfirmationTicks = n; }
     public void setOvernightMinPremiumFrac(double frac)       { this.overnightMinPremiumFrac = frac; }
+    public void setIvSurgeThreshold(double threshold)         { this.ivSurgeThreshold = threshold; }
     private boolean isStrategyEnabled(String name) { return enabledStrategies.isEmpty() || enabledStrategies.contains(name); }
 
     public OptionsSignalRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
@@ -379,10 +380,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         if (prices.size() >= IV_WINDOW + 2) {
             double recentVol = bsEngine.historicalVol(
                     prices.subList(prices.size() - IV_WINDOW, prices.size()));
-            if (recentVol > sigma * IV_SURGE_THRESHOLD) {
+            if (recentVol > sigma * ivSurgeThreshold) {
                 researchCallback.accept(symbol + " options skip: IV surge "
                         + String.format("%.4f", recentVol) + " > "
-                        + String.format("%.4f", sigma * IV_SURGE_THRESHOLD));
+                        + String.format("%.4f", sigma * ivSurgeThreshold));
                 return;
             }
         }

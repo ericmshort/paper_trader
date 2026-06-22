@@ -179,6 +179,7 @@ public class DashboardController implements Initializable {
                     optionsRouter.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
                     optionsRouter.setEntryConfirmationTicks(cfg.getEntryConfirmationTicks());
                     optionsRouter.setOvernightMinPremiumFrac(cfg.getOvernightMinPremiumFrac());
+                    optionsRouter.setIvSurgeThreshold(cfg.getIvSurgeThreshold());
                     optionsRouter.setStopLossFrac(cfg.getOptionsStopLossFrac());
                     optionsRouter.setProfitTarget(cfg.getProfitTarget());
                     optionsRouter.setReversalMinSignals(cfg.getReversalMinSignals());
@@ -343,6 +344,7 @@ public class DashboardController implements Initializable {
         optionsRouter.setAvoidOvernightHolds(appConfig.isAvoidOvernightHolds());
         optionsRouter.setEntryConfirmationTicks(appConfig.getEntryConfirmationTicks());
         optionsRouter.setOvernightMinPremiumFrac(appConfig.getOvernightMinPremiumFrac());
+        optionsRouter.setIvSurgeThreshold(appConfig.getIvSurgeThreshold());
         tradingLoop.setMarketRegimeFilterEnabled(appConfig.isMarketRegimeFilterEnabled());
         tradingLoop.setEarningsCalendar(earningsCalendar);
         tradingLoop.setEarningsBlackoutDays(appConfig.getEarningsBlackoutDays());

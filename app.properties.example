@@ -26,6 +26,9 @@ options.stop_loss_frac=0.30
 options.downtrend_put_min_signals=3
 options.entry_cutoff=14:45
 
+# IV surge guard: skip entry when recent 20-bar vol exceeds N× long-term vol (1.5 = recommended; 99 = disabled)
+options.iv_surge_threshold=1.5
+
 # --- Options filters ---
 # 30-symbol options allowlist: top 30 by 2-year net P&L across 100-symbol MasterUniverse (COIN excluded)
 options.symbol.allowlist=SPY,NOC,NVDA,MSFT,COST,VRTX,AMGN,CRWD,RTX,GD,GS,AVGO,LRCX,XOM,ADBE,WMT,TGT,DE,ORCL,AMZN,PG,LLY,PANW,BLK,NOW,MA,REGN,META,MS,AMAT
