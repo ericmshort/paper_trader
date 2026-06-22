@@ -194,6 +194,14 @@ public class IntradayBacktestRunner {
         } else if ("loss-limit-compare".equals(mode)) {
             runs.add(new RunCfg("Daily loss limit  5% (baseline)", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), 5.0));
             runs.add(new RunCfg("Daily loss limit 10%",            baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), 10.0));
+        } else if ("add-strategy-compare".equals(mode)) {
+            // 2-run compare: current config (baseline) vs current config + one additional strategy.
+            // Specify strategy via -Dbacktest.addStrategy=RELATIVE_STRENGTH_DIVERGENCE
+            String addStrategy = System.getProperty("backtest.addStrategy", "RELATIVE_STRENGTH_DIVERGENCE");
+            Set<String> withExtra = new java.util.LinkedHashSet<>(cfg.getEnabledStrategies());
+            withExtra.add(addStrategy);
+            runs.add(new RunCfg(String.format("%-44s", "Baseline: " + cfg.getEnabledStrategies()), baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct));
+            runs.add(new RunCfg(String.format("%-44s", "Baseline + " + addStrategy), baseWatchlist, BASE_OPTS, Set.copyOf(withExtra), defaultLossLimitPct));
         } else if ("add-candidates".equals(mode)) {
             // Clean 2-run compare: baseline vs baseline + all newCandidates combined
             List<String> allWl = new ArrayList<>(baseWatchlist);
@@ -465,7 +473,7 @@ public class IntradayBacktestRunner {
             // Keep full results for single-run and small 2-run compares; use summaries for large multi-run modes.
             boolean keepFull = newCandidates.isEmpty() || cfg2.label().startsWith("ALL:")
                     || "loss-limit-compare".equals(mode) || "add-candidates".equals(mode)
-                    || "today-compare".equals(mode);
+                    || "add-strategy-compare".equals(mode) || "today-compare".equals(mode);
             if (!keepFull || "strategy-compare".equals(mode) || "reversal-compare".equals(mode)
                     || "overnight-floor-compare".equals(mode) || "avoid-overnight-compare".equals(mode)
                     || "orb-optimize".equals(mode) || "entry-start-compare".equals(mode)

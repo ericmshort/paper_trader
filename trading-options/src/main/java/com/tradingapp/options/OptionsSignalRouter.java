@@ -381,8 +381,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                     prices.subList(prices.size() - IV_WINDOW, prices.size()));
             if (recentVol > sigma * IV_SURGE_THRESHOLD) {
                 researchCallback.accept(symbol + " options skip: IV surge "
-                        + String.format("%.2f", recentVol) + " > "
-                        + String.format("%.2f", sigma * IV_SURGE_THRESHOLD));
+                        + String.format("%.4f", recentVol) + " > "
+                        + String.format("%.4f", sigma * IV_SURGE_THRESHOLD));
                 return;
             }
         }
