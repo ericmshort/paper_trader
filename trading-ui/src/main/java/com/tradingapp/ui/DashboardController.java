@@ -131,6 +131,8 @@ public class DashboardController implements Initializable {
     // Coalesces concurrent refresh requests: at most one applyUiSnapshot is queued in the FX
     // event loop at any time. The FX thread always applies the latest snapshot.
     private final AtomicReference<UiSnapshot> pendingSnapshot = new AtomicReference<>();
+    private ScrollPane researchScrollPane;
+    private boolean researchUserScrolledUp = false;
 
     private static final Logger LOG = Logger.getLogger(DashboardController.class.getName());
     private final TradingLogger tradingLogger = new TradingLogger();
@@ -153,6 +155,19 @@ public class DashboardController implements Initializable {
         setupTableColumns();
         setupOptionsTableColumns();
         setupStockTableColumns();
+
+        // Cache the internal ScrollPane once the skin is applied, then track whether the user
+        // has scrolled up so we can suppress auto-scroll during ticks.
+        researchArea.skinProperty().addListener((obs, oldSkin, newSkin) -> {
+            if (newSkin != null) {
+                ScrollPane sp = (ScrollPane) researchArea.lookup(".scroll-pane");
+                if (sp != null) {
+                    researchScrollPane = sp;
+                    sp.vvalueProperty().addListener((o, oldV, newV) ->
+                            researchUserScrolledUp = newV.doubleValue() < sp.getVmax() - 0.01);
+                }
+            }
+        });
 
         refreshUi();
 
@@ -785,9 +800,26 @@ public class DashboardController implements Initializable {
             String existing = researchArea.getText();
             if (existing.length() > 80_000) {
                 int cut = existing.indexOf('\n', existing.length() - 60_000);
-                researchArea.setText(cut > 0 ? existing.substring(cut + 1) : existing.substring(existing.length() - 60_000));
+                existing = cut > 0 ? existing.substring(cut + 1) : existing.substring(existing.length() - 60_000);
             }
-            researchArea.appendText(logBuf.toString());
+
+            if (researchUserScrolledUp && researchScrollPane != null) {
+                // User has scrolled up to read. Use setText (scrolls to top synchronously) so that
+                // a single runLater reliably fires after the skin's scroll and can restore position.
+                double savedV = researchScrollPane.getVvalue();
+                researchArea.setText(existing + logBuf.toString());
+                final double v = savedV;
+                Platform.runLater(() -> researchScrollPane.setVvalue(v));
+            } else {
+                // User is at the bottom or scroll pane not yet available — normal auto-scroll.
+                if (existing.equals(researchArea.getText())) {
+                    researchArea.appendText(logBuf.toString());
+                } else {
+                    // Text was trimmed; setText was needed, scroll back to bottom.
+                    researchArea.setText(existing + logBuf.toString());
+                    Platform.runLater(() -> { if (researchScrollPane != null) researchScrollPane.setVvalue(researchScrollPane.getVmax()); });
+                }
+            }
         }
 
         tradeHistoryTable.setItems(FXCollections.observableArrayList(s.history()));
