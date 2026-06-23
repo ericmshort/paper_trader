@@ -512,7 +512,7 @@ public class TradingLoop implements Runnable {
                     } else if (inverseEtfSymbols.contains(symbol) ? isMarketInUptrend() : !isMarketInUptrend()) {
                         researchCallback.accept(symbol + (inverseEtfSymbols.contains(symbol)
                                 ? " BUY skipped: SPY in uptrend (inverse ETF — needs downtrend)"
-                                : " BUY skipped: SPY below 5-day MA (short-term downtrend)"));
+                                : " BUY skipped: SPY below " + regimeMaDays + "-day MA (short-term downtrend)"));
                     } else if (daysToEarnings <= earningsBlackoutDays) {
                         researchCallback.accept(symbol + " BUY skipped: earnings in "
                                 + daysToEarnings + " day" + (daysToEarnings == 1 ? "" : "s"));
