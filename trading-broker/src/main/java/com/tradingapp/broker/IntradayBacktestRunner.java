@@ -395,6 +395,70 @@ public class IntradayBacktestRunner {
             runs.add(new RunCfg(String.format("%-44s", "Baseline (IV surge guard 1.2x)"), baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct, 5, 2, 2.5, -1, null, null, null, -1, 0, 0, 0, 0.0));
             runs.add(new RunCfg(String.format("%-44s", "IV surge guard 1.5x (relaxed)"),  baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct, 5, 2, 2.5, -1, null, null, null, -1, 0, 0, 0, 1.5));
             runs.add(new RunCfg(String.format("%-44s", "IV surge guard OFF (disabled)"),   baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct, 5, 2, 2.5, -1, null, null, null, -1, 0, 0, 0, 99.0));
+        } else if ("regime-ma-compare".equals(mode)) {
+            // 2-pass comparison: 5-day MA (backtest default) vs 20-day MA (live setting).
+            // Runs inline and returns so regimeMaDays doesn't need to be threaded through RunCfg.
+            RunSummary[] maResults = new RunSummary[2];
+            int[] maDayValues = {5, 20};
+            for (int i = 0; i < maDayValues.length; i++) {
+                int ma = maDayValues[i];
+                String maLabel = String.format("%-44s", "regime MA " + ma + "-day"
+                        + (ma == 5 ? " (backtest default)" : " (live setting)  "));
+                System.out.println("\n=== " + maLabel.trim() + " ===");
+                BlackScholesEngine bs = new BlackScholesEngine();
+                bs.setVixProvider(vixCache::getVix, vixCache.baselineVix());
+                OptionsSignalRouter maRouter = new OptionsSignalRouter(
+                        bs, new OptionsOrderExecutor(new Account(), null),
+                        new Account(), new PriceHistory(), msg -> {}, null);
+                maRouter.setMaxPortfolioExposure(maxExposure);
+                maRouter.setEnabledStrategies(cfg.getEnabledStrategies());
+                if (backtestEntryStartTime != null) maRouter.setEntryStartTime(backtestEntryStartTime);
+                if (cfg.getOptionsForceCloseTime() != null) maRouter.setForceCloseTime(cfg.getOptionsForceCloseTime());
+                maRouter.setPositionBudgetFrac(cfg.getPositionBudgetFrac());
+                maRouter.setMaxContractsPerTrade(cfg.getMaxContractsPerTrade());
+                maRouter.setStopLossFrac(cfg.getOptionsStopLossFrac());
+                maRouter.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
+                if (cfg.getOptionsEntryCutoff() != null) maRouter.setEntryCutoff(cfg.getOptionsEntryCutoff());
+                maRouter.setOptionsAllowlist(BASE_OPTS);
+                maRouter.setCallsDisabledSymbols(CALLS_DISABLED);
+                maRouter.setPutsDisabledSymbols(cfg.getOptionsPutsDisabled());
+                maRouter.setDowntrendPutMinSignals(cfg.getDowntrendPutMinSignals());
+                maRouter.setReversalMinSignals(5);
+                maRouter.setReversalMinConsecutive(2);
+                maRouter.setProfitTarget(cfg.getProfitTarget());
+                maRouter.setEntryConfirmationTicks(Math.max(1, cfg.getEntryConfirmationTicks() / 12));
+                maRouter.setOvernightMinPremiumFrac(cfg.getOvernightMinPremiumFrac());
+                final int finalMa = ma;
+                long t0 = System.currentTimeMillis();
+                IntradayBacktestResult r = engine.run(baseWatchlist, barsBySymbol, 100_000.0, maRouter, msg -> {},
+                        Set.of(), loop -> {
+                            maRouter.setUptrendSupplier(loop::isUptrend);
+                            loop.setStockTradingEnabled(false);
+                            loop.setMaxConcurrentStockPositions(10);
+                            loop.setAvoidOvernightHolds(false);
+                            loop.setDailyLossLimitPct(defaultLossLimitPct / 100.0);
+                            loop.setAccurateOptionsValuation(true);
+                            loop.setRegimeMaDays(finalMa);
+                            maRouter.setClosePositionsOnHalt(true);
+                        });
+                System.out.printf("Done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
+                        (System.currentTimeMillis() - t0) / 1000.0,
+                        r.getTotalReturnPct(), r.getMaxDrawdownPct(),
+                        r.getTotalTrades(), r.getWins(), r.getLosses());
+                maResults[i] = new RunSummary(maLabel, cfg.getEnabledStrategies(),
+                        r.getTotalReturnPct(), r.getMaxDrawdownPct(),
+                        r.getTotalTrades(), r.getWins(), r.getLosses());
+            }
+            System.out.printf("%n%-46s  %8s  %8s  %7s  %7s%n", "Regime MA Config", "Return", "MaxDD", "Trades", "WinRate");
+            System.out.println("-".repeat(89));
+            for (RunSummary s : maResults) {
+                double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
+                System.out.printf("%-46s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
+                        s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
+            }
+            appendHistorySummaries(cfg, List.of(maResults[0], maResults[1]), startDate, endDate);
+            System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
+            return;
         } else if (newCandidates.isEmpty()) {
             // Watchlist is at capacity — single confirmation run with all current symbols
             runs.add(new RunCfg("FINAL: all " + baseWatchlist.size() + " symbols (capacity confirmation)", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct));

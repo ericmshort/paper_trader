@@ -378,7 +378,7 @@ public class DashboardController implements Initializable {
         tradingLoop.setMaxLossPerTradePct(appConfig.getMaxLossPerTradePct());
         tradingLoop.setCircuitBreakerPct(appConfig.getCircuitBreakerPct());
         tradingLoop.setMaxConcurrentStockPositions(8);
-        tradingLoop.setRegimeMaDays(20);
+        tradingLoop.setRegimeMaDays(5);
 
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "trading-loop");
