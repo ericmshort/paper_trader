@@ -459,6 +459,73 @@ public class IntradayBacktestRunner {
             appendHistorySummaries(cfg, List.of(maResults[0], maResults[1]), startDate, endDate);
             System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
             return;
+        } else if ("stock-compare".equals(mode)) {
+            // 2-run compare: stock trading ON (historical baseline) vs OFF (matches live config).
+            // Runs inline so the stockEnabled flag doesn't need to be threaded through RunCfg.
+            RunSummary[] stockResults = new RunSummary[2];
+            boolean[] stockEnabled = {true, false};
+            for (int i = 0; i < stockEnabled.length; i++) {
+                boolean stockOn = stockEnabled[i];
+                String stockLabel = String.format("%-44s", stockOn
+                        ? "stock trading ON  (historical baseline)"
+                        : "stock trading OFF (matches live config) ");
+                System.out.println("\n=== " + stockLabel.trim() + " ===");
+                BlackScholesEngine bsSt = new BlackScholesEngine();
+                bsSt.setVixProvider(vixCache::getVix, vixCache.baselineVix());
+                OptionsSignalRouter stRouter = new OptionsSignalRouter(
+                        bsSt, new OptionsOrderExecutor(new Account(), null),
+                        new Account(), new PriceHistory(), msg -> {}, null);
+                stRouter.setMaxPortfolioExposure(maxExposure);
+                Set<String> stStrategies = disabledStrategies.isEmpty() ? cfg.getEnabledStrategies()
+                        : cfg.getEnabledStrategies().stream().filter(s -> !disabledStrategies.contains(s))
+                                .collect(Collectors.toSet());
+                stRouter.setEnabledStrategies(stStrategies);
+                if (backtestEntryStartTime != null) stRouter.setEntryStartTime(backtestEntryStartTime);
+                if (cfg.getOptionsForceCloseTime() != null) stRouter.setForceCloseTime(cfg.getOptionsForceCloseTime());
+                stRouter.setPositionBudgetFrac(cfg.getPositionBudgetFrac());
+                stRouter.setMaxContractsPerTrade(cfg.getMaxContractsPerTrade());
+                stRouter.setStopLossFrac(cfg.getOptionsStopLossFrac());
+                stRouter.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
+                if (cfg.getOptionsEntryCutoff() != null) stRouter.setEntryCutoff(cfg.getOptionsEntryCutoff());
+                stRouter.setOptionsAllowlist(BASE_OPTS);
+                stRouter.setCallsDisabledSymbols(CALLS_DISABLED);
+                stRouter.setPutsDisabledSymbols(cfg.getOptionsPutsDisabled());
+                stRouter.setDowntrendPutMinSignals(cfg.getDowntrendPutMinSignals());
+                stRouter.setReversalMinSignals(5);
+                stRouter.setReversalMinConsecutive(2);
+                stRouter.setProfitTarget(cfg.getProfitTarget());
+                stRouter.setEntryConfirmationTicks(Math.max(1, cfg.getEntryConfirmationTicks() / 12));
+                stRouter.setOvernightMinPremiumFrac(cfg.getOvernightMinPremiumFrac());
+                final boolean finalStockOn = stockOn;
+                long t0St = System.currentTimeMillis();
+                IntradayBacktestResult stResult = engine.run(baseWatchlist, barsBySymbol, 100_000.0, stRouter, msg -> {},
+                        Set.of(), loop -> {
+                            stRouter.setUptrendSupplier(loop::isUptrend);
+                            loop.setStockTradingEnabled(finalStockOn);
+                            loop.setMaxConcurrentStockPositions(10);
+                            loop.setAvoidOvernightHolds(false);
+                            loop.setDailyLossLimitPct(defaultLossLimitPct / 100.0);
+                            loop.setAccurateOptionsValuation(true);
+                            stRouter.setClosePositionsOnHalt(true);
+                        });
+                System.out.printf("Done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
+                        (System.currentTimeMillis() - t0St) / 1000.0,
+                        stResult.getTotalReturnPct(), stResult.getMaxDrawdownPct(),
+                        stResult.getTotalTrades(), stResult.getWins(), stResult.getLosses());
+                stockResults[i] = new RunSummary(stockLabel, cfg.getEnabledStrategies(),
+                        stResult.getTotalReturnPct(), stResult.getMaxDrawdownPct(),
+                        stResult.getTotalTrades(), stResult.getWins(), stResult.getLosses());
+            }
+            System.out.printf("%n%-46s  %8s  %8s  %7s  %7s%n", "Stock Trading Config", "Return", "MaxDD", "Trades", "WinRate");
+            System.out.println("-".repeat(89));
+            for (RunSummary s : stockResults) {
+                double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
+                System.out.printf("%-46s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
+                        s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
+            }
+            appendHistorySummaries(cfg, List.of(stockResults[0], stockResults[1]), startDate, endDate);
+            System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
+            return;
         } else if (newCandidates.isEmpty()) {
             // Watchlist is at capacity — single confirmation run with all current symbols
             runs.add(new RunCfg("FINAL: all " + baseWatchlist.size() + " symbols (capacity confirmation)", baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct));
@@ -528,7 +595,7 @@ public class IntradayBacktestRunner {
             IntradayBacktestResult r = engine.run(cfg2.watchlist(), barsBySymbol, 100_000.0, router, msg -> {},
                     Set.of(), loop -> {
                         router.setUptrendSupplier(loop::isUptrend);
-                        loop.setStockTradingEnabled(false);
+                        loop.setStockTradingEnabled(cfg.isStockTradingEnabled());
                         loop.setMaxConcurrentStockPositions(10);
                         loop.setAvoidOvernightHolds(false);
                         loop.setDailyLossLimitPct(cfg2.dailyLossLimitPct() / 100.0);
