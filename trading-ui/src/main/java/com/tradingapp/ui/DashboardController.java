@@ -133,6 +133,7 @@ public class DashboardController implements Initializable {
     private final AtomicReference<UiSnapshot> pendingSnapshot = new AtomicReference<>();
     private ScrollPane researchScrollPane;
     private boolean researchUserScrolledUp = false;
+    private boolean suppressScrollTracking = false;
 
     private static final Logger LOG = Logger.getLogger(DashboardController.class.getName());
     private final TradingLogger tradingLogger = new TradingLogger();
@@ -163,8 +164,10 @@ public class DashboardController implements Initializable {
                 ScrollPane sp = (ScrollPane) researchArea.lookup(".scroll-pane");
                 if (sp != null) {
                     researchScrollPane = sp;
-                    sp.vvalueProperty().addListener((o, oldV, newV) ->
-                            researchUserScrolledUp = newV.doubleValue() < sp.getVmax() - 0.01);
+                    sp.vvalueProperty().addListener((o, oldV, newV) -> {
+                        if (!suppressScrollTracking)
+                            researchUserScrolledUp = newV.doubleValue() < sp.getVmax() - 0.01;
+                    });
                 }
             }
         });
@@ -806,20 +809,26 @@ public class DashboardController implements Initializable {
             }
 
             if (researchUserScrolledUp && researchScrollPane != null) {
-                // User has scrolled up to read. Use setText (scrolls to top synchronously) so that
-                // a single runLater reliably fires after the skin's scroll and can restore position.
+                // User has scrolled up to read. Suppress tracking so the setText scroll-to-top
+                // doesn't corrupt researchUserScrolledUp; restore saved position in runLater.
                 double savedV = researchScrollPane.getVvalue();
+                suppressScrollTracking = true;
                 researchArea.setText(existing + logBuf.toString());
                 final double v = savedV;
-                Platform.runLater(() -> researchScrollPane.setVvalue(v));
+                Platform.runLater(() -> { researchScrollPane.setVvalue(v); suppressScrollTracking = false; });
             } else {
                 // User is at the bottom or scroll pane not yet available — normal auto-scroll.
                 if (existing.equals(researchArea.getText())) {
                     researchArea.appendText(logBuf.toString());
                 } else {
-                    // Text was trimmed; setText was needed, scroll back to bottom.
+                    // Text was trimmed; setText was needed. Suppress tracking so the transient
+                    // scroll-to-top doesn't flip researchUserScrolledUp; restore bottom in runLater.
+                    suppressScrollTracking = true;
                     researchArea.setText(existing + logBuf.toString());
-                    Platform.runLater(() -> { if (researchScrollPane != null) researchScrollPane.setVvalue(researchScrollPane.getVmax()); });
+                    Platform.runLater(() -> {
+                        if (researchScrollPane != null) researchScrollPane.setVvalue(researchScrollPane.getVmax());
+                        suppressScrollTracking = false;
+                    });
                 }
             }
         }
