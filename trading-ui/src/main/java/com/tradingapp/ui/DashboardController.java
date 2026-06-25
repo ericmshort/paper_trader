@@ -391,11 +391,13 @@ public class DashboardController implements Initializable {
         // Seed daily price history so RSI and Bollinger Bands are active from the first tick.
         // Always use Yahoo Finance (free, no credentials) — Alpaca's data API requires
         // a paid subscription and fails silently, leaving RSI/BB permanently neutral.
-        // 60 calendar days gives ~43 trading days, enough for RSI(9) and BB(20) with buffer.
+        // 365 calendar days (~252 trading days) gives a stable long-term sigma baseline for
+        // the IV surge guard. 60 days was too short — a calm spring followed by any vol
+        // uptick would falsely trip the 1.5× threshold, blocking all options entries.
         HistoricalBarFetcher seedFetcher = new HistoricalBarFetcher();
         Thread seedThread = new Thread(() -> {
             LocalDate end = LocalDate.now();
-            LocalDate start = end.minusDays(60);
+            LocalDate start = end.minusDays(365);
             int seeded = 0;
             List<String> symbolsToSeed = new ArrayList<>(allSymbols);
             if (!symbolsToSeed.contains("SPY")) symbolsToSeed.add("SPY");
