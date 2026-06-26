@@ -62,8 +62,8 @@
                         </HBox>
                     </VBox>
 
-                    <!-- Section 2: Equity chart (full width) -->
-                    <VBox VBox.vgrow="ALWAYS" style="-fx-padding: 5;" spacing="3">
+                    <!-- Section 2: Equity chart (full width, compact) -->
+                    <VBox prefHeight="130" maxHeight="130" style="-fx-padding: 5;" spacing="3">
                         <Label text="Equity Curve"
                                style="-fx-font-size: 12px; -fx-font-weight: bold; -fx-text-fill: #e0e0e0;"/>
                         <LineChart fx:id="equityChart"
@@ -82,21 +82,44 @@
                         </LineChart>
                     </VBox>
 
-                    <!-- Section 3: Research + Trade history -->
-                    <HBox VBox.vgrow="ALWAYS" spacing="5" style="-fx-padding: 5;">
-                        <!-- Left: Research -->
-                        <VBox HBox.hgrow="ALWAYS" spacing="3">
-                            <Label text="Research"
-                                   style="-fx-font-size: 12px; -fx-font-weight: bold; -fx-text-fill: #e0e0e0;"/>
-                            <Separator/>
-                            <TextArea fx:id="researchArea"
-                                      editable="false"
-                                      wrapText="true"
-                                      VBox.vgrow="ALWAYS"
-                                      style="-fx-control-inner-background: #1a1a2e; -fx-text-fill: #c0c0c0; -fx-font-size: 11px;"/>
-                        </VBox>
-                        <!-- Right: Trade history -->
-                        <VBox HBox.hgrow="ALWAYS" spacing="3">
+                    <!-- Section 3: Top row (Signals 60% + Decisions 40%), Trade History below -->
+                    <VBox VBox.vgrow="ALWAYS" spacing="5" style="-fx-padding: 5;">
+
+                        <!-- Top: Signals and Decisions side by side -->
+                        <GridPane VBox.vgrow="ALWAYS" hgap="5">
+                            <columnConstraints>
+                                <ColumnConstraints percentWidth="60"/>
+                                <ColumnConstraints percentWidth="40"/>
+                            </columnConstraints>
+                            <rowConstraints>
+                                <RowConstraints vgrow="ALWAYS"/>
+                            </rowConstraints>
+                            <!-- Signals: per-tick BUY=/SELL= indicator lines -->
+                            <VBox GridPane.columnIndex="0" GridPane.vgrow="ALWAYS" spacing="3">
+                                <Label text="Signals"
+                                       style="-fx-font-size: 12px; -fx-font-weight: bold; -fx-text-fill: #e0e0e0;"/>
+                                <Separator/>
+                                <TextArea fx:id="signalsArea"
+                                          editable="false"
+                                          wrapText="true"
+                                          VBox.vgrow="ALWAYS"
+                                          style="-fx-control-inner-background: #1a1a2e; -fx-text-fill: #c0c0c0; -fx-font-size: 11px;"/>
+                            </VBox>
+                            <!-- Decisions: trade executions, skips, risk messages -->
+                            <VBox GridPane.columnIndex="1" GridPane.vgrow="ALWAYS" spacing="3">
+                                <Label text="Decisions"
+                                       style="-fx-font-size: 12px; -fx-font-weight: bold; -fx-text-fill: #e0e0e0;"/>
+                                <Separator/>
+                                <TextArea fx:id="decisionsArea"
+                                          editable="false"
+                                          wrapText="true"
+                                          VBox.vgrow="ALWAYS"
+                                          style="-fx-control-inner-background: #1a1a2e; -fx-text-fill: #c0c0c0; -fx-font-size: 11px;"/>
+                            </VBox>
+                        </GridPane>
+
+                        <!-- Trade History (full width, below) -->
+                        <VBox prefHeight="200" spacing="3">
                             <Label text="Trade History"
                                    style="-fx-font-size: 12px; -fx-font-weight: bold; -fx-text-fill: #e0e0e0;"/>
                             <Separator/>
@@ -115,7 +138,8 @@
                                 </columns>
                             </TableView>
                         </VBox>
-                    </HBox>
+
+                    </VBox>
 
                 </VBox>
             </content>

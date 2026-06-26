@@ -99,7 +99,8 @@ public class DashboardController implements Initializable {
     @FXML private TableColumn<StockPositionRow, String> stkColCurrentPrice;
     @FXML private TableColumn<StockPositionRow, String> stkColMarketValue;
     @FXML private TableColumn<StockPositionRow, String> stkColUnrealizedPnl;
-    @FXML private TextArea researchArea;
+    @FXML private TextArea signalsArea;
+    @FXML private TextArea decisionsArea;
     @FXML private TableView<TransactionRecord> tradeHistoryTable;
     @FXML private TableColumn<TransactionRecord, Long> colTimestamp;
     @FXML private TableColumn<TransactionRecord, String> colSymbol;
@@ -127,13 +128,14 @@ public class DashboardController implements Initializable {
     private XYChart.Series<Number, Number> equitySeries;
     private int tickCount = 0;
     private boolean alpacaMode = false;
-    private final ConcurrentLinkedQueue<String> pendingMessages = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<String> pendingSignals = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<String> pendingDecisions = new ConcurrentLinkedQueue<>();
     // Coalesces concurrent refresh requests: at most one applyUiSnapshot is queued in the FX
     // event loop at any time. The FX thread always applies the latest snapshot.
     private final AtomicReference<UiSnapshot> pendingSnapshot = new AtomicReference<>();
-    private ScrollPane researchScrollPane;
-    private boolean researchUserScrolledUp = false;
-    private boolean suppressScrollTracking = false;
+    private ScrollPane decisionsScrollPane;
+    private boolean decisionsUserScrolledUp = false;
+    private boolean suppressDecisionsScrollTracking = false;
 
     private static final Logger LOG = Logger.getLogger(DashboardController.class.getName());
     private final TradingLogger tradingLogger = new TradingLogger();
@@ -157,16 +159,15 @@ public class DashboardController implements Initializable {
         setupOptionsTableColumns();
         setupStockTableColumns();
 
-        // Cache the internal ScrollPane once the skin is applied, then track whether the user
-        // has scrolled up so we can suppress auto-scroll during ticks.
-        researchArea.skinProperty().addListener((obs, oldSkin, newSkin) -> {
+        // Track scroll position on the decisions panel so we don't auto-scroll while user reads.
+        decisionsArea.skinProperty().addListener((obs, oldSkin, newSkin) -> {
             if (newSkin != null) {
-                ScrollPane sp = (ScrollPane) researchArea.lookup(".scroll-pane");
+                ScrollPane sp = (ScrollPane) decisionsArea.lookup(".scroll-pane");
                 if (sp != null) {
-                    researchScrollPane = sp;
+                    decisionsScrollPane = sp;
                     sp.vvalueProperty().addListener((o, oldV, newV) -> {
-                        if (!suppressScrollTracking)
-                            researchUserScrolledUp = newV.doubleValue() < sp.getVmax() - 0.01;
+                        if (!suppressDecisionsScrollTracking)
+                            decisionsUserScrolledUp = newV.doubleValue() < sp.getVmax() - 0.01;
                     });
                 }
             }
@@ -212,7 +213,7 @@ public class DashboardController implements Initializable {
                     optionsRouter.setCallsDisabledSymbols(cfg.getOptionsCallsDisabled());
                     optionsRouter.setPutsDisabledSymbols(cfg.getOptionsPutsDisabled());
                 }
-                Platform.runLater(() -> researchArea.appendText(
+                Platform.runLater(() -> decisionsArea.appendText(
                         "\nRisk settings updated (effective next tick). Broker/quote changes take effect on next restart.\n"));
             });
             settingsPanelController.setOnBrokerReset(this::handleBrokerReset);
@@ -223,7 +224,7 @@ public class DashboardController implements Initializable {
         boolean useWsProvider = appConfig.getQuoteProviderType() == AppConfig.QuoteProviderType.ALPACA_WEBSOCKET_FREE
                 && appConfig.isAlpacaBroker();
 
-        researchArea.setText("Waiting for market data...\n\nMarket hours: 9:30 AM – 4:00 PM ET"
+        decisionsArea.setText("Waiting for market data...\n\nMarket hours: 9:30 AM – 4:00 PM ET"
                 + "\nWatching " + (useWsProvider ? "30 most-liquid day-trading symbols" : "100 large-cap and small-cap US stocks") + "."
                 + "\nBroker: " + SettingsController.brokerTypeLabel(appConfig.getBrokerType())
                 + " | Quotes: " + appConfig.getQuoteProviderType().name());
@@ -231,7 +232,7 @@ public class DashboardController implements Initializable {
         QuoteProvider quoteProvider;
         if (useWsProvider) {
             wsProvider = new AlpacaWebSocketFreeProvider(appConfig, candleHistory,
-                    msg -> Platform.runLater(() -> researchArea.appendText(msg + "\n")));
+                    msg -> Platform.runLater(() -> decisionsArea.appendText(msg + "\n")));
             wsProvider.start();
             quoteProvider = wsProvider;
         } else if (appConfig.getQuoteProviderType() == AppConfig.QuoteProviderType.ALPACA && appConfig.isAlpacaBroker()) {
@@ -263,9 +264,10 @@ public class DashboardController implements Initializable {
         }
 
         Consumer<String> researchCb = msg -> {
-            pendingMessages.add(msg);
-            // Quote lines: "HH:mm | SYMBOL $price | ... | BUY=n SELL=n" — skip those
-            if (!msg.contains("| BUY=")) {
+            if (msg.contains("| BUY=")) {
+                pendingSignals.add(msg);
+            } else {
+                pendingDecisions.add(msg);
                 tradingLogger.log(msg);
             }
         };
@@ -313,7 +315,7 @@ public class DashboardController implements Initializable {
         MLSignalEvaluator mlEval = new MLSignalEvaluator(initialWeights, weightsPath);
         Runnable trainingCallback = () -> {
             mlEval.retrain(transactionLog);
-            Platform.runLater(() -> researchArea.appendText(
+            Platform.runLater(() -> decisionsArea.appendText(
                 "ML weights updated: " + mlEval.getWeightsSummary() + "\n"));
         };
 
@@ -444,7 +446,8 @@ public class DashboardController implements Initializable {
             if (wsToStop != null) wsToStop.stop();
 
             Platform.runLater(() -> {
-                pendingMessages.clear();
+                pendingSignals.clear();
+                pendingDecisions.clear();
                 transactionLog.clearAll();
                 account.reset(newConfig.isAlpacaBroker() ? 0.0 : 100_000.0);
                 priceHistory = new PriceHistory();
@@ -452,9 +455,10 @@ public class DashboardController implements Initializable {
                 equitySeries.getData().clear();
                 tickCount = 0;
                 applyUiSnapshot(computeUiSnapshot());
-                researchArea.setText("Broker switched to "
+                decisionsArea.setText("Broker switched to "
                         + SettingsController.brokerTypeLabel(newConfig.getBrokerType())
                         + ". Historical data cleared.\nWaiting for market data...\n");
+                signalsArea.setText("");
                 startTradingComponents(newConfig);
                 if (settingsPanelController != null) {
                     settingsPanelController.setActiveBrokerType(newConfig.getBrokerType());
@@ -798,36 +802,54 @@ public class DashboardController implements Initializable {
     // Must be called on the FX thread. Only touches FX nodes.
     private void applyUiSnapshot(UiSnapshot s) {
         String msg;
-        StringBuilder logBuf = new StringBuilder();
-        while ((msg = pendingMessages.poll()) != null) logBuf.append(msg).append('\n');
-        if (logBuf.length() > 0) {
+
+        // --- Signals panel (always auto-scrolls, just a ticker) ---
+        StringBuilder signalBuf = new StringBuilder();
+        while ((msg = pendingSignals.poll()) != null) signalBuf.append(msg).append('\n');
+        if (signalBuf.length() > 0) {
+            String existing = signalsArea.getText();
+            if (existing.length() > 80_000) {
+                int cut = existing.indexOf('\n', existing.length() - 60_000);
+                existing = cut > 0 ? existing.substring(cut + 1) : existing.substring(existing.length() - 60_000);
+            }
+            if (existing.equals(signalsArea.getText())) {
+                signalsArea.appendText(signalBuf.toString());
+            } else {
+                signalsArea.setText(existing + signalBuf.toString());
+            }
+        }
+
+        // --- Decisions panel (preserve scroll when user has scrolled up to read) ---
+        StringBuilder decisionBuf = new StringBuilder();
+        while ((msg = pendingDecisions.poll()) != null) decisionBuf.append(msg).append('\n');
+        if (decisionBuf.length() > 0) {
             // TextArea layout cost grows with text length; trim from the top when it gets large.
-            String existing = researchArea.getText();
+            String existing = decisionsArea.getText();
             if (existing.length() > 80_000) {
                 int cut = existing.indexOf('\n', existing.length() - 60_000);
                 existing = cut > 0 ? existing.substring(cut + 1) : existing.substring(existing.length() - 60_000);
             }
 
-            if (researchUserScrolledUp && researchScrollPane != null) {
+            if (decisionsUserScrolledUp && decisionsScrollPane != null) {
                 // User has scrolled up to read. Suppress tracking so the setText scroll-to-top
-                // doesn't corrupt researchUserScrolledUp; restore saved position in runLater.
-                double savedV = researchScrollPane.getVvalue();
-                suppressScrollTracking = true;
-                researchArea.setText(existing + logBuf.toString());
+                // doesn't corrupt decisionsUserScrolledUp; restore saved position in runLater.
+                double savedV = decisionsScrollPane.getVvalue();
+                suppressDecisionsScrollTracking = true;
+                decisionsArea.setText(existing + decisionBuf.toString());
                 final double v = savedV;
-                Platform.runLater(() -> { researchScrollPane.setVvalue(v); suppressScrollTracking = false; });
+                Platform.runLater(() -> { decisionsScrollPane.setVvalue(v); suppressDecisionsScrollTracking = false; });
             } else {
                 // User is at the bottom or scroll pane not yet available — normal auto-scroll.
-                if (existing.equals(researchArea.getText())) {
-                    researchArea.appendText(logBuf.toString());
+                if (existing.equals(decisionsArea.getText())) {
+                    decisionsArea.appendText(decisionBuf.toString());
                 } else {
                     // Text was trimmed; setText was needed. Suppress tracking so the transient
-                    // scroll-to-top doesn't flip researchUserScrolledUp; restore bottom in runLater.
-                    suppressScrollTracking = true;
-                    researchArea.setText(existing + logBuf.toString());
+                    // scroll-to-top doesn't flip decisionsUserScrolledUp; restore bottom in runLater.
+                    suppressDecisionsScrollTracking = true;
+                    decisionsArea.setText(existing + decisionBuf.toString());
                     Platform.runLater(() -> {
-                        if (researchScrollPane != null) researchScrollPane.setVvalue(researchScrollPane.getVmax());
-                        suppressScrollTracking = false;
+                        if (decisionsScrollPane != null) decisionsScrollPane.setVvalue(decisionsScrollPane.getVmax());
+                        suppressDecisionsScrollTracking = false;
                     });
                 }
             }
