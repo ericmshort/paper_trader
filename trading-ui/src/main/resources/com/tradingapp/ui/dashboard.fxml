@@ -192,7 +192,7 @@
                             <TableColumn fx:id="prmColDte"      text="DTE"      prefWidth="55"/>
                             <TableColumn fx:id="prmColMax"      text="Max Profit" prefWidth="100"/>
                             <TableColumn fx:id="prmColPnl"      text="P&amp;L"  prefWidth="100"/>
-                            <TableColumn fx:id="prmColPct"      text="Captured %" prefWidth="120"/>
+                            <TableColumn fx:id="prmColPct"      text="Captured Pct" prefWidth="110"/>
                         </columns>
                     </TableView>
                     <Separator/>
