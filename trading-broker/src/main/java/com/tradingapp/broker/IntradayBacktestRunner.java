@@ -396,15 +396,18 @@ public class IntradayBacktestRunner {
             runs.add(new RunCfg(String.format("%-44s", "IV surge guard 1.5x (relaxed)"),  baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct, 5, 2, 2.5, -1, null, null, null, -1, 0, 0, 0, 1.5));
             runs.add(new RunCfg(String.format("%-44s", "IV surge guard OFF (disabled)"),   baseWatchlist, BASE_OPTS, cfg.getEnabledStrategies(), defaultLossLimitPct, 5, 2, 2.5, -1, null, null, null, -1, 0, 0, 0, 99.0));
         } else if ("regime-ma-compare".equals(mode)) {
-            // 2-pass comparison: 5-day MA (backtest default) vs 20-day MA (live setting).
-            // Runs inline and returns so regimeMaDays doesn't need to be threaded through RunCfg.
-            RunSummary[] maResults = new RunSummary[2];
-            int[] maDayValues = {5, 20};
-            for (int i = 0; i < maDayValues.length; i++) {
-                int ma = maDayValues[i];
-                String maLabel = String.format("%-44s", "regime MA " + ma + "-day"
-                        + (ma == 5 ? " (backtest default)" : " (live setting)  "));
-                System.out.println("\n=== " + maLabel.trim() + " ===");
+            // 2-pass comparison: 5-day MA (current live setting) vs regime filter OFF.
+            // Runs inline and returns so the filter flag doesn't need to be threaded through RunCfg.
+            record RegimeCase(String label, boolean filterOn, int maDays) {}
+            List<RegimeCase> regimeCases = List.of(
+                    new RegimeCase("5-day MA (current live)", true, 5),
+                    new RegimeCase("regime filter OFF",       false, 5)
+            );
+            RunSummary[] maResults = new RunSummary[regimeCases.size()];
+            for (int i = 0; i < regimeCases.size(); i++) {
+                RegimeCase rc = regimeCases.get(i);
+                String maLabel = String.format("%-44s", rc.label());
+                System.out.println("\n=== " + rc.label() + " ===");
                 BlackScholesEngine bs = new BlackScholesEngine();
                 bs.setVixProvider(vixCache::getVix, vixCache.baselineVix());
                 OptionsSignalRouter maRouter = new OptionsSignalRouter(
@@ -428,7 +431,6 @@ public class IntradayBacktestRunner {
                 maRouter.setProfitTarget(cfg.getProfitTarget());
                 maRouter.setEntryConfirmationTicks(Math.max(1, cfg.getEntryConfirmationTicks() / 12));
                 maRouter.setOvernightMinPremiumFrac(cfg.getOvernightMinPremiumFrac());
-                final int finalMa = ma;
                 long t0 = System.currentTimeMillis();
                 IntradayBacktestResult r = engine.run(baseWatchlist, barsBySymbol, 100_000.0, maRouter, msg -> {},
                         Set.of(), loop -> {
@@ -438,7 +440,8 @@ public class IntradayBacktestRunner {
                             loop.setAvoidOvernightHolds(false);
                             loop.setDailyLossLimitPct(defaultLossLimitPct / 100.0);
                             loop.setAccurateOptionsValuation(true);
-                            loop.setRegimeMaDays(finalMa);
+                            loop.setRegimeMaDays(rc.maDays());
+                            loop.setMarketRegimeFilterEnabled(rc.filterOn());
                             maRouter.setClosePositionsOnHalt(true);
                         });
                 System.out.printf("Done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
@@ -449,7 +452,7 @@ public class IntradayBacktestRunner {
                         r.getTotalReturnPct(), r.getMaxDrawdownPct(),
                         r.getTotalTrades(), r.getWins(), r.getLosses());
             }
-            System.out.printf("%n%-46s  %8s  %8s  %7s  %7s%n", "Regime MA Config", "Return", "MaxDD", "Trades", "WinRate");
+            System.out.printf("%n%-46s  %8s  %8s  %7s  %7s%n", "Regime Filter Config", "Return", "MaxDD", "Trades", "WinRate");
             System.out.println("-".repeat(89));
             for (RunSummary s : maResults) {
                 double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
