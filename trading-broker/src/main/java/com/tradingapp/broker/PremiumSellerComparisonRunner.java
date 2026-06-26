@@ -232,16 +232,17 @@ public class PremiumSellerComparisonRunner {
 
             // ── 2. Daily P&L ──────────────────────────────────────────────────
             out.println("─── Daily P&L ────────────────────────────────────────────────────────────────");
-            out.printf("  %-12s  %14s  %12s  %9s%n", "Date", "Balance", "Daily P&L", "Return%");
-            out.println("  " + "-".repeat(54));
+            out.printf("  %-12s  %14s  %12s  %9s  %9s%n", "Date", "Balance", "Daily P&L", "Daily %", "Return%");
+            out.println("  " + "-".repeat(64));
             List<BacktestDataPoint> curve = r.getEquityCurve();
             double prev = 100_000.0;
             for (BacktestDataPoint dp : curve) {
-                double bal   = dp.getPortfolioValue();
-                double delta = bal - prev;
-                double ret   = (bal - 100_000.0) / 100_000.0 * 100.0;
-                out.printf("  %-12s  %14.2f  %+12.2f  %+8.2f%%%n",
-                        dp.getDate(), bal, delta, ret);
+                double bal      = dp.getPortfolioValue();
+                double delta    = bal - prev;
+                double dailyPct = prev > 0 ? delta / prev * 100.0 : 0.0;
+                double ret      = (bal - 100_000.0) / 100_000.0 * 100.0;
+                out.printf("  %-12s  %14.2f  %+12.2f  %+8.2f%%  %+8.2f%%%n",
+                        dp.getDate(), bal, delta, dailyPct, ret);
                 prev = bal;
             }
             out.println();
