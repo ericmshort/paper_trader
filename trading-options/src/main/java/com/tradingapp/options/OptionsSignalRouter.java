@@ -42,7 +42,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
     private static final ZoneId ET = ZoneId.of("America/New_York");
     // All open options positions are force-closed at this time to avoid overnight holds.
-    private static final LocalTime PRE_CLOSE_CUTOFF = LocalTime.of(15, 45);
+    private static final LocalTime PRE_CLOSE_CUTOFF = LocalTime.of(15, 55);
 
     private final BlackScholesEngine bsEngine;
     private final OptionsOrderExecutor optExec;

@@ -253,7 +253,7 @@ public class TradingLoopTest {
     @Test
     void testPreClosePositionLiquidated() throws Exception {
         List<String> research = new ArrayList<>();
-        ZonedDateTime preClose = ZonedDateTime.of(2026, 5, 15, 15, 50, 0, 0, ET);
+        ZonedDateTime preClose = ZonedDateTime.of(2026, 5, 15, 15, 56, 0, 0, ET);
 
         Account account = new Account();
         account.addOrUpdatePosition("AAPL", 10, 150.0, Position.PositionType.STOCK);
@@ -304,7 +304,7 @@ public class TradingLoopTest {
         loop.run();
 
         assertTrue(account.getPositions().containsKey("AAPL"),
-                "AAPL position should NOT be closed before the 15:45 cutoff");
+                "AAPL position should NOT be closed before the 15:55 cutoff");
     }
 
     @Test

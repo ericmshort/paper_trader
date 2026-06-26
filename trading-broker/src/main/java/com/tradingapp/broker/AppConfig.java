@@ -66,7 +66,7 @@ public class AppConfig {
     private LocalTime optionsEntryCutoff = null;
     // No new options entries before this ET time (null = no delay).
     private LocalTime optionsEntryStartTime = null;
-    // EOD force-close time for options positions (null = use default 15:45).
+    // EOD force-close time for options positions (null = use default 15:55).
     private LocalTime optionsForceCloseTime = null;
     // Per-trade position sizing: budget fraction of account balance (standard tier, default 0.05).
     private double positionBudgetFrac   = 0.05;

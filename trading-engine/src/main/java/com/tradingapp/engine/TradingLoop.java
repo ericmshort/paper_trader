@@ -38,7 +38,7 @@ public class TradingLoop implements Runnable {
     private double maxPortfolioExposure = 0.60;
     private static final LocalTime MARKET_OPEN      = LocalTime.of(9, 30);
     private static final LocalTime MARKET_CLOSE     = LocalTime.of(16, 0);
-    private static final LocalTime PRE_CLOSE_CUTOFF = LocalTime.of(15, 45);
+    private static final LocalTime PRE_CLOSE_CUTOFF = LocalTime.of(15, 55);
     // No new entries during the first 5 minutes — the opening range is still forming
     private static final LocalTime ORB_FORMATION_END = LocalTime.of(9, 35);
     // No new stock entries after 2:30 PM — gives every position at least 75 min of runway
