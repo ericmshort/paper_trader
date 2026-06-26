@@ -2,9 +2,9 @@ package com.tradingapp.broker;
 
 import com.tradingapp.account.Account;
 import com.tradingapp.account.TransactionLog;
-import com.tradingapp.account.TransactionRecord;
 import com.tradingapp.data.DayTraderWatchList;
 import com.tradingapp.data.PriceHistory;
+import com.tradingapp.engine.BacktestDataPoint;
 import com.tradingapp.engine.FeeCalculator;
 import com.tradingapp.engine.IndicatorEngine;
 import com.tradingapp.engine.IntradayBacktestEngine;
@@ -21,13 +21,11 @@ import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.DayOfWeek;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,9 +34,8 @@ import java.util.TreeMap;
 import java.util.function.Supplier;
 
 /**
- * 800-day backtest: intraday baseline + Put Credit Spread + Call Credit Spread combined.
- * Writes a full analysis report to ~/.tradingapp/backtest-report.txt including
- * capital competition between PCS and CCS.
+ * 800-day backtest: all enabled strategies from live app settings (intraday + premium seller).
+ * Writes a report to ~/.tradingapp/backtest-report.txt with daily P&L and per-symbol attribution.
  *
  * Run via:
  *   mvn install && mvn -pl trading-broker exec:java \
@@ -63,7 +60,7 @@ public class PremiumSellerComparisonRunner {
         Path reportPath = Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-report.txt");
         Files.createDirectories(reportPath.getParent());
 
-        System.out.println("=== Premium Seller: Baseline + PCS + CCS ===");
+        System.out.println("=== Backtest: All Enabled Strategies ===");
         System.out.printf("Period : %s → %s%n", startDate, endDate);
         System.out.println("Report : " + reportPath);
         System.out.println();
@@ -100,7 +97,7 @@ public class PremiumSellerComparisonRunner {
         double maxExposure  = cfg.getMaxPortfolioExposurePct() / 100.0;
         double lossLimitPct = cfg.getDailyLossLimitPct();
 
-        // Intraday router
+        // Intraday router — all enabled strategies from live config
         BlackScholesEngine bs = new BlackScholesEngine();
         bs.setVixProvider(vixCache::getVix, vixCache.baselineVix());
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(new Account(), null);
@@ -125,7 +122,7 @@ public class PremiumSellerComparisonRunner {
         intradayRouter.setEntryConfirmationTicks(Math.max(1, cfg.getEntryConfirmationTicks() / 12));
         intradayRouter.setOvernightMinPremiumFrac(cfg.getOvernightMinPremiumFrac());
 
-        // Premium seller router: PCS + CCS only — collect its log for report analysis
+        // Premium seller router — PCS + CCS (as configured in live app)
         List<String> premLog = new ArrayList<>();
         BlackScholesEngine bsPrem = new BlackScholesEngine();
         bsPrem.setVixProvider(vixCache::getVix, vixCache.baselineVix());
@@ -161,53 +158,32 @@ public class PremiumSellerComparisonRunner {
                 result.getTotalReturnPct(), result.getMaxDrawdownPct(),
                 result.getTotalTrades(), wr, elapsed / 1000);
 
-        writeReport(reportPath, result, premLog, startDate, endDate);
+        writeReport(reportPath, result, premLog, startDate, endDate, cfg);
         System.out.println("Report written to: " + reportPath);
     }
 
     // ── Report ────────────────────────────────────────────────────────────────
 
-    /**
-     * Log line formats from PremiumSellerRouter:
-     *   Opens  : "{SYM} PUT CREDIT SPREAD K=.../... exp=... x{n} credit=$..."
-     *            "{SYM} CALL CREDIT SPREAD K=.../... exp=... x{n} credit=$..."
-     *   Closes : "{SYM} PUT CREDIT SPREAD closed: {reason} | P&L ${pnl}"
-     *            "{SYM} CALL CREDIT SPREAD closed: {reason} | P&L ${pnl}"
-     */
     private static void writeReport(Path path, IntradayBacktestResult r,
                                     List<String> premLog,
-                                    LocalDate startDate, LocalDate endDate) throws Exception {
+                                    LocalDate startDate, LocalDate endDate,
+                                    AppConfig cfg) throws Exception {
 
-        // ── Parse premLog ─────────────────────────────────────────────────────
-        // opens: symbol → date → [PCS, CCS, ...] for competition analysis
-        // closes: symbol → [pcs_pnl, ccs_pnl, pcs_closes, ccs_closes]
-        Map<String, Map<String, List<String>>> opensBySymDate = new TreeMap<>(); // sym → date-str → types
-        Map<String, double[]> symPnl = new TreeMap<>();                          // [pcs_pnl, ccs_pnl, pcs_n, ccs_n]
-
+        // Parse premLog for per-symbol P&L attribution
+        Map<String, double[]> symPnl = new TreeMap<>(); // sym → [pcs_pnl, ccs_pnl, pcs_n, ccs_n]
         int pcsOpens = 0, ccsOpens = 0;
 
         for (String line : premLog) {
-            // e.g. "SPY PUT CREDIT SPREAD K=490/480 exp=2024-05-17 x3 credit=$312"
-            boolean isPcs = line.contains("PUT CREDIT SPREAD") && !line.contains("closed:");
-            boolean isCcs = line.contains("CALL CREDIT SPREAD") && !line.contains("closed:");
+            boolean isPcs  = line.contains("PUT CREDIT SPREAD")  && !line.contains("closed:");
+            boolean isCcs  = line.contains("CALL CREDIT SPREAD") && !line.contains("closed:");
             boolean isPcsClose = line.contains("PUT CREDIT SPREAD closed:");
             boolean isCcsClose = line.contains("CALL CREDIT SPREAD closed:");
 
-            if (isPcs || isCcs) {
-                String sym = line.split(" ")[0];
-                // Extract date from "exp=yyyy-MM-dd"
-                String date = "";
-                int ei = line.indexOf("exp=");
-                if (ei >= 0) date = line.substring(ei + 4, Math.min(ei + 14, line.length()));
-                opensBySymDate.computeIfAbsent(sym, k -> new TreeMap<>())
-                        .computeIfAbsent(date, k -> new ArrayList<>())
-                        .add(isPcs ? "PCS" : "CCS");
-                if (isPcs) pcsOpens++; else ccsOpens++;
-            }
+            if (isPcs)  pcsOpens++;
+            if (isCcs)  ccsOpens++;
 
             if (isPcsClose || isCcsClose) {
                 String sym = line.split(" ")[0];
-                // Extract P&L from "| P&L $NNN" or "| P&L $-NNN"
                 double pnl = 0;
                 int pi = line.indexOf("P&L $");
                 if (pi >= 0) {
@@ -218,66 +194,59 @@ public class PremiumSellerComparisonRunner {
             }
         }
 
-        // Competition stats
-        int competeDays = 0, pcsAlone = 0, ccsAlone = 0;
-        Map<String, Integer> competeBySymbol = new TreeMap<>();
-        for (Map.Entry<String, Map<String, List<String>>> se : opensBySymDate.entrySet()) {
-            for (Map.Entry<String, List<String>> de : se.getValue().entrySet()) {
-                boolean hasPcs = de.getValue().contains("PCS");
-                boolean hasCcs = de.getValue().contains("CCS");
-                if (hasPcs && hasCcs) { competeDays++; competeBySymbol.merge(se.getKey(), 1, Integer::sum); }
-                else if (hasPcs) pcsAlone++;
-                else             ccsAlone++;
-            }
-        }
-        int activeDays = competeDays + pcsAlone + ccsAlone;
-
-        // ── Write file ────────────────────────────────────────────────────────
         try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(path))) {
 
-            out.println("=== Premium Seller Backtest Report: Baseline + PCS + CCS ===");
-            out.printf("Period   : %s → %s%n", startDate, endDate);
-            out.printf("Generated: %s%n%n", ZonedDateTime.now(ET).format(
+            out.println("=== Backtest Report: All Enabled Strategies ===");
+            out.printf("Period    : %s → %s%n", startDate, endDate);
+            out.printf("Generated : %s%n%n", ZonedDateTime.now(ET).format(
                     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z")));
+
+            out.println("─── App Settings (app.properties) ───────────────────────────────────────────");
+            out.println("  Intraday strategies:");
+            for (String s : cfg.getEnabledStrategies())
+                out.println("    • " + s);
+            out.println("  Premium selling strategies:");
+            out.println("    • PUT_CREDIT_SPREAD (PCS)");
+            out.println("    • CALL_CREDIT_SPREAD (CCS)");
+            out.printf("  Market regime filter : %s%n", cfg.isMarketRegimeFilterEnabled() ? "ON" : "OFF");
+            out.printf("  Max portfolio exposure: %.0f%%%n", cfg.getMaxPortfolioExposurePct());
+            out.printf("  Daily loss limit     : %.1f%%%n", cfg.getDailyLossLimitPct());
+            out.printf("  Avoid overnight holds: %s%n", cfg.isAvoidOvernightHolds() ? "YES" : "NO");
+            out.printf("  Stop loss fraction   : %.0f%%%n", cfg.getOptionsStopLossFrac() * 100);
+            out.printf("  Profit target        : %.0f%%%n", cfg.getProfitTarget() * 100);
+            out.printf("  Position budget      : %.0f%% of capital per trade%n", cfg.getPositionBudgetFrac() * 100);
+            if (cfg.getOptionsEntryCutoff() != null)
+                out.printf("  Entry cutoff         : %s%n", cfg.getOptionsEntryCutoff());
+            out.println();
 
             // ── 1. Overall results ────────────────────────────────────────────
             out.println("─── Overall Results ──────────────────────────────────────────────────────────");
             out.printf("  Return       : %+.2f%%%n", r.getTotalReturnPct());
             out.printf("  Max Drawdown : %.2f%%%n",  r.getMaxDrawdownPct());
             out.printf("  Final Balance: $%.2f%n",   r.getFinalBalance());
-            out.printf("  Total Trades : %d  (W:%d  L:%d  WR:%.1f%%)%n%n",
+            out.printf("  Total Trades : %d  (W:%d  L:%d  WR:%.1f%%)%n",
                     r.getTotalTrades(), r.getWins(), r.getLosses(),
                     r.getTotalTrades() > 0 ? 100.0 * r.getWins() / r.getTotalTrades() : 0.0);
+            out.printf("  PCS opens    : %d%n", pcsOpens);
+            out.printf("  CCS opens    : %d%n%n", ccsOpens);
 
-            // ── 2. Trade breakdown ────────────────────────────────────────────
-            out.println("─── Trade Breakdown: Intraday vs Premium ─────────────────────────────────────");
-            int premTotal = pcsOpens + ccsOpens;
-            // Total intraday opens = total trades minus both legs of each premium open/close pair
-            // Easier: infer from trade count
-            out.printf("  PCS opens      : %d%n", pcsOpens);
-            out.printf("  CCS opens      : %d%n", ccsOpens);
-            out.printf("  Premium total  : %d opens%n%n", premTotal);
-
-            // ── 3. Capital competition ────────────────────────────────────────
-            out.println("─── Capital Competition: PCS vs CCS ─────────────────────────────────────────");
-            out.println("  Days where both strategies opened on the same symbol (expiry as proxy for day).");
-            out.println("  When both fire, the second entry uses a shrunken account balance.");
-            out.println();
-            out.printf("  %-8s  %s%n", "Symbol", "Both-open days");
-            out.println("  " + "-".repeat(28));
-            competeBySymbol.entrySet().stream()
-                    .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
-                    .forEach(e -> out.printf("  %-8s  %d%n", e.getKey(), e.getValue()));
-            out.println();
-            out.printf("  PCS only  : %4d entries  (%4.1f%% of active days)%n",
-                    pcsAlone,  activeDays > 0 ? 100.0 * pcsAlone  / activeDays : 0);
-            out.printf("  CCS only  : %4d entries  (%4.1f%% of active days)%n",
-                    ccsAlone,  activeDays > 0 ? 100.0 * ccsAlone  / activeDays : 0);
-            out.printf("  Both open : %4d entries  (%4.1f%% of active days)  ← capital shared%n",
-                    competeDays, activeDays > 0 ? 100.0 * competeDays / activeDays : 0);
+            // ── 2. Daily P&L ──────────────────────────────────────────────────
+            out.println("─── Daily P&L ────────────────────────────────────────────────────────────────");
+            out.printf("  %-12s  %14s  %12s  %9s%n", "Date", "Balance", "Daily P&L", "Return%");
+            out.println("  " + "-".repeat(54));
+            List<BacktestDataPoint> curve = r.getEquityCurve();
+            double prev = 100_000.0;
+            for (BacktestDataPoint dp : curve) {
+                double bal   = dp.getPortfolioValue();
+                double delta = bal - prev;
+                double ret   = (bal - 100_000.0) / 100_000.0 * 100.0;
+                out.printf("  %-12s  %14.2f  %+12.2f  %+8.2f%%%n",
+                        dp.getDate(), bal, delta, ret);
+                prev = bal;
+            }
             out.println();
 
-            // ── 4. Per-symbol P&L attribution ─────────────────────────────────
+            // ── 3. Per-symbol premium P&L attribution ─────────────────────────
             out.println("─── Per-Symbol Premium P&L Attribution ──────────────────────────────────────");
             out.printf("  %-8s  %6s  %6s  %8s  %8s  %9s%n",
                     "Symbol", "PCS_N", "CCS_N", "PCS_P&L", "CCS_P&L", "Total_P&L");
@@ -293,26 +262,6 @@ public class PremiumSellerComparisonRunner {
             out.println("  " + "-".repeat(58));
             out.printf("  %-8s  %6d  %6d  %+8.0f  %+8.0f  %+9.0f%n",
                     "TOTAL", totPcsN, totCcsN, totPcsPnl, totCcsPnl, totPcsPnl + totCcsPnl);
-            out.println();
-
-            // ── 5. Equity curve (bi-weekly) ───────────────────────────────────
-            out.println("─── Equity Curve (bi-weekly snapshots) ──────────────────────────────────────");
-            out.printf("  %-12s  %12s  %8s%n", "Date", "Balance", "Return%");
-            out.println("  " + "-".repeat(38));
-            var curve = r.getEquityCurve();
-            if (!curve.isEmpty()) {
-                int step = Math.max(1, curve.size() / 55);
-                for (int i = 0; i < curve.size(); i += step) {
-                    var dp = curve.get(i);
-                    out.printf("  %-12s  %12.2f  %+7.2f%%%n",
-                            dp.getDate(), dp.getPortfolioValue(),
-                            (dp.getPortfolioValue() - 100_000.0) / 100_000.0 * 100.0);
-                }
-                var last = curve.get(curve.size() - 1);
-                out.printf("  %-12s  %12.2f  %+7.2f%%  ← final%n",
-                        last.getDate(), last.getPortfolioValue(),
-                        (last.getPortfolioValue() - 100_000.0) / 100_000.0 * 100.0);
-            }
             out.println();
         }
     }
