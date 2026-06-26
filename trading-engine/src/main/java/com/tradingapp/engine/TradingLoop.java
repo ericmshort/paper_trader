@@ -62,6 +62,7 @@ public class TradingLoop implements Runnable {
     private final Account account;
     private final Supplier<ZonedDateTime> clock;
     private final OptionsEvaluator optionsEvaluator;
+    private OptionsEvaluator premiumSellerEvaluator = null;
     private final SignalWeightEvaluator weightEvaluator;
     private final Runnable afterMarketCallback;
     private LocalDate lastTrainingDate;
@@ -76,6 +77,9 @@ public class TradingLoop implements Runnable {
     private boolean avoidOvernightHolds = true;
     private boolean marketRegimeFilterEnabled = true;
     private int regimeMaDays = 5;
+    // Extra weighted-buy signals required on top of SIGNAL_THRESHOLD to override the regime filter.
+    // MAX_VALUE = strict (never override, matches live default). 1 = allow buy if weightedBuys >= SIGNAL_THRESHOLD+1, etc.
+    private int regimeOverrideExtraBuys = Integer.MAX_VALUE;
     private Set<String> inverseEtfSymbols = Set.of();
     private boolean stockTradingEnabled = true;
     private EarningsCalendar earningsCalendar;
@@ -186,6 +190,7 @@ public class TradingLoop implements Runnable {
     public void setAvoidOvernightHolds(boolean v) { this.avoidOvernightHolds = v; }
     public void setMarketRegimeFilterEnabled(boolean v) { this.marketRegimeFilterEnabled = v; }
     public void setRegimeMaDays(int days) { this.regimeMaDays = Math.max(2, days); }
+    public void setRegimeOverrideExtraBuys(int extra) { this.regimeOverrideExtraBuys = extra; }
     public void setInverseEtfSymbols(Set<String> symbols) { this.inverseEtfSymbols = symbols; }
     public void setMaxConcurrentStockPositions(int n) { this.maxConcurrentStockPositions = n; }
     public void setStockTradingEnabled(boolean v) { this.stockTradingEnabled = v; }
@@ -198,6 +203,8 @@ public class TradingLoop implements Runnable {
     public void setTrailingStopPct(double pct) { trailingStop.setTrailingStopPct(pct); }
     public void setMaxLossPerTradePct(double pct) { this.maxLossPerTradePct = pct; }
     public void setCircuitBreakerPct(double pct) { this.circuitBreakerPct = pct; }
+    public void setPremiumSellerEvaluator(OptionsEvaluator e) { this.premiumSellerEvaluator = e; }
+
     public void setStockWatchlist(java.util.Collection<String> symbols) {
         this.stockWatchlist = symbols == null || symbols.isEmpty() ? null : new HashSet<>(symbols);
     }
@@ -292,6 +299,9 @@ public class TradingLoop implements Runnable {
                 account.updatePositionPrice(symbol, price);
                 if (optionsEvaluator != null && !account.isDailyLossHalted()) {
                     optionsEvaluator.markPositionsToMarket(symbol, price);
+                }
+                if (premiumSellerEvaluator != null && !account.isDailyLossHalted()) {
+                    premiumSellerEvaluator.markPositionsToMarket(symbol, price);
                 }
             }
 
@@ -509,7 +519,8 @@ public class TradingLoop implements Runnable {
                         // Silent — fires on nearly every ORB-false-breakout tick; logging would flood the feed.
                     } else if (rsiOverbought) {
                         researchCallback.accept(symbol + " BUY skipped: RSI overbought");
-                    } else if (inverseEtfSymbols.contains(symbol) ? isMarketInUptrend() : !isMarketInUptrend()) {
+                    } else if ((inverseEtfSymbols.contains(symbol) ? isMarketInUptrend() : !isMarketInUptrend())
+                            && weightedBuys < SIGNAL_THRESHOLD + regimeOverrideExtraBuys) {
                         researchCallback.accept(symbol + (inverseEtfSymbols.contains(symbol)
                                 ? " BUY skipped: SPY in uptrend (inverse ETF — needs downtrend)"
                                 : " BUY skipped: SPY below " + regimeMaDays + "-day MA (short-term downtrend)"));
@@ -559,6 +570,9 @@ public class TradingLoop implements Runnable {
                 // calls forceCloseAllForSymbol to close open positions on the halt tick itself.
                 if (optionsEvaluator != null) {
                     optionsEvaluator.evaluateWithSignals(symbol, price, buys, sells, signalStr, featureCsv, signals);
+                }
+                if (premiumSellerEvaluator != null) {
+                    premiumSellerEvaluator.evaluateWithSignals(symbol, price, buys, sells, signalStr, featureCsv, signals);
                 }
                 researchCallback.accept(time + " | " + symbol + " $" + String.format("%.2f", price)
                         + " | " + signalStr + " | BUY=" + buys + " SELL=" + sells);

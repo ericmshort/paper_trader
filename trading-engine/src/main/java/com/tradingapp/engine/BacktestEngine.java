@@ -7,12 +7,32 @@ import java.util.*;
 
 public class BacktestEngine {
 
+    // sentinel: regime filter disabled (default — matches pre-filter behaviour)
+    public static final int REGIME_DISABLED = -1;
+    // sentinel: regime filter on, signal count can never override it
+    public static final int REGIME_STRICT = Integer.MAX_VALUE;
+
     private final IndicatorEngine indicatorEngine;
     private final FeeCalculator feeCalc;
+
+    // Regime filter state — set via withRegimeFilter() before calling run()
+    private int regimeOverrideMinBuys = REGIME_DISABLED;
+    private Map<LocalDate, Double> spyCloseByDate = Collections.emptyMap();
 
     public BacktestEngine(IndicatorEngine indicatorEngine, FeeCalculator feeCalc) {
         this.indicatorEngine = indicatorEngine;
         this.feeCalc = feeCalc;
+    }
+
+    /**
+     * Enable the SPY 5-day MA regime filter.
+     * overrideMinBuys: minimum buy-signal count needed to allow a buy even when SPY is below
+     * its MA. Use REGIME_STRICT to never allow overrides, or 1/2/3 for progressive thresholds.
+     */
+    public BacktestEngine withRegimeFilter(int overrideMinBuys, Map<LocalDate, Double> spyCloseByDate) {
+        this.regimeOverrideMinBuys = overrideMinBuys;
+        this.spyCloseByDate = Collections.unmodifiableMap(new HashMap<>(spyCloseByDate));
+        return this;
     }
 
     public BacktestResult run(BacktestConfig config, Map<String, List<HistoricalBar>> barsBySymbol) {
@@ -45,8 +65,21 @@ public class BacktestEngine {
 
         int wins = 0, losses = 0, totalTrades = 0;
         List<BacktestDataPoint> equityCurve = new ArrayList<>();
+        List<Double> spyPrices = new ArrayList<>(); // rolling SPY closes for regime MA
 
         for (LocalDate date : tradingDays) {
+            // Update SPY regime state once per date (before evaluating any symbol)
+            Double spyClose = spyCloseByDate.get(date);
+            if (spyClose != null) spyPrices.add(spyClose);
+            final boolean spyUptrend;
+            if (regimeOverrideMinBuys == REGIME_DISABLED || spyPrices.size() < 5) {
+                spyUptrend = true; // no filter or insufficient history → treat as uptrend
+            } else {
+                double ma = spyPrices.subList(spyPrices.size() - 5, spyPrices.size())
+                        .stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                spyUptrend = spyPrices.get(spyPrices.size() - 1) >= ma;
+            }
+
             for (String symbol : config.getSymbols()) {
                 Map<LocalDate, HistoricalBar> symbolIndex = index.get(symbol);
                 if (symbolIndex == null) continue;
@@ -79,7 +112,7 @@ public class BacktestEngine {
                         if (close > entryPrice) wins++; else losses++;
                         openPositions.remove(symbol);
                     }
-                } else if (buys >= 2) {
+                } else if (buys >= 2 && (spyUptrend || buys >= regimeOverrideMinBuys)) {
                     int shares = feeCalc.maxShares(cash, close);
                     if (shares > 0) {
                         cash -= shares * close + feeCalc.calculateFee(shares);

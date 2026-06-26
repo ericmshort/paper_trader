@@ -27,6 +27,7 @@ import com.tradingapp.sentiment.SentimentRefreshScheduler;
 import com.tradingapp.options.BlackScholesEngine;
 import com.tradingapp.options.OptionsOrderExecutor;
 import com.tradingapp.options.OptionsSignalRouter;
+import com.tradingapp.options.PremiumSellerRouter;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -92,6 +93,16 @@ public class DashboardController implements Initializable {
     @FXML private TableColumn<OptionsPositionRow, String> optColCost;
     @FXML private TableColumn<OptionsPositionRow, String> optColCurrentValue;
     @FXML private TableColumn<OptionsPositionRow, String> optColPnl;
+    @FXML private TableView<PremiumSellerRow> premiumTable;
+    @FXML private TableColumn<PremiumSellerRow, String> prmColSymbol;
+    @FXML private TableColumn<PremiumSellerRow, String> prmColStrategy;
+    @FXML private TableColumn<PremiumSellerRow, String> prmColStrike;
+    @FXML private TableColumn<PremiumSellerRow, String> prmColExpiry;
+    @FXML private TableColumn<PremiumSellerRow, String> prmColDte;
+    @FXML private TableColumn<PremiumSellerRow, String> prmColMax;
+    @FXML private TableColumn<PremiumSellerRow, String> prmColPnl;
+    @FXML private TableColumn<PremiumSellerRow, String> prmColPct;
+    @FXML private Label premiumTotalLabel;
     @FXML private TableView<StockPositionRow> stockPositionsTable;
     @FXML private TableColumn<StockPositionRow, String> stkColSymbol;
     @FXML private TableColumn<StockPositionRow, Integer> stkColQuantity;
@@ -122,6 +133,7 @@ public class DashboardController implements Initializable {
     private ScheduledExecutorService scheduler;
     private TradingLoop tradingLoop;
     private OptionsSignalRouter optionsRouter;
+    private PremiumSellerRouter premiumSellerRouter;
     private AlpacaWebSocketFreeProvider wsProvider;
     private SentimentRefreshScheduler sentimentScheduler;
     private final NewsSentimentCache sentimentCache = new NewsSentimentCache();
@@ -158,6 +170,7 @@ public class DashboardController implements Initializable {
         setupTableColumns();
         setupOptionsTableColumns();
         setupStockTableColumns();
+        setupPremiumTableColumns();
 
         // Track scroll position on the decisions panel so we don't auto-scroll while user reads.
         decisionsArea.skinProperty().addListener((obs, oldSkin, newSkin) -> {
@@ -305,6 +318,12 @@ public class DashboardController implements Initializable {
             optionsRouter.restoreSessionState(transactionLog);
         }
 
+        premiumSellerRouter = new PremiumSellerRouter(
+                bsEngine, optExec, account, priceHistory, researchCb);
+        if (!appConfig.getPremiumEnabledStrategies().isEmpty()) {
+            premiumSellerRouter.setEnabledStrategies(appConfig.getPremiumEnabledStrategies());
+        }
+
         Path weightsPath = AppConfig.getDataDir().resolve("signal-weights.json");
         SignalWeights initialWeights;
         try {
@@ -342,6 +361,9 @@ public class DashboardController implements Initializable {
                 allSymbols, researchCb, uiRefresh, account,
                 optionsRouter, mlEval, trainingCallback);
         tradingLoop.setTransactionLog(transactionLog);
+        if (appConfig.isPremiumSellerEnabled()) {
+            tradingLoop.setPremiumSellerEvaluator(premiumSellerRouter);
+        }
         if (useWsProvider) {
             tradingLoop.setCandleHistory(candleHistory);
         }
@@ -561,6 +583,139 @@ public class DashboardController implements Initializable {
         stkColUnrealizedPnl.setCellValueFactory(new PropertyValueFactory<>("unrealizedPnl"));
     }
 
+    private void setupPremiumTableColumns() {
+        prmColSymbol.setCellValueFactory(new PropertyValueFactory<>("symbol"));
+        prmColStrategy.setCellValueFactory(new PropertyValueFactory<>("strategy"));
+        prmColStrike.setCellValueFactory(new PropertyValueFactory<>("shortStrike"));
+        prmColExpiry.setCellValueFactory(new PropertyValueFactory<>("expiry"));
+        prmColDte.setCellValueFactory(new PropertyValueFactory<>("dte"));
+        prmColMax.setCellValueFactory(new PropertyValueFactory<>("maxProfit"));
+        prmColPnl.setCellValueFactory(new PropertyValueFactory<>("currentPnl"));
+        prmColPct.setCellValueFactory(new PropertyValueFactory<>("pctCaptured"));
+        prmColPnl.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String value, boolean empty) {
+                super.updateItem(value, empty);
+                if (empty || value == null) { setText(null); setTextFill(Color.BLACK); return; }
+                setText(value);
+                PremiumSellerRow row = getTableView().getItems().get(getIndex());
+                setTextFill(row.getPnlRaw() >= 0 ? Color.GREEN : Color.RED);
+            }
+        });
+    }
+
+    // Safe to call on any thread — no FX node access.
+    private List<PremiumSellerRow> buildPremiumRows() {
+        List<PremiumSellerRow> rows = new ArrayList<>();
+        LocalDate today = LocalDate.now();
+
+        // Put Credit Spreads
+        for (Map.Entry<String, com.tradingapp.account.OptionsPosition> e :
+                account.getOptionsPositions().entrySet()) {
+            String key = e.getKey();
+            if (!key.endsWith(PremiumSellerRouter.PUTSPREAD_SHORT)) continue;
+            String symbol = e.getValue().getSymbol();
+            com.tradingapp.account.OptionsPosition shortPos = e.getValue();
+            com.tradingapp.account.OptionsPosition longPos =
+                    account.getOptionsPositions().get(symbol + PremiumSellerRouter.PUTSPREAD_LONG);
+            if (longPos == null) continue;
+            int c = Math.abs(shortPos.getContracts());
+            double credit = (shortPos.getPremiumPaid() - longPos.getPremiumPaid()) * 100 * c;
+            double sCur = computeOptionCurrentPremium(shortPos);
+            double lCur = computeOptionCurrentPremium(longPos);
+            double closeCost = (sCur - lCur) * 100 * c;
+            double pnl = credit - closeCost;
+            long dte = java.time.temporal.ChronoUnit.DAYS.between(today, shortPos.getExpiry());
+            rows.add(new PremiumSellerRow(symbol, "Put Credit Spread",
+                    String.format("$%.0f", shortPos.getStrike()),
+                    shortPos.getExpiry().toString(), Math.max(0, dte), credit, pnl));
+        }
+
+        // Call Credit Spreads
+        for (Map.Entry<String, com.tradingapp.account.OptionsPosition> e :
+                account.getOptionsPositions().entrySet()) {
+            String key = e.getKey();
+            if (!key.endsWith(PremiumSellerRouter.CALLSPREAD_SHORT)) continue;
+            String symbol = e.getValue().getSymbol();
+            com.tradingapp.account.OptionsPosition shortPos = e.getValue();
+            com.tradingapp.account.OptionsPosition longPos =
+                    account.getOptionsPositions().get(symbol + PremiumSellerRouter.CALLSPREAD_LONG);
+            if (longPos == null) continue;
+            int c = Math.abs(shortPos.getContracts());
+            double credit = (shortPos.getPremiumPaid() - longPos.getPremiumPaid()) * 100 * c;
+            double sCur = computeOptionCurrentPremium(shortPos);
+            double lCur = computeOptionCurrentPremium(longPos);
+            double closeCost = (sCur - lCur) * 100 * c;
+            double pnl = credit - closeCost;
+            long dte = java.time.temporal.ChronoUnit.DAYS.between(today, shortPos.getExpiry());
+            rows.add(new PremiumSellerRow(symbol, "Call Credit Spread",
+                    String.format("$%.0f", shortPos.getStrike()),
+                    shortPos.getExpiry().toString(), Math.max(0, dte), credit, pnl));
+        }
+
+        // Iron Condors
+        for (Map.Entry<String, com.tradingapp.account.OptionsPosition> e :
+                account.getOptionsPositions().entrySet()) {
+            String key = e.getKey();
+            if (!key.endsWith(PremiumSellerRouter.IC_SHORTCALL)) continue;
+            String symbol = e.getValue().getSymbol();
+            com.tradingapp.account.OptionsPosition scPos = e.getValue();
+            com.tradingapp.account.OptionsPosition lcPos = account.getOptionsPositions().get(symbol + PremiumSellerRouter.IC_LONGCALL);
+            com.tradingapp.account.OptionsPosition spPos = account.getOptionsPositions().get(symbol + PremiumSellerRouter.IC_SHORTPUT);
+            com.tradingapp.account.OptionsPosition lpPos = account.getOptionsPositions().get(symbol + PremiumSellerRouter.IC_LONGPUT);
+            if (lcPos == null || spPos == null || lpPos == null) continue;
+            int c = Math.abs(scPos.getContracts());
+            double credit = ((scPos.getPremiumPaid() - lcPos.getPremiumPaid())
+                           + (spPos.getPremiumPaid() - lpPos.getPremiumPaid())) * 100 * c;
+            double scCur = computeOptionCurrentPremium(scPos);
+            double lcCur = computeOptionCurrentPremium(lcPos);
+            double spCur = computeOptionCurrentPremium(spPos);
+            double lpCur = computeOptionCurrentPremium(lpPos);
+            double closeCost = ((scCur - lcCur) + (spCur - lpCur)) * 100 * c;
+            double pnl = credit - closeCost;
+            long dte = java.time.temporal.ChronoUnit.DAYS.between(today, scPos.getExpiry());
+            String shortStrikes = String.format("$%.0f/$%.0f", spPos.getStrike(), scPos.getStrike());
+            rows.add(new PremiumSellerRow(symbol, "Iron Condor", shortStrikes,
+                    scPos.getExpiry().toString(), Math.max(0, dte), credit, pnl));
+        }
+
+        // Cash-Secured Puts
+        for (Map.Entry<String, com.tradingapp.account.OptionsPosition> e :
+                account.getOptionsPositions().entrySet()) {
+            String key = e.getKey();
+            if (!key.endsWith(PremiumSellerRouter.CSP_PUT)) continue;
+            com.tradingapp.account.OptionsPosition pos = e.getValue();
+            String symbol = pos.getSymbol();
+            int c = Math.abs(pos.getContracts());
+            double credit = pos.getPremiumPaid() * 100 * c;
+            double curPrem = computeOptionCurrentPremium(pos);
+            double pnl = credit - curPrem * 100 * c;
+            long dte = java.time.temporal.ChronoUnit.DAYS.between(today, pos.getExpiry());
+            rows.add(new PremiumSellerRow(symbol, "Cash-Secured Put",
+                    String.format("$%.0f", pos.getStrike()),
+                    pos.getExpiry().toString(), Math.max(0, dte), credit, pnl));
+        }
+
+        // Covered Calls
+        for (Map.Entry<String, com.tradingapp.account.OptionsPosition> e :
+                account.getOptionsPositions().entrySet()) {
+            String key = e.getKey();
+            if (!key.endsWith(PremiumSellerRouter.CC_CALL)) continue;
+            com.tradingapp.account.OptionsPosition pos = e.getValue();
+            String symbol = pos.getSymbol();
+            int c = Math.abs(pos.getContracts());
+            double credit = pos.getPremiumPaid() * 100 * c;
+            double curPrem = computeOptionCurrentPremium(pos);
+            double pnl = credit - curPrem * 100 * c;
+            long dte = java.time.temporal.ChronoUnit.DAYS.between(today, pos.getExpiry());
+            rows.add(new PremiumSellerRow(symbol, "Covered Call",
+                    String.format("$%.0f", pos.getStrike()),
+                    pos.getExpiry().toString(), Math.max(0, dte), credit, pnl));
+        }
+
+        return rows;
+    }
+
     // Compute-phase: builds rows from account state. Safe to call on any thread.
     private double buildOptionsRows(List<OptionsPositionRow> rows) {
         double totalUnrealized = 0.0;
@@ -631,6 +786,10 @@ public class DashboardController implements Initializable {
         String name = root.startsWith(symbol + "_") ? root.substring(symbol.length() + 1) : root;
         return switch (name) {
             case "IRONCONDOR"    -> "Iron Condor";
+            case "PUTSPREAD"     -> "Put Credit Spread";
+            case "CALLSPREAD"    -> "Call Credit Spread";
+            case "CSP"           -> "Cash-Secured Put";
+            case "CC"            -> "Covered Call";
             case "STRADDLE"      -> "Straddle";
             case "STRANGLE"      -> "Strangle";
             case "BULLPUTSPREAD" -> "Bull Put Spread";
@@ -757,7 +916,9 @@ public class DashboardController implements Initializable {
             int losses,
             double winRate,
             double realizedPnl,
-            boolean tradingHalted
+            boolean tradingHalted,
+            List<PremiumSellerRow> premiumRows,
+            double premiumTotalPnl
     ) {}
 
     // Safe to call on any thread — no FX node access.
@@ -794,9 +955,13 @@ public class DashboardController implements Initializable {
                 ? brokerPv - Account.STARTING_BALANCE
                 : optTotalUnrealized + stkTotalUnrealized;
 
+        List<PremiumSellerRow> premiumRows = buildPremiumRows();
+        double premiumTotalPnl = premiumRows.stream().mapToDouble(PremiumSellerRow::getPnlRaw).sum();
+
         return new UiSnapshot(history, availableCash, stockHoldings, optionHoldings, totalPortfolio,
                 optionsCashDeployed, optionRows, optTotalUnrealized, stockRows, stkTotalUnrealized,
-                totalUnrealizedPnl, wins, losses, winRate, realizedPnl, account.isTradingHalted());
+                totalUnrealizedPnl, wins, losses, winRate, realizedPnl, account.isTradingHalted(),
+                premiumRows, premiumTotalPnl);
     }
 
     // Must be called on the FX thread. Only touches FX nodes.
@@ -855,6 +1020,13 @@ public class DashboardController implements Initializable {
             }
         }
 
+        premiumTable.setItems(FXCollections.observableArrayList(s.premiumRows()));
+        double premPnl = s.premiumTotalPnl();
+        premiumTotalLabel.setText(s.premiumRows().isEmpty() ? "No open premium positions"
+                : String.format("Open positions: %d  |  Total P&L: %s$%.0f",
+                        s.premiumRows().size(),
+                        premPnl >= 0 ? "+" : "-",
+                        Math.abs(premPnl)));
         tradeHistoryTable.setItems(FXCollections.observableArrayList(s.history()));
         totalPortfolioLabel.setText(String.format("Total Portfolio: $%,.2f", s.totalPortfolio()));
         stockHoldingsLabel.setText(String.format("Stocks: $%,.2f", s.stockHoldings()));

@@ -126,7 +126,7 @@ public class OptionsBacktestEngineTest {
     void exitsNearExpiry() {
         LocalDate expiry = LocalDate.now().plusDays(2);
         var pos = new OptionsBacktestEngine.OpenPosition(SYM, expiry, 1, SIGMA, 500, 0,
-                List.of(new OptionsBacktestEngine.Leg(K, true, true, 1)), 0, 0);
+                List.of(new OptionsBacktestEngine.Leg(K, true, true, 1)), 0, 0, 0, 0);
         assertTrue(engine.shouldExit(pos, 500, 0, 0, LocalDate.now(), OptionsStrategy.LONG_CALL, PRICE));
     }
 
@@ -134,7 +134,7 @@ public class OptionsBacktestEngineTest {
     void exitsOnPremiumStopLoss() {
         LocalDate expiry = LocalDate.now().plusDays(30);
         var pos = new OptionsBacktestEngine.OpenPosition(SYM, expiry, 1, SIGMA, 500, 0,
-                List.of(new OptionsBacktestEngine.Leg(K, true, true, 1)), 0, 0);
+                List.of(new OptionsBacktestEngine.Leg(K, true, true, 1)), 0, 0, 0, 0);
         // currentValue = 45% of cost basis → triggers 50% stop
         assertTrue(engine.shouldExit(pos, 225, 0, 0, LocalDate.now(), OptionsStrategy.LONG_CALL, PRICE));
     }
@@ -143,7 +143,7 @@ public class OptionsBacktestEngineTest {
     void exitsOnProfitTarget() {
         LocalDate expiry = LocalDate.now().plusDays(30);
         var pos = new OptionsBacktestEngine.OpenPosition(SYM, expiry, 1, SIGMA, 500, 0,
-                List.of(new OptionsBacktestEngine.Leg(K, true, true, 1)), 0, 0);
+                List.of(new OptionsBacktestEngine.Leg(K, true, true, 1)), 0, 0, 0, 0);
         // currentValue = 2x cost basis → profit target hit
         assertTrue(engine.shouldExit(pos, 1000, 0, 0, LocalDate.now(), OptionsStrategy.LONG_CALL, PRICE));
     }
@@ -153,7 +153,7 @@ public class OptionsBacktestEngineTest {
         engine.setOvernightMinPremiumFrac(0.70);
         LocalDate expiry = LocalDate.now().plusDays(30);
         var pos = new OptionsBacktestEngine.OpenPosition(SYM, expiry, 1, SIGMA, 500, 0,
-                List.of(new OptionsBacktestEngine.Leg(K, true, true, 1)), 0, 0);
+                List.of(new OptionsBacktestEngine.Leg(K, true, true, 1)), 0, 0, 0, 0);
         // currentValue = 60% of costBasis (< 70% floor) → should close
         assertTrue(engine.shouldExit(pos, 300, 0, 0, LocalDate.now(), OptionsStrategy.LONG_CALL, PRICE));
         // currentValue = 80% of costBasis (>= 70% floor) → should hold
@@ -164,7 +164,7 @@ public class OptionsBacktestEngineTest {
     void overnightFloorDisabledByDefault() {
         LocalDate expiry = LocalDate.now().plusDays(30);
         var pos = new OptionsBacktestEngine.OpenPosition(SYM, expiry, 1, SIGMA, 500, 0,
-                List.of(new OptionsBacktestEngine.Leg(K, true, true, 1)), 0, 0);
+                List.of(new OptionsBacktestEngine.Leg(K, true, true, 1)), 0, 0, 0, 0);
         // 60% of costBasis — above the 50% stop-loss so only the floor could trigger, but floor=0
         assertFalse(engine.shouldExit(pos, 300, 0, 0, LocalDate.now(), OptionsStrategy.LONG_CALL, PRICE));
     }

@@ -48,6 +48,9 @@ public class SettingsController implements Initializable {
     @FXML private CheckBox avoidOvernightHoldsCheck;
     @FXML private CheckBox stockTradingEnabledCheck;
     @FXML private CheckBox optionsTradingEnabledCheck;
+    @FXML private CheckBox premiumSellerEnabledCheck;
+    @FXML private CheckBox premiumPcsCheck;
+    @FXML private CheckBox premiumCcsCheck;
     @FXML private TextField optionsStopLossField;
     @FXML private TextField downtrendPutMinSignalsField;
     @FXML private TextField entryStartTimeField;
@@ -85,6 +88,7 @@ public class SettingsController implements Initializable {
         quoteProviderCombo.setOnAction(e -> updateQuoteNote());
         stockTradingEnabledCheck.setOnAction(e -> updateStockStrategyCheckboxStates());
         optionsTradingEnabledCheck.setOnAction(e -> updateOptionsStrategyCheckboxStates());
+        premiumSellerEnabledCheck.setOnAction(e -> updatePremiumStrategyCheckboxStates());
     }
 
     public void setActiveBrokerType(AppConfig.BrokerType type) {
@@ -130,6 +134,10 @@ public class SettingsController implements Initializable {
         avoidOvernightHoldsCheck.setSelected(cfg.isAvoidOvernightHolds());
         stockTradingEnabledCheck.setSelected(cfg.isStockTradingEnabled());
         optionsTradingEnabledCheck.setSelected(cfg.isOptionsTradingEnabled());
+        premiumSellerEnabledCheck.setSelected(cfg.isPremiumSellerEnabled());
+        Set<String> premStrats = cfg.getPremiumEnabledStrategies();
+        premiumPcsCheck.setSelected(premStrats.contains(com.tradingapp.options.PremiumSellerRouter.STRATEGY_PUT_CREDIT_SPREAD));
+        premiumCcsCheck.setSelected(premStrats.contains(com.tradingapp.options.PremiumSellerRouter.STRATEGY_CALL_CREDIT_SPREAD));
         optionsStopLossField.setText(String.valueOf((int) Math.round(cfg.getOptionsStopLossFrac() * 100)));
         downtrendPutMinSignalsField.setText(String.valueOf(cfg.getDowntrendPutMinSignals()));
         entryStartTimeField.setText(cfg.getOptionsEntryStartTime() != null ? cfg.getOptionsEntryStartTime().toString() : "");
@@ -149,6 +157,7 @@ public class SettingsController implements Initializable {
         updateQuoteNote();
         updateStockStrategyCheckboxStates();
         updateOptionsStrategyCheckboxStates();
+        updatePremiumStrategyCheckboxStates();
     }
 
     private void updateAlpacaFieldVisibility() {
@@ -355,6 +364,11 @@ public class SettingsController implements Initializable {
         cfg.setMarketRegimeFilterEnabled(marketRegimeFilterCheck.isSelected());
         cfg.setStockTradingEnabled(stockTradingEnabledCheck.isSelected());
         cfg.setOptionsTradingEnabled(optionsTradingEnabledCheck.isSelected());
+        cfg.setPremiumSellerEnabled(premiumSellerEnabledCheck.isSelected());
+        Set<String> premStrats = new LinkedHashSet<>();
+        if (premiumPcsCheck.isSelected()) premStrats.add(com.tradingapp.options.PremiumSellerRouter.STRATEGY_PUT_CREDIT_SPREAD);
+        if (premiumCcsCheck.isSelected()) premStrats.add(com.tradingapp.options.PremiumSellerRouter.STRATEGY_CALL_CREDIT_SPREAD);
+        cfg.setPremiumEnabledStrategies(premStrats);
         try {
             int days = Integer.parseInt(earningsBlackoutField.getText().strip());
             cfg.setEarningsBlackoutDays(Math.max(0, days));
@@ -450,6 +464,12 @@ public class SettingsController implements Initializable {
         strategyZeroDte.setDisable(!enabled);
         strategyStochasticReversal.setDisable(!enabled);
         strategyMacdCrossover.setDisable(!enabled);
+    }
+
+    private void updatePremiumStrategyCheckboxStates() {
+        boolean enabled = premiumSellerEnabledCheck.isSelected();
+        premiumPcsCheck.setDisable(!enabled);
+        premiumCcsCheck.setDisable(!enabled);
     }
 
     private void setStatus(String msg, boolean success) {

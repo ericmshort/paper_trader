@@ -642,6 +642,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         List<String> keys = account.getOptionsPositions().entrySet().stream()
                 .filter(e -> symbol.equals(e.getValue().getSymbol()))
                 .map(Map.Entry::getKey)
+                .filter(k -> !PremiumSellerRouter.isPremiumPositionFor(k, symbol))
                 .collect(java.util.stream.Collectors.toList());
         double sigma = computeVol(symbol);
         for (String key : keys) {
@@ -672,6 +673,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         List<String> keys = account.getOptionsPositions().entrySet().stream()
                 .filter(e -> symbol.equals(e.getValue().getSymbol()))
                 .map(Map.Entry::getKey)
+                .filter(k -> !PremiumSellerRouter.isPremiumPositionFor(k, symbol))
                 .collect(java.util.stream.Collectors.toList());
         double sigma = computeVol(symbol);
         for (String key : keys) {
@@ -1122,6 +1124,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         String prefix = symbol + "_";
         for (Map.Entry<String, OptionsPosition> e : account.getOptionsPositions().entrySet()) {
             if (!e.getKey().startsWith(prefix)) continue;
+            if (PremiumSellerRouter.isPremiumPositionFor(e.getKey(), symbol)) continue;
             OptionsPosition pos = e.getValue();
             if (pos.getContracts() <= 0) continue;
             double T = bsEngine.timeToExpiry(pos.getExpiry());

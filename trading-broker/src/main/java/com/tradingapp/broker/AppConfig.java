@@ -58,6 +58,8 @@ public class AppConfig {
     private int reversalMinSignals = 5;
     // Close a winning options position when premium reaches this multiple of entry (e.g. 2.5 = 150% gain).
     private double profitTarget = 2.5;
+    private boolean premiumSellerEnabled = false;
+    private Set<String> premiumEnabledStrategies = new LinkedHashSet<>();
     // When false, equity (stock) buys are disabled; only options trades execute.
     private boolean stockTradingEnabled = true;
     // Fraction of entry premium at which an options position is stop-lossed (default 0.50 = 50%).
@@ -138,6 +140,14 @@ public class AppConfig {
             String strategiesRaw = props.getProperty("strategy.enabled", "");
             if (!strategiesRaw.isBlank()) {
                 config.enabledStrategies = Arrays.stream(strategiesRaw.split(","))
+                        .map(String::strip).filter(s -> !s.isEmpty())
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
+            }
+            config.premiumSellerEnabled = Boolean.parseBoolean(
+                    props.getProperty("premium.seller.enabled", "false"));
+            String premiumStratsRaw = props.getProperty("premium.strategies", "");
+            if (!premiumStratsRaw.isBlank()) {
+                config.premiumEnabledStrategies = Arrays.stream(premiumStratsRaw.split(","))
                         .map(String::strip).filter(s -> !s.isEmpty())
                         .collect(Collectors.toCollection(LinkedHashSet::new));
             }
@@ -261,6 +271,8 @@ public class AppConfig {
             props.setProperty("risk.market_regime_filter", String.valueOf(marketRegimeFilterEnabled));
             props.setProperty("risk.earnings_blackout_days", String.valueOf(earningsBlackoutDays));
             props.setProperty("strategy.enabled", String.join(",", enabledStrategies));
+            props.setProperty("premium.seller.enabled", String.valueOf(premiumSellerEnabled));
+            props.setProperty("premium.strategies", String.join(",", premiumEnabledStrategies));
             props.setProperty("options.symbol.allowlist", String.join(",", optionsSymbolAllowlist));
             props.setProperty("options.calls.disabled", String.join(",", optionsCallsDisabled));
             props.setProperty("options.puts.disabled",  String.join(",", optionsPutsDisabled));
@@ -347,6 +359,10 @@ public class AppConfig {
     public Set<String> getEnabledStrategies() { return enabledStrategies; }
     public void setEnabledStrategies(Set<String> strategies) { this.enabledStrategies = new LinkedHashSet<>(strategies); }
     public boolean isStrategyEnabled(String name) { return enabledStrategies.contains(name); }
+    public boolean isPremiumSellerEnabled() { return premiumSellerEnabled; }
+    public void setPremiumSellerEnabled(boolean v) { this.premiumSellerEnabled = v; }
+    public Set<String> getPremiumEnabledStrategies() { return premiumEnabledStrategies; }
+    public void setPremiumEnabledStrategies(Set<String> s) { this.premiumEnabledStrategies = new LinkedHashSet<>(s); }
     public int getDowntrendPutMinSignals() { return downtrendPutMinSignals; }
     public void setDowntrendPutMinSignals(int n) { this.downtrendPutMinSignals = n; }
 

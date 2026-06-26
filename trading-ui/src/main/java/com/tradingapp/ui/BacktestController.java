@@ -56,6 +56,7 @@ public class BacktestController implements Initializable {
 
     private static final String EQUITY_LABEL = "Equity (Current)";
     private static final String COMPARE_ALL_LABEL = "Compare All";
+    private static final String REGIME_COMPARE_LABEL = "Regime Filter Compare";
 
     record StrategyResult(String name, double returnPct, double maxDrawdownPct,
                           double winRate, int trades) {
@@ -79,6 +80,7 @@ public class BacktestController implements Initializable {
             strategyCombo.getItems().add(s.getDisplayName());
         }
         strategyCombo.getItems().add(COMPARE_ALL_LABEL);
+        strategyCombo.getItems().add(REGIME_COMPARE_LABEL);
         strategyCombo.setValue(EQUITY_LABEL);
         strategyCombo.setOnAction(e -> onStrategyChanged());
 
@@ -142,7 +144,8 @@ public class BacktestController implements Initializable {
     }
 
     private void onStrategyChanged() {
-        boolean isCompare = COMPARE_ALL_LABEL.equals(strategyCombo.getValue());
+        String val = strategyCombo.getValue();
+        boolean isCompare = COMPARE_ALL_LABEL.equals(val) || REGIME_COMPARE_LABEL.equals(val);
         comparisonTable.setVisible(isCompare);
         comparisonTable.setManaged(isCompare);
         backtestChart.setVisible(!isCompare);
@@ -242,6 +245,11 @@ public class BacktestController implements Initializable {
                     List<StrategyResult> rows = runAllStrategies(cfg, barsBySymbol);
                     Platform.runLater(() -> applyComparisonResults(rows));
 
+                } else if (REGIME_COMPARE_LABEL.equals(selected)) {
+                    Map<LocalDate, Double> spyClose = buildSpyClose(startDate, endDate, provider);
+                    List<StrategyResult> rows = runRegimeCompare(cfg, barsBySymbol, spyClose);
+                    Platform.runLater(() -> applyComparisonResults(rows));
+
                 } else {
                     OptionsStrategy optStrat = strategyForName(selected);
                     if (optStrat == null) return;
@@ -282,6 +290,11 @@ public class BacktestController implements Initializable {
         runBacktestButton.setDisable(true);
         backtestProgress.setVisible(true);
         btReturnLabel.setText("Fetching minute bars...");
+        // Show comparison table immediately so it's ready when results arrive
+        comparisonTable.setVisible(true);
+        comparisonTable.setManaged(true);
+        backtestChart.setVisible(false);
+        backtestChart.setManaged(false);
 
         List<String> watchlist = new ArrayList<>(DayTraderWatchList.SYMBOLS);
         AppConfig cfg = appConfig;
@@ -317,22 +330,46 @@ public class BacktestController implements Initializable {
                     return;
                 }
 
-                Platform.runLater(() -> btReturnLabel.setText("Running intraday sim..."));
+                // 4-pass regime-filter comparison.
+                // Disable event-log collection — each pass can accumulate 1-2 GB otherwise.
+                record RegimePass(String label, int extraBuys) {}
+                List<RegimePass> passes = List.of(
+                        new RegimePass("Regime 5-day MA (baseline)",  Integer.MAX_VALUE),
+                        new RegimePass("Override: +1 extra buy signal", 1),
+                        new RegimePass("Override: +2 extra buy signals", 2),
+                        new RegimePass("Override: +3 extra buy signals", 3)
+                );
 
-                // Placeholder account/history — replaced by engine's shared objects in onBacktestInit
-                OptionsOrderExecutor optExec = new OptionsOrderExecutor(new Account(), null);
-                OptionsSignalRouter optRouter = new OptionsSignalRouter(
-                        new BlackScholesEngine(), optExec, new Account(), new PriceHistory(),
-                        msg -> {}, null);
-                optRouter.setOptionsAllowlist(Set.of("SPY","AMZN","PLTR","META","MSFT","NVDA","AAPL","NOK","F"));
-                optRouter.setCallsDisabledSymbols(Set.of("MSFT"));
-                optRouter.setPutsDisabledSymbols(Set.of("NVDA"));
+                List<StrategyResult> rows = new ArrayList<>();
+                int passNum = 0;
+                for (RegimePass pass : passes) {
+                    passNum++;
+                    final int pn = passNum;
+                    Platform.runLater(() -> btReturnLabel.setText("Pass " + pn + "/4: " + pass.label()));
 
-                IntradayBacktestEngine engine = new IntradayBacktestEngine(new IndicatorEngine(), new FeeCalculator());
-                IntradayBacktestResult result = engine.run(watchlist, barsBySymbol, 100_000.0, optRouter,
-                        msg -> Platform.runLater(() -> btReturnLabel.setText(msg)));
+                    // Placeholder account/history — replaced by engine's shared objects in onBacktestInit
+                    OptionsOrderExecutor optExec = new OptionsOrderExecutor(new Account(), null);
+                    OptionsSignalRouter optRouter = new OptionsSignalRouter(
+                            new BlackScholesEngine(), optExec, new Account(), new PriceHistory(),
+                            msg -> {}, null);
+                    optRouter.setOptionsAllowlist(Set.of("SPY","AMZN","PLTR","META","MSFT","NVDA","AAPL","NOK","F"));
+                    optRouter.setCallsDisabledSymbols(Set.of("MSFT"));
+                    optRouter.setPutsDisabledSymbols(Set.of("NVDA"));
 
-                Platform.runLater(() -> applySingleResult(result, "Intraday 100d"));
+                    final int extra = pass.extraBuys();
+                    IntradayBacktestResult result = new IntradayBacktestEngine(new IndicatorEngine(), new FeeCalculator())
+                            .setCollectEventLog(false)
+                            .run(watchlist, barsBySymbol, 100_000.0, optRouter,
+                                    msg -> Platform.runLater(() -> btReturnLabel.setText("Pass " + pn + "/4: " + msg)),
+                                    Set.of(),
+                                    loop -> {
+                                        loop.setMarketRegimeFilterEnabled(true);
+                                        loop.setRegimeOverrideExtraBuys(extra);
+                                    });
+                    rows.add(toRow(pass.label(), result));
+                }
+                rows.sort(Comparator.comparingDouble(StrategyResult::riskReward).reversed());
+                Platform.runLater(() -> applyComparisonResults(rows));
 
             } catch (Exception e) {
                 Platform.runLater(() -> {
@@ -349,6 +386,40 @@ public class BacktestController implements Initializable {
         }, "intraday-sim");
         t.setDaemon(true);
         t.start();
+    }
+
+    private Map<LocalDate, Double> buildSpyClose(LocalDate start, LocalDate end, QuoteProvider provider) throws Exception {
+        List<HistoricalBar> bars = (provider != null)
+                ? provider.getHistoricalBars("SPY", start, end)
+                : new com.tradingapp.data.HistoricalBarFetcher().fetchDailyBars("SPY", start, end);
+        Map<LocalDate, Double> map = new HashMap<>();
+        for (HistoricalBar bar : bars) map.put(bar.getDate(), bar.getClose());
+        return map;
+    }
+
+    private List<StrategyResult> runRegimeCompare(BacktestConfig cfg,
+            Map<String, List<HistoricalBar>> barsBySymbol, Map<LocalDate, Double> spyClose) {
+        List<StrategyResult> rows = new ArrayList<>();
+        IndicatorEngine ind = new IndicatorEngine();
+        FeeCalculator fee = new FeeCalculator();
+
+        // Baseline: live app behaviour — regime filter on, never override
+        rows.add(toRow("Regime 5-day MA (baseline)",
+                new BacktestEngine(ind, fee)
+                        .withRegimeFilter(BacktestEngine.REGIME_STRICT, spyClose)
+                        .run(cfg, barsBySymbol)));
+        // Override thresholds: absolute buy-signal count needed to bypass the downtrend block.
+        // Base trigger is buys >= 2, so +1/+2/+3 extra maps to absolute thresholds 3/4/5.
+        int[] overrides = {3, 4, 5};
+        int[] extras    = {1, 2, 3};
+        for (int i = 0; i < overrides.length; i++) {
+            rows.add(toRow("Override: +" + extras[i] + " extra buy signal" + (extras[i] > 1 ? "s" : ""),
+                    new BacktestEngine(ind, fee)
+                            .withRegimeFilter(overrides[i], spyClose)
+                            .run(cfg, barsBySymbol)));
+        }
+        rows.sort(Comparator.comparingDouble(StrategyResult::riskReward).reversed());
+        return rows;
     }
 
     private Map<String, List<HistoricalBar>> fetchBars(List<String> symbols, LocalDate start, LocalDate end,

@@ -312,6 +312,25 @@
 
     <Separator/>
 
+    <!-- Premium Selling Strategies section -->
+    <Label text="Premium Selling Strategies"
+           style="-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #aaaaaa;"/>
+
+    <CheckBox fx:id="premiumSellerEnabledCheck" text="Enable Premium Selling"
+              style="-fx-text-fill: #e0e0e0;"/>
+
+    <Label text="Premium positions are held for days/weeks and are never force-closed at 15:55. They exit on profit target (50% of credit), price through the short strike, or &lt; 7 DTE."
+           style="-fx-font-size: 11px; -fx-text-fill: #888888;" wrapText="true" maxWidth="520"/>
+
+    <HBox spacing="20" alignment="CENTER_LEFT">
+        <CheckBox fx:id="premiumPcsCheck" text="Put Credit Spread (PCS)" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="premiumCcsCheck" text="Call Credit Spread (CCS)" style="-fx-text-fill: #e0e0e0;"/>
+    </HBox>
+    <Label text="PCS prefers bullish signals; CCS prefers bearish. If both qualify on the same symbol, PCS takes priority and CCS is skipped."
+           style="-fx-font-size: 11px; -fx-text-fill: #888888;" wrapText="true" maxWidth="520"/>
+
+    <Separator/>
+
     <!-- Actions -->
     <HBox spacing="12" alignment="CENTER_LEFT">
         <Button fx:id="testConnectionButton" text="Test Connection"
