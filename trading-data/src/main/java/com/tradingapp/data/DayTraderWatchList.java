@@ -32,7 +32,7 @@ public class DayTraderWatchList {
         "AMAT",  // $22,986
         "KLAC",  // $173,866
         "CAT",   // $49,372
-        "NFLX",  // $54,868
+        "AVGO",  // $1,587 net P&L (replaced NFLX, ranked #1 in Jun-2026 scan)
         "UNH",   // $24,273
         "LMT",   // $14,458
         "JPM",   // scan P&L $15,934 — +56pp return vs 25-symbol baseline

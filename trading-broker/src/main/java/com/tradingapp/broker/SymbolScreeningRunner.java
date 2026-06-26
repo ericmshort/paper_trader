@@ -24,13 +24,13 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Screens the 70 symbols in MasterUniverse that are not in the current options watchlist.
+ * Screens candidate symbols from MasterUniverse against the current 29-symbol options allowlist.
  *
- * Baseline: 25-symbol options-only watchlist (Config D allowlist — all 30 current symbols
- * minus the 5 that don't trade options: QQQ, TSLA, AXP, GILD, MRNA).
+ * Baseline: the 29 symbols currently in options.symbol.allowlist (live app.properties).
+ * NFLX is excluded from options trading, leaving one open slot.
  *
  * For each candidate: run baseline + that symbol (added to both watchlist and allowlist),
- * measure return delta. Ranks all 70 and prints the top 20.
+ * measure return delta. Ranks all candidates and prints the top results.
  *
  * Run via:
  *   mvn -pl trading-broker exec:java -Dexec.mainClass=com.tradingapp.broker.SymbolScreeningRunner
@@ -39,12 +39,14 @@ public class SymbolScreeningRunner {
 
     private static final ZoneId ET = ZoneId.of("America/New_York");
 
-    // Current 25-symbol options-only watchlist (Config D, post AXP/GILD/MRNA prune)
+    // Current 29-symbol live options allowlist (from options.symbol.allowlist in app.properties)
     private static final List<String> BASELINE_WATCHLIST = List.of(
-            "SPY","AAPL","MSFT","NVDA","META","AMZN","PLTR",
-            "LLY","ORCL","RTX","GS","TSM","TGT",
-            "MA","UNH","ADBE","LOW","COP","XOM",
-            "NET","CRWD","PG","AMD","WMT","QCOM");
+            "SPY", "NOC", "NVDA", "MSFT", "COST",
+            "VRTX", "AMGN", "CRWD", "GS", "PLTR",
+            "LRCX", "DE", "ORCL", "LLY", "BLK",
+            "NOW", "MA", "REGN", "META", "AMAT",
+            "KLAC", "CAT", "UNH", "LMT", "JPM",
+            "MU", "HD", "MCD", "V");
 
     public static void main(String[] args) throws Exception {
         AppConfig cfg = AppConfig.load();
@@ -58,9 +60,10 @@ public class SymbolScreeningRunner {
             endDate = endDate.minusDays(1);
         LocalDate startDate = endDate.minusDays(800);
 
-        // Candidates: MasterUniverse symbols not in the current watchlist (nor the 5 being dropped)
+        // Candidates: MasterUniverse symbols not in the current allowlist.
+        // Exclude QQQ/TSLA (always options-excluded) and NFLX (currently excluded from options).
         Set<String> current = new HashSet<>(BASELINE_WATCHLIST);
-        current.addAll(Set.of("QQQ", "TSLA", "AXP", "GILD", "MRNA")); // full current 30
+        current.addAll(Set.of("QQQ", "TSLA", "NFLX")); // options-ineligible
         List<String> candidates = new ArrayList<>();
         for (String sym : MasterUniverse.SYMBOLS) {
             if (!current.contains(sym)) candidates.add(sym);
@@ -97,7 +100,7 @@ public class SymbolScreeningRunner {
         double maxExposure = cfg.getMaxPortfolioExposurePct() / 100.0;
 
         // Run baseline first
-        System.out.println("=== BASELINE (25 symbols) ===");
+        System.out.println("=== BASELINE (29 symbols, current live allowlist) ===");
         double baselineReturn = runOnce(engine, cfg, maxExposure, barsBySymbol,
                 BASELINE_WATCHLIST, Set.copyOf(BASELINE_WATCHLIST));
         System.out.printf("Baseline return: %.2f%%%n%n", baselineReturn);
@@ -137,7 +140,7 @@ public class SymbolScreeningRunner {
 
         System.out.println();
         System.out.println("=== SCREENING RESULTS (ranked by return delta vs baseline) ===");
-        System.out.printf("Baseline: %.2f%% return  (25 symbols, no rotation)%n%n", baselineReturn);
+        System.out.printf("Baseline: %.2f%% return  (29 symbols, current live allowlist)%n%n", baselineReturn);
         System.out.printf("%-8s  %8s  %8s  %8s  %7s  %7s%n",
                 "Symbol", "Return", "Delta", "MaxDD", "Trades", "WinRate");
         System.out.println("-".repeat(60));
@@ -151,10 +154,10 @@ public class SymbolScreeningRunner {
         }
 
         System.out.println();
-        System.out.println("=== RECOMMENDED NEW WATCHLIST (25 current + top 5) ===");
-        System.out.print("  " + String.join(", ", BASELINE_WATCHLIST));
-        results.stream().limit(5).forEach(cr -> System.out.print(", " + cr.symbol()));
-        System.out.println();
+        System.out.println("=== TOP CANDIDATES TO REPLACE NFLX ===");
+        results.stream().limit(5).forEach(cr ->
+                System.out.printf("  %-6s  delta=%+.2f%%  return=%.2f%%  WR=%.1f%%%n",
+                        cr.symbol(), cr.delta(), cr.returnPct(), cr.winRate()));
     }
 
     private static double runOnce(IntradayBacktestEngine engine, AppConfig cfg, double maxExposure,
