@@ -323,6 +323,7 @@ public class DashboardController implements Initializable {
         if (!appConfig.getPremiumEnabledStrategies().isEmpty()) {
             premiumSellerRouter.setEnabledStrategies(appConfig.getPremiumEnabledStrategies());
         }
+        premiumSellerRouter.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
 
         Path weightsPath = AppConfig.getDataDir().resolve("signal-weights.json");
         SignalWeights initialWeights;
@@ -362,6 +363,7 @@ public class DashboardController implements Initializable {
                 optionsRouter, mlEval, trainingCallback);
         tradingLoop.setTransactionLog(transactionLog);
         if (appConfig.isPremiumSellerEnabled()) {
+            premiumSellerRouter.setUptrendSupplier(tradingLoop::isUptrend);
             tradingLoop.setPremiumSellerEvaluator(premiumSellerRouter);
         }
         if (useWsProvider) {

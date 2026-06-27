@@ -132,6 +132,7 @@ public class PremiumSellerComparisonRunner {
         premRouter.setEnabledStrategies(Set.of(
                 PremiumSellerRouter.STRATEGY_PUT_CREDIT_SPREAD,
                 PremiumSellerRouter.STRATEGY_CALL_CREDIT_SPREAD));
+        premRouter.setMaxPortfolioExposure(cfg.getMaxPortfolioExposurePct() / 100.0);
 
         OptionsEvaluator optEval = new CompositeEvaluator(intradayRouter, premRouter);
 
@@ -143,6 +144,7 @@ public class PremiumSellerComparisonRunner {
                 msg -> {}, Set.of(),
                 loop -> {
                     intradayRouter.setUptrendSupplier(loop::isUptrend);
+                    premRouter.setUptrendSupplier(loop::isUptrend);
                     loop.setStockTradingEnabled(false);
                     loop.setMaxConcurrentStockPositions(10);
                     loop.setAvoidOvernightHolds(false);

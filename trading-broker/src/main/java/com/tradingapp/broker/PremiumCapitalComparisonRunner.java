@@ -111,12 +111,14 @@ public class PremiumCapitalComparisonRunner {
         // ── Config A: Intraday + PCS + CCS ───────────────────────────────────
         System.out.println("Running Config A: Intraday + Premium Seller (PCS + CCS)...");
         List<String> premLogA = new ArrayList<>();
-        OptionsEvaluator evalA = buildCompositeEvaluator(cfg, vixCache, optAllowlist, maxExposure, premLogA);
+        PremiumSellerRouter premRouterA = buildPremiumRouter(vixCache, premLogA, maxExposure);
+        OptionsEvaluator evalA = buildCompositeEvaluator(cfg, vixCache, optAllowlist, maxExposure, premRouterA);
 
         long t0 = System.currentTimeMillis();
         IntradayBacktestResult resultA = engine.run(watchlist, barsBySymbol, 100_000.0, evalA,
                 msg -> {}, Set.of(),
                 loop -> {
+                    premRouterA.setUptrendSupplier(loop::isUptrend);
                     loop.setStockTradingEnabled(false);
                     loop.setMaxConcurrentStockPositions(10);
                     loop.setAvoidOvernightHolds(false);
@@ -129,12 +131,13 @@ public class PremiumCapitalComparisonRunner {
         // ── Config B: PCS + CCS only ──────────────────────────────────────────
         System.out.println("Running Config B: Premium Seller only (PCS + CCS)...");
         List<String> premLogB = new ArrayList<>();
-        OptionsEvaluator evalB = buildPremiumOnlyEvaluator(cfg, vixCache, premLogB);
+        PremiumSellerRouter premRouterB = buildPremiumRouter(vixCache, premLogB, maxExposure);
 
         t0 = System.currentTimeMillis();
-        IntradayBacktestResult resultB = engine.run(watchlist, barsBySymbol, 100_000.0, evalB,
+        IntradayBacktestResult resultB = engine.run(watchlist, barsBySymbol, 100_000.0, premRouterB,
                 msg -> {}, Set.of(),
                 loop -> {
+                    premRouterB.setUptrendSupplier(loop::isUptrend);
                     loop.setStockTradingEnabled(false);
                     loop.setMaxConcurrentStockPositions(10);
                     loop.setAvoidOvernightHolds(false);
@@ -155,10 +158,24 @@ public class PremiumCapitalComparisonRunner {
 
     // ── Evaluator builders ────────────────────────────────────────────────────
 
+    private static PremiumSellerRouter buildPremiumRouter(VixCache vixCache, List<String> premLog,
+                                                           double maxPortfolioExposure) {
+        BlackScholesEngine bsPrem = new BlackScholesEngine();
+        bsPrem.setVixProvider(vixCache::getVix, vixCache.baselineVix());
+        OptionsOrderExecutor premExec = new OptionsOrderExecutor(new Account(), null);
+        PremiumSellerRouter premium = new PremiumSellerRouter(
+                bsPrem, premExec, new Account(), new PriceHistory(), premLog::add);
+        premium.setEnabledStrategies(Set.of(
+                PremiumSellerRouter.STRATEGY_PUT_CREDIT_SPREAD,
+                PremiumSellerRouter.STRATEGY_CALL_CREDIT_SPREAD));
+        premium.setMaxPortfolioExposure(maxPortfolioExposure);
+        return premium;
+    }
+
     private static OptionsEvaluator buildCompositeEvaluator(AppConfig cfg, VixCache vixCache,
                                                              Set<String> optAllowlist,
                                                              double maxExposure,
-                                                             List<String> premLog) {
+                                                             PremiumSellerRouter premium) {
         BlackScholesEngine bs = new BlackScholesEngine();
         bs.setVixProvider(vixCache::getVix, vixCache.baselineVix());
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(new Account(), null);
@@ -182,30 +199,7 @@ public class PremiumCapitalComparisonRunner {
         intraday.setProfitTarget(cfg.getProfitTarget());
         intraday.setEntryConfirmationTicks(Math.max(1, cfg.getEntryConfirmationTicks() / 12));
         intraday.setOvernightMinPremiumFrac(cfg.getOvernightMinPremiumFrac());
-
-        BlackScholesEngine bsPrem = new BlackScholesEngine();
-        bsPrem.setVixProvider(vixCache::getVix, vixCache.baselineVix());
-        OptionsOrderExecutor premExec = new OptionsOrderExecutor(new Account(), null);
-        PremiumSellerRouter premium = new PremiumSellerRouter(
-                bsPrem, premExec, new Account(), new PriceHistory(), premLog::add);
-        premium.setEnabledStrategies(Set.of(
-                PremiumSellerRouter.STRATEGY_PUT_CREDIT_SPREAD,
-                PremiumSellerRouter.STRATEGY_CALL_CREDIT_SPREAD));
-
         return new CompositeEvaluator(intraday, premium);
-    }
-
-    private static OptionsEvaluator buildPremiumOnlyEvaluator(AppConfig cfg, VixCache vixCache,
-                                                               List<String> premLog) {
-        BlackScholesEngine bsPrem = new BlackScholesEngine();
-        bsPrem.setVixProvider(vixCache::getVix, vixCache.baselineVix());
-        OptionsOrderExecutor premExec = new OptionsOrderExecutor(new Account(), null);
-        PremiumSellerRouter premium = new PremiumSellerRouter(
-                bsPrem, premExec, new Account(), new PriceHistory(), premLog::add);
-        premium.setEnabledStrategies(Set.of(
-                PremiumSellerRouter.STRATEGY_PUT_CREDIT_SPREAD,
-                PremiumSellerRouter.STRATEGY_CALL_CREDIT_SPREAD));
-        return premium;
     }
 
     // ── Console summary ───────────────────────────────────────────────────────

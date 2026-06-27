@@ -50,18 +50,22 @@ public class Account {
 
     public synchronized void addRealizedPnL(double amount) { this.totalRealizedPnL += amount; }
 
-    public double totalExposureFraction() {
+    public double getTotalPortfolioValue() {
         double equity = positions.values().stream().mapToDouble(Position::getMarketValue).sum();
-        // allOptions includes short legs (negative contracts) for accurate portfolio value.
         double allOptions = optionsPositions.values().stream()
                 .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts()).sum();
+        return balance + equity + allOptions;
+    }
+
+    public double totalExposureFraction() {
         // Only long (debit) positions consumed cash and count toward the deployment cap.
         // Short legs have negative contracts and would otherwise reduce the numerator,
-        // letting credit spreads punch a hole in the 60% cap.
+        // letting credit spreads punch a hole in the cap.
+        double equity = positions.values().stream().mapToDouble(Position::getMarketValue).sum();
         double deployedOptions = optionsPositions.values().stream()
                 .filter(p -> p.getContracts() > 0)
                 .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts()).sum();
-        double totalPortfolioValue = balance + equity + allOptions;
+        double totalPortfolioValue = getTotalPortfolioValue();
         if (totalPortfolioValue <= 0) return 1.0;
         return (equity + deployedOptions) / totalPortfolioValue;
     }

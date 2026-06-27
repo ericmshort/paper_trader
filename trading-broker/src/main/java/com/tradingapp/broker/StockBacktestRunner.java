@@ -195,7 +195,7 @@ public class StockBacktestRunner {
         IntradayBacktestResult result1 = engine.run(
                 new ArrayList<>(barsBySymbol.keySet()), barsBySymbol, 100_000.0,
                 null, msg -> {}, java.util.Set.of(),
-                loop -> { baseConfig.accept(loop); loop.setRegimeMaDays(20); });
+                loop -> { baseConfig.accept(loop); loop.setRegimeMaDays(5); });
 
         System.out.printf("Pass 1 done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
                 (System.currentTimeMillis() - t0) / 1000.0,

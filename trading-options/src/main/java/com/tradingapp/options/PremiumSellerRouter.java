@@ -73,6 +73,12 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
     private Supplier<ZonedDateTime> clock = () -> ZonedDateTime.now(ET);
 
+    // When set, PCS entries are blocked when this returns false (SPY below regime MA).
+    private java.util.function.BooleanSupplier uptrendSupplier = null;
+
+    // Maximum fraction of portfolio that may be deployed before new entries are blocked.
+    private double maxPortfolioExposure = 0.70;
+
     // When non-null, only these strategies attempt new entries (all others still close open positions)
     private java.util.Set<String> enabledStrategies = null;
 
@@ -84,6 +90,14 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         this.account     = account;
         this.priceHistory = priceHistory;
         this.log         = log;
+    }
+
+    public void setUptrendSupplier(java.util.function.BooleanSupplier supplier) {
+        this.uptrendSupplier = supplier;
+    }
+
+    public void setMaxPortfolioExposure(double fraction) {
+        this.maxPortfolioExposure = fraction;
     }
 
     public void setEnabledStrategies(java.util.Set<String> strategies) {
@@ -151,9 +165,17 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         // Skip new entries while daily loss limit is active
         if (account.isDailyLossHalted()) return;
 
+        // Skip new entries if max-loss-at-risk across open premium positions exceeds the cap.
+        // Uses spread width × |contracts| × 100 per position — more accurate than cash-deployed
+        // for credit spreads, which receive cash on entry and look cheap on a deployment basis.
+        double portfolioValue = account.getTotalPortfolioValue();
+        if (portfolioValue > 0 && premiumMaxLossAtRisk() / portfolioValue >= maxPortfolioExposure) return;
+
         // ── 2. New entries (once per day per symbol per strategy) ─────────────
-        // Put Credit Spread / CSP: bullish or neutral
-        if (buys >= sells && sells < 2) {
+        boolean inUptrend = uptrendSupplier == null || uptrendSupplier.getAsBoolean();
+
+        // Put Credit Spread / CSP: bullish or neutral — require uptrend (SPY above regime MA)
+        if (buys >= sells && sells < 2 && inUptrend) {
             if (isEnabled(STRATEGY_PUT_CREDIT_SPREAD))
                 tryEnterPutSpread(symbol, price, sigma, today, signalStr, featureCsv);
             if (isEnabled(STRATEGY_CASH_SECURED_PUT))
@@ -512,6 +534,30 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Total max-loss-at-risk across all open premium positions.
+     * For credit spreads the max loss is SPREAD_WIDTH × |contracts| × 100.
+     * Iron Condor counted once (one wing can breach at a time).
+     * CSP counted at strike × |contracts| × 100 (full downside).
+     */
+    private double premiumMaxLossAtRisk() {
+        double risk = 0;
+        for (Map.Entry<String, OptionsPosition> e : account.getOptionsPositions().entrySet()) {
+            String key = e.getKey();
+            OptionsPosition pos = e.getValue();
+            int n = Math.abs(pos.getContracts());
+            if (key.endsWith(PUTSPREAD_SHORT) || key.endsWith(CALLSPREAD_SHORT)) {
+                risk += SPREAD_WIDTH * n * 100;
+            } else if (key.endsWith(IC_SHORTPUT)) {
+                // Count one IC wing only — max loss is the breached side, not both simultaneously
+                risk += SPREAD_WIDTH * n * 100;
+            } else if (key.endsWith(CSP_PUT)) {
+                risk += pos.getStrike() * n * 100;
+            }
+        }
+        return risk;
+    }
 
     /**
      * Returns an exit reason string when an exit condition is triggered, or null to hold.
