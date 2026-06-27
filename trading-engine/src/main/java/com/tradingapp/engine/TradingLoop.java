@@ -34,7 +34,7 @@ public class TradingLoop implements Runnable {
     static final double SIGNAL_THRESHOLD = 2.5;
     // Sell threshold is higher than buy — signal sells had a 4% win rate at 2.5, meaning they
     // were cutting winners early. Requiring stronger consensus before exiting on signals alone.
-    private static final double SELL_SIGNAL_THRESHOLD = 4.0;
+    private double sellSignalThreshold = 4.0;
     private double maxPortfolioExposure = 0.60;
     private static final LocalTime MARKET_OPEN      = LocalTime.of(9, 30);
     private static final LocalTime MARKET_CLOSE     = LocalTime.of(16, 0);
@@ -203,6 +203,7 @@ public class TradingLoop implements Runnable {
     public void setTrailingStopPct(double pct) { trailingStop.setTrailingStopPct(pct); }
     public void setMaxLossPerTradePct(double pct) { this.maxLossPerTradePct = pct; }
     public void setCircuitBreakerPct(double pct) { this.circuitBreakerPct = pct; }
+    public void setSellSignalThreshold(double threshold) { this.sellSignalThreshold = threshold; }
     public void setPremiumSellerEvaluator(OptionsEvaluator e) { this.premiumSellerEvaluator = e; }
 
     public void setStockWatchlist(java.util.Collection<String> symbols) {
@@ -469,7 +470,7 @@ public class TradingLoop implements Runnable {
                     researchCallback.accept(symbol + " on 60-min re-entry cooldown after trailing stop (price $"
                             + String.format("%.2f", price) + (ep != null ? " < peak, entry was $" + String.format("%.2f", ep) : "") + ")");
                     uiRefreshCallback.run();
-                } else if (weightedSells >= SELL_SIGNAL_THRESHOLD && hasPosition) {
+                } else if (weightedSells >= sellSignalThreshold && hasPosition) {
                     ZonedDateTime entryTime = entryTimes.get(symbol);
                     long heldMinutes = entryTime != null
                             ? Duration.between(entryTime, now).toMinutes() : Long.MAX_VALUE;

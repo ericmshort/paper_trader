@@ -190,6 +190,85 @@ public class StockBacktestRunner {
             return;
         }
 
+        if ("sell-threshold-compare".equals(mode)) {
+            // Out-of-sample validation for the sell signal threshold.
+            // The 4.0 threshold was tuned by observing that sells at 2.5 cut winners too early.
+            // This mode splits the bar data at the midpoint: the first half is "in-sample"
+            // (what the threshold was tuned on) and the second half is "out-of-sample" (unseen).
+            // If 4.0 is a genuine edge rather than curve-fit noise it should hold up on both halves.
+            double[] thresholds = { 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 99.0 };
+
+            LocalDate splitDate = startDate.plusDays((endDate.toEpochDay() - startDate.toEpochDay()) / 2);
+            // Advance to nearest Monday if it falls on a weekend
+            while (splitDate.getDayOfWeek() == java.time.DayOfWeek.SATURDAY
+                    || splitDate.getDayOfWeek() == java.time.DayOfWeek.SUNDAY) {
+                splitDate = splitDate.plusDays(1);
+            }
+
+            // Filter bar maps to each half
+            final LocalDate split = splitDate;
+            Map<String, List<IntradayBar>> inSampleBars  = new LinkedHashMap<>();
+            Map<String, List<IntradayBar>> outSampleBars = new LinkedHashMap<>();
+            for (Map.Entry<String, List<IntradayBar>> e : barsBySymbol.entrySet()) {
+                List<IntradayBar> in  = e.getValue().stream()
+                        .filter(b -> !b.time().toLocalDate().isAfter(split)).collect(Collectors.toList());
+                List<IntradayBar> out = e.getValue().stream()
+                        .filter(b -> b.time().toLocalDate().isAfter(split)).collect(Collectors.toList());
+                if (!in.isEmpty())  inSampleBars.put(e.getKey(), in);
+                if (!out.isEmpty()) outSampleBars.put(e.getKey(), out);
+            }
+
+            record ThresholdSummary(double threshold, double inReturn, double inMaxDd, int inTrades, int inWins,
+                                    double outReturn, double outMaxDd, int outTrades, int outWins) {}
+            List<ThresholdSummary> summaries = new ArrayList<>();
+
+            System.out.printf("Split date : %s (in-sample: %s→%s  out-of-sample: %s→%s)%n",
+                    split, startDate, split, split.plusDays(1), endDate);
+            System.out.printf("%-12s  %10s  %10s  %8s  %8s    %10s  %10s  %8s  %8s%n",
+                    "Threshold", "In-Ret", "In-DD", "In-Trades", "In-WR",
+                    "Out-Ret", "Out-DD", "Out-Trades", "Out-WR");
+            System.out.println("-".repeat(100));
+
+            for (double thresh : thresholds) {
+                final double t = thresh;
+                String label = thresh >= 90 ? "DISABLED" : String.format("%.1f", thresh);
+
+                IntradayBacktestResult inR = engine.run(
+                        new ArrayList<>(inSampleBars.keySet()), inSampleBars, 100_000.0,
+                        null, msg -> {}, java.util.Set.of(),
+                        loop -> { baseConfig.accept(loop); loop.setRegimeMaDays(5); loop.setSellSignalThreshold(t); });
+
+                IntradayBacktestResult outR = engine.run(
+                        new ArrayList<>(outSampleBars.keySet()), outSampleBars, 100_000.0,
+                        null, msg -> {}, java.util.Set.of(),
+                        loop -> { baseConfig.accept(loop); loop.setRegimeMaDays(5); loop.setSellSignalThreshold(t); });
+
+                double inWr  = inR.getTotalTrades()  > 0 ? 100.0 * inR.getWins()  / inR.getTotalTrades()  : 0;
+                double outWr = outR.getTotalTrades() > 0 ? 100.0 * outR.getWins() / outR.getTotalTrades() : 0;
+                String current = thresh == 4.0 ? " ←" : "";
+                System.out.printf("%-12s  %+9.2f%%  %9.2f%%  %9d  %7.1f%%    %+9.2f%%  %9.2f%%  %9d  %7.1f%%%s%n",
+                        label,
+                        inR.getTotalReturnPct(), inR.getMaxDrawdownPct(), inR.getTotalTrades(), inWr,
+                        outR.getTotalReturnPct(), outR.getMaxDrawdownPct(), outR.getTotalTrades(), outWr,
+                        current);
+                summaries.add(new ThresholdSummary(thresh,
+                        inR.getTotalReturnPct(), inR.getMaxDrawdownPct(), inR.getTotalTrades(), inR.getWins(),
+                        outR.getTotalReturnPct(), outR.getMaxDrawdownPct(), outR.getTotalTrades(), outR.getWins()));
+            }
+
+            // Rank by out-of-sample return to highlight what actually generalises
+            System.out.println("\n--- Ranked by out-of-sample return ---");
+            summaries.stream()
+                    .sorted(Comparator.comparingDouble(ThresholdSummary::outReturn).reversed())
+                    .forEach(s -> {
+                        String label = s.threshold() >= 90 ? "DISABLED    " : String.format("sell>=%.1f     ", s.threshold());
+                        String current = s.threshold() == 4.0 ? " ← current" : "";
+                        System.out.printf("  %-14s  out-of-sample: %+.2f%%  in-sample: %+.2f%%%s%n",
+                                label, s.outReturn(), s.inReturn(), current);
+                    });
+            return;
+        }
+
         System.out.println("Running pass 1/2: baseline (5-day SPY MA)...");
         long t0 = System.currentTimeMillis();
         IntradayBacktestResult result1 = engine.run(
