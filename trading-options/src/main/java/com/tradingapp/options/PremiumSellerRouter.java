@@ -266,7 +266,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
         double T = bsEngine.timeToExpiry(shortPos.getExpiry());
         long dte = ChronoUnit.DAYS.between(today, shortPos.getExpiry());
-        double sCur = bsPut(price, shortPos.getStrike(), T, sigma) * (1 + IV_PREMIUM);
+        double sCur = bsPut(price, shortPos.getStrike(), T, sigma);
         double lCur = bsPut(price, longPos.getStrike(),  T, sigma);
 
         int contracts = Math.abs(shortPos.getContracts());
@@ -299,7 +299,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
         double T = bsEngine.timeToExpiry(shortPos.getExpiry());
         long dte = ChronoUnit.DAYS.between(today, shortPos.getExpiry());
-        double sCur = bsCall(price, shortPos.getStrike(), T, sigma) * (1 + IV_PREMIUM);
+        double sCur = bsCall(price, shortPos.getStrike(), T, sigma);
         double lCur = bsCall(price, longPos.getStrike(),  T, sigma);
 
         int contracts = Math.abs(shortPos.getContracts());
@@ -340,9 +340,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
         double T = bsEngine.timeToExpiry(scPos.getExpiry());
         long dte = ChronoUnit.DAYS.between(today, scPos.getExpiry());
-        double scCur = bsCall(price, scPos.getStrike(), T, sigma) * (1 + IV_PREMIUM);
+        double scCur = bsCall(price, scPos.getStrike(), T, sigma);
         double lcCur = bsCall(price, lcPos.getStrike(), T, sigma);
-        double spCur = bsPut (price, spPos.getStrike(), T, sigma) * (1 + IV_PREMIUM);
+        double spCur = bsPut (price, spPos.getStrike(), T, sigma);
         double lpCur = bsPut (price, lpPos.getStrike(), T, sigma);
 
         int contracts = Math.abs(scPos.getContracts());
@@ -375,7 +375,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
         double T = bsEngine.timeToExpiry(pos.getExpiry());
         long dte = ChronoUnit.DAYS.between(today, pos.getExpiry());
-        double curPrem = bsPut(price, pos.getStrike(), T, sigma) * (1 + IV_PREMIUM);
+        double curPrem = bsPut(price, pos.getStrike(), T, sigma);
 
         int contracts = Math.abs(pos.getContracts());
         double credit    = pos.getPremiumPaid() * 100 * contracts;
@@ -397,7 +397,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
         double T = bsEngine.timeToExpiry(pos.getExpiry());
         long dte = ChronoUnit.DAYS.between(today, pos.getExpiry());
-        double curPrem = bsCall(price, pos.getStrike(), T, sigma) * (1 + IV_PREMIUM);
+        double curPrem = bsCall(price, pos.getStrike(), T, sigma);
 
         int contracts = Math.abs(pos.getContracts());
         double credit    = pos.getPremiumPaid() * 100 * contracts;
