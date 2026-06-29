@@ -254,20 +254,26 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         OptionsPosition longPos  = account.getOptionsPositions().get(symbol + PUTSPREAD_LONG);
         if (shortPos == null && longPos == null) return;
         if (shortPos == null || longPos == null) {
-            // Orphaned single leg — close it immediately
+            // Orphaned single leg — attempt close then force-remove from local state.
+            // Without force-removal, a broker rejection leaves the position in local state
+            // and the close retries every 5-second tick indefinitely.
+            // If the leg is still real in Alpaca, broker sync will re-add it next cycle.
+            OptionsPosition orphanPos = shortPos != null ? shortPos : longPos;
             String orphanKey = shortPos != null ? symbol + PUTSPREAD_SHORT : symbol + PUTSPREAD_LONG;
+            double orphanT = bsEngine.timeToExpiry(orphanPos.getExpiry());
             double orphanPrem = shortPos != null
-                    ? bsPut(price, shortPos.getStrike(), bsEngine.timeToExpiry(shortPos.getExpiry()), sigma)
-                    : bsPut(price, longPos.getStrike(),  bsEngine.timeToExpiry(longPos.getExpiry()),  sigma);
+                    ? shortLegCurrentPrice(shortPos, price, orphanT, sigma)
+                    : longLegCurrentPrice(longPos,   price, orphanT, sigma);
             optExec.closePosition(orphanKey, orphanPrem, "Orphaned spread leg — closing");
+            account.removeOptionsPosition(orphanKey);
             log.accept(symbol + " PUT SPREAD orphaned leg closed");
             return;
         }
 
         double T = bsEngine.timeToExpiry(shortPos.getExpiry());
         long dte = ChronoUnit.DAYS.between(today, shortPos.getExpiry());
-        double sCur = bsPut(price, shortPos.getStrike(), T, sigma);
-        double lCur = bsPut(price, longPos.getStrike(),  T, sigma);
+        double sCur = shortLegCurrentPrice(shortPos, price, T, sigma);
+        double lCur = longLegCurrentPrice(longPos,   price, T, sigma);
 
         int contracts = Math.abs(shortPos.getContracts());
         double credit    = (shortPos.getPremiumPaid() - longPos.getPremiumPaid()) * 100 * contracts;
@@ -288,19 +294,22 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         OptionsPosition longPos  = account.getOptionsPositions().get(symbol + CALLSPREAD_LONG);
         if (shortPos == null && longPos == null) return;
         if (shortPos == null || longPos == null) {
+            OptionsPosition orphanPos = shortPos != null ? shortPos : longPos;
             String orphanKey = shortPos != null ? symbol + CALLSPREAD_SHORT : symbol + CALLSPREAD_LONG;
+            double orphanT = bsEngine.timeToExpiry(orphanPos.getExpiry());
             double orphanPrem = shortPos != null
-                    ? bsCall(price, shortPos.getStrike(), bsEngine.timeToExpiry(shortPos.getExpiry()), sigma)
-                    : bsCall(price, longPos.getStrike(),  bsEngine.timeToExpiry(longPos.getExpiry()),  sigma);
+                    ? shortLegCurrentPrice(shortPos, price, orphanT, sigma)
+                    : longLegCurrentPrice(longPos,   price, orphanT, sigma);
             optExec.closePosition(orphanKey, orphanPrem, "Orphaned spread leg — closing");
+            account.removeOptionsPosition(orphanKey);
             log.accept(symbol + " CALL SPREAD orphaned leg closed");
             return;
         }
 
         double T = bsEngine.timeToExpiry(shortPos.getExpiry());
         long dte = ChronoUnit.DAYS.between(today, shortPos.getExpiry());
-        double sCur = bsCall(price, shortPos.getStrike(), T, sigma);
-        double lCur = bsCall(price, longPos.getStrike(),  T, sigma);
+        double sCur = shortLegCurrentPrice(shortPos, price, T, sigma);
+        double lCur = longLegCurrentPrice(longPos,   price, T, sigma);
 
         int contracts = Math.abs(shortPos.getContracts());
         double credit    = (shortPos.getPremiumPaid() - longPos.getPremiumPaid()) * 100 * contracts;
@@ -340,10 +349,10 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
         double T = bsEngine.timeToExpiry(scPos.getExpiry());
         long dte = ChronoUnit.DAYS.between(today, scPos.getExpiry());
-        double scCur = bsCall(price, scPos.getStrike(), T, sigma);
-        double lcCur = bsCall(price, lcPos.getStrike(), T, sigma);
-        double spCur = bsPut (price, spPos.getStrike(), T, sigma);
-        double lpCur = bsPut (price, lpPos.getStrike(), T, sigma);
+        double scCur = shortLegCurrentPrice(scPos, price, T, sigma);
+        double lcCur = longLegCurrentPrice(lcPos,  price, T, sigma);
+        double spCur = shortLegCurrentPrice(spPos, price, T, sigma);
+        double lpCur = longLegCurrentPrice(lpPos,  price, T, sigma);
 
         int contracts = Math.abs(scPos.getContracts());
         double credit = ((scPos.getPremiumPaid() - lcPos.getPremiumPaid())
@@ -375,7 +384,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
         double T = bsEngine.timeToExpiry(pos.getExpiry());
         long dte = ChronoUnit.DAYS.between(today, pos.getExpiry());
-        double curPrem = bsPut(price, pos.getStrike(), T, sigma);
+        double curPrem = shortLegCurrentPrice(pos, price, T, sigma);
 
         int contracts = Math.abs(pos.getContracts());
         double credit    = pos.getPremiumPaid() * 100 * contracts;
@@ -397,7 +406,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
         double T = bsEngine.timeToExpiry(pos.getExpiry());
         long dte = ChronoUnit.DAYS.between(today, pos.getExpiry());
-        double curPrem = bsCall(price, pos.getStrike(), T, sigma);
+        double curPrem = shortLegCurrentPrice(pos, price, T, sigma);
 
         int contracts = Math.abs(pos.getContracts());
         double credit    = pos.getPremiumPaid() * 100 * contracts;
@@ -657,6 +666,30 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     private double bsPut(double S, double K, double T, double sigma) {
         return T > 0 ? bsEngine.putPrice(S, K, RISK_FREE_RATE, T, sigma)
                      : Math.max(0, K - S);
+    }
+
+    /**
+     * Current price for a SHORT leg we need to buy back.
+     * Uses Alpaca's live market price if available (same source as the UI),
+     * falling back to BS * (1 + IV_PREMIUM) so the estimate is consistent with
+     * the inflated premium we received at entry. Avoids a false-profit asymmetry
+     * that would trigger the exit target immediately after entry.
+     */
+    private double shortLegCurrentPrice(OptionsPosition pos, double S, double T, double sigma) {
+        double mkt = pos.getCurrentMarketPrice();
+        if (mkt >= 0) return mkt;
+        return "CALL".equals(pos.getType())
+                ? bsCall(S, pos.getStrike(), T, sigma) * (1 + IV_PREMIUM)
+                : bsPut (S, pos.getStrike(), T, sigma) * (1 + IV_PREMIUM);
+    }
+
+    /** Current price for a LONG leg we need to sell to close. Uses Alpaca live price if available. */
+    private double longLegCurrentPrice(OptionsPosition pos, double S, double T, double sigma) {
+        double mkt = pos.getCurrentMarketPrice();
+        if (mkt >= 0) return mkt;
+        return "CALL".equals(pos.getType())
+                ? bsCall(S, pos.getStrike(), T, sigma)
+                : bsPut (S, pos.getStrike(), T, sigma);
     }
 
     private double findOtmPutStrike(double S, double T, double sigma) {

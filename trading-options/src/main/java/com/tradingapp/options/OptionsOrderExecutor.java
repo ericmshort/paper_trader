@@ -566,7 +566,12 @@ public class OptionsOrderExecutor {
         double pnl = net - pos.getPremiumPaid() * 100 * pos.getContracts();
         account.addRealizedPnL(pnl);
 
-        TransactionAction action = pos.getType().equals("CALL") ? TransactionAction.CALL_SELL : TransactionAction.PUT_SELL;
+        // Short positions (contracts < 0) are closed by buying back → BUY action.
+        // Long positions (contracts > 0) are closed by selling → SELL action.
+        boolean isShortClose = pos.getContracts() < 0;
+        TransactionAction action = pos.getType().equals("CALL")
+                ? (isShortClose ? TransactionAction.CALL_BUY : TransactionAction.CALL_SELL)
+                : (isShortClose ? TransactionAction.PUT_BUY  : TransactionAction.PUT_SELL);
         TransactionRecord rec = ts(new TransactionRecord(pos.getSymbol(), action, pos.getContracts(),
                 currentPremium, fee, account.getBalance(), reason, ""));
         rec.setExternalId(externalId);
