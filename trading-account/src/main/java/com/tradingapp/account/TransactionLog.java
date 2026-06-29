@@ -25,6 +25,8 @@ public class TransactionLog {
         initDb();
     }
 
+    public String getDbPath() { return dbPath; }
+
     private Connection connect() {
         try {
             Class.forName("org.sqlite.JDBC");

@@ -328,6 +328,8 @@ public class DashboardController implements Initializable {
         }
         premiumSellerRouter.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
         premiumSellerRouter.setAllowlist(appConfig.getOptionsSymbolAllowlist());
+        String dataDir = new java.io.File(transactionLog.getDbPath()).getParent();
+        premiumSellerRouter.restoreExitDates(dataDir);
 
         Path weightsPath = AppConfig.getDataDir().resolve("signal-weights.json");
         SignalWeights initialWeights;

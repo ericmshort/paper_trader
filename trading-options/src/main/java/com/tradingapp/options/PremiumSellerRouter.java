@@ -68,8 +68,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     private PriceHistory priceHistory;
     private final Consumer<String> log;
 
-    // Blocks same-day re-entry after a stop-loss per symbol+strategy
+    // Blocks same-day re-entry after an exit per symbol+strategy; persisted across restarts.
     private final Map<String, LocalDate> lastExitDate = new HashMap<>();
+    private java.io.File exitDatesFile = null;
 
     private Supplier<ZonedDateTime> clock = () -> ZonedDateTime.now(ET);
 
@@ -110,6 +111,40 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
     public void setAllowlist(java.util.Set<String> symbols) {
         this.allowlist = new java.util.HashSet<>(symbols);
+    }
+
+    /** Load persisted exit dates from <dataDir>/premium-exit-dates.properties, discarding any not from today. */
+    public void restoreExitDates(String dataDir) {
+        exitDatesFile = new java.io.File(dataDir, "premium-exit-dates.properties");
+        if (!exitDatesFile.exists()) return;
+        java.util.Properties props = new java.util.Properties();
+        try (java.io.FileInputStream fis = new java.io.FileInputStream(exitDatesFile)) {
+            props.load(fis);
+        } catch (java.io.IOException e) {
+            return;
+        }
+        LocalDate today = LocalDate.now(ET);
+        for (String key : props.stringPropertyNames()) {
+            try {
+                LocalDate d = LocalDate.parse(props.getProperty(key));
+                if (today.equals(d)) lastExitDate.put(key, d);
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private void recordExit(String key, LocalDate date) {
+        lastExitDate.put(key, date);
+        if (exitDatesFile == null) return;
+        java.util.Properties props = new java.util.Properties();
+        if (exitDatesFile.exists()) {
+            try (java.io.FileInputStream fis = new java.io.FileInputStream(exitDatesFile)) {
+                props.load(fis);
+            } catch (java.io.IOException ignored) {}
+        }
+        props.setProperty(key, date.toString());
+        try (java.io.FileOutputStream fos = new java.io.FileOutputStream(exitDatesFile)) {
+            props.store(fos, null);
+        } catch (java.io.IOException ignored) {}
     }
 
     private boolean isEnabled(String strategy) {
@@ -238,7 +273,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
         optExec.closeCreditSpread(symbol + PUTSPREAD_SHORT, symbol + PUTSPREAD_LONG,
                 sCur, lCur, reason);
-        lastExitDate.put(symbol + "_PUTSPREAD", today);
+        recordExit(symbol + "_PUTSPREAD", today);
         log.accept(String.format("%s PUT CREDIT SPREAD closed: %s | P&L $%.0f", symbol, reason, pnl));
     }
 
@@ -271,7 +306,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
         optExec.closeCreditSpread(symbol + CALLSPREAD_SHORT, symbol + CALLSPREAD_LONG,
                 sCur, lCur, reason);
-        lastExitDate.put(symbol + "_CALLSPREAD", today);
+        recordExit(symbol + "_CALLSPREAD", today);
         log.accept(String.format("%s CALL CREDIT SPREAD closed: %s | P&L $%.0f", symbol, reason, pnl));
     }
 
@@ -324,7 +359,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         optExec.closeIronCondor(symbol + IC_SHORTCALL, symbol + IC_LONGCALL,
                 symbol + IC_SHORTPUT, symbol + IC_LONGPUT,
                 scCur, lcCur, spCur, lpCur, reason);
-        lastExitDate.put(symbol + "_IRONCONDOR", today);
+        recordExit(symbol + "_IRONCONDOR", today);
         log.accept(String.format("%s IRON CONDOR closed: %s | P&L $%.0f", symbol, reason, pnl));
     }
 
@@ -345,7 +380,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         if (reason == null) return;
 
         optExec.closePosition(symbol + CSP_PUT, curPrem, reason);
-        lastExitDate.put(symbol + "_CSP", today);
+        recordExit(symbol + "_CSP", today);
         log.accept(String.format("%s CSP closed: %s | P&L $%.0f", symbol, reason, pnl));
     }
 
@@ -374,7 +409,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                       : profitMsg(pnl);
 
         optExec.closeCoveredCall(symbol + CC_CALL, curPrem, price, reason);
-        lastExitDate.put(symbol + "_CC", today);
+        recordExit(symbol + "_CC", today);
         log.accept(String.format("%s COVERED CALL closed: %s | option P&L $%.0f", symbol, reason, pnl));
     }
 
