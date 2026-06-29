@@ -1348,7 +1348,11 @@ public class DashboardController implements Initializable {
             if (first == null) {
                 pending.put(r.getGroupId(), r);
             } else {
-                String type = first.getType().equals(r.getType()) ? "Credit Spread" : "Straddle/Strangle";
+                boolean bothCalls = first.getType().contains("Call") && r.getType().contains("Call");
+                boolean bothPuts  = first.getType().contains("Put")  && r.getType().contains("Put");
+                String type = bothCalls ? "Call Credit Spread"
+                            : bothPuts  ? "Put Credit Spread"
+                            : "Straddle/Strangle";
                 result.add(new ClosedTradeRecord(
                         first.getSymbol(), type, first.getQuantity(),
                         first.getEntryRaw() + r.getEntryRaw(),

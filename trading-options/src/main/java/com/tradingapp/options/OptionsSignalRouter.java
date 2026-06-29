@@ -396,9 +396,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             }
         }
 
-        if (account.totalExposureFraction() >= maxPortfolioExposure) {
+        double exposureFraction = account.totalExposureFraction(PremiumSellerRouter::isPremiumKey);
+        if (exposureFraction >= maxPortfolioExposure) {
             researchCallback.accept(symbol + " options skip: portfolio at capacity ("
-                    + String.format("%.0f%%", account.totalExposureFraction() * 100) + ")");
+                    + String.format("%.0f%%", exposureFraction * 100) + ")");
             return;
         }
 

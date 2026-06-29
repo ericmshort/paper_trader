@@ -59,13 +59,19 @@ public class Account {
     }
 
     public double totalExposureFraction() {
+        return totalExposureFraction(key -> false);
+    }
+
+    public double totalExposureFraction(java.util.function.Predicate<String> excludeKey) {
         // Only long (debit) positions consumed cash and count toward the deployment cap.
         // Short legs have negative contracts and would otherwise reduce the numerator,
         // letting credit spreads punch a hole in the cap.
         double equity = positions.values().stream().mapToDouble(Position::getMarketValue).sum();
-        double deployedOptions = optionsPositions.values().stream()
-                .filter(p -> p.getContracts() > 0)
-                .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts()).sum();
+        double deployedOptions = optionsPositions.entrySet().stream()
+                .filter(e -> !excludeKey.test(e.getKey()))
+                .filter(e -> e.getValue().getContracts() > 0)
+                .mapToDouble(e -> e.getValue().getPremiumPaid() * 100 * e.getValue().getContracts())
+                .sum();
         double totalPortfolioValue = getTotalPortfolioValue();
         if (totalPortfolioValue <= 0) return 1.0;
         return (equity + deployedOptions) / totalPortfolioValue;
