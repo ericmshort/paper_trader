@@ -470,10 +470,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         // ── 7. Entry (per-symbol options filters) ────────────────────────────
         boolean optionsAllowed = optionsAllowlist.isEmpty() || optionsAllowlist.contains(symbol);
-        if (!optionsAllowed) {
-            researchCallback.accept(symbol + " options skip: not in options allowlist");
-            return;
-        }
+        if (!optionsAllowed) return;
         boolean callsAllowed = !callsDisabledSymbols.contains(symbol);
         boolean putsAllowed  = !putsDisabledSymbols.contains(symbol);
 

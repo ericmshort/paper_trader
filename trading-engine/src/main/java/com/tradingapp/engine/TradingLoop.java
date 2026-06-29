@@ -103,7 +103,8 @@ public class TradingLoop implements Runnable {
     private int lossLimitBreachCount  = 0;
     private final java.util.concurrent.atomic.AtomicBoolean dailyLossResetRequested =
             new java.util.concurrent.atomic.AtomicBoolean(false);
-    private Set<String> stockWatchlist = null; // null = all symbols eligible
+    private Set<String> stockWatchlist   = null; // null = all symbols eligible
+    private Set<String> optionsWatchlist = null; // null = all symbols eligible for options
     private CandleHistory candleHistory;
     private NewsSentimentCache sentimentCache;
 
@@ -216,6 +217,10 @@ public class TradingLoop implements Runnable {
 
     public void setStockWatchlist(java.util.Collection<String> symbols) {
         this.stockWatchlist = symbols == null || symbols.isEmpty() ? null : new HashSet<>(symbols);
+    }
+
+    public void setOptionsWatchlist(java.util.Collection<String> symbols) {
+        this.optionsWatchlist = symbols == null || symbols.isEmpty() ? null : new HashSet<>(symbols);
     }
 
     @Override
@@ -524,11 +529,19 @@ public class TradingLoop implements Runnable {
                 }
                 // Premium seller evaluates first so multi-day spreads have first claim on
                 // portfolio capacity. Options router runs second. Stock entries run last.
-                if (premiumSellerEvaluator != null) {
-                    premiumSellerEvaluator.evaluateWithSignals(symbol, price, buys, sells, signalStr, featureCsv, signals);
-                }
-                if (optionsEvaluator != null) {
-                    optionsEvaluator.evaluateWithSignals(symbol, price, buys, sells, signalStr, featureCsv, signals);
+                // Filter to the options watchlist but still run exits for any symbol with
+                // open positions (in case the allowlist changed after a position was entered).
+                boolean inOptionsWatchlist = optionsWatchlist == null || optionsWatchlist.contains(symbol);
+                boolean hasOpenOptionsForSymbol = !inOptionsWatchlist
+                        && account.getOptionsPositions().keySet().stream()
+                                .anyMatch(k -> k.startsWith(symbol + "_"));
+                if (inOptionsWatchlist || hasOpenOptionsForSymbol) {
+                    if (premiumSellerEvaluator != null) {
+                        premiumSellerEvaluator.evaluateWithSignals(symbol, price, buys, sells, signalStr, featureCsv, signals);
+                    }
+                    if (optionsEvaluator != null) {
+                        optionsEvaluator.evaluateWithSignals(symbol, price, buys, sells, signalStr, featureCsv, signals);
+                    }
                 }
                 if (!hasPosition && !orbFormationPeriod && !time.isAfter(LAST_ENTRY_TIME)
                         && (stockWatchlist == null || stockWatchlist.contains(symbol))

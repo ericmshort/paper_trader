@@ -608,9 +608,18 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                             String longKey = "CALL".equals(type)
                                     ? underlying + "_CALLSPREAD_LONGCALL"
                                     : underlying + "_PUTSPREAD_LONGPUT";
-                            account.addOptionsPosition(shortKey, shortLeg);
+                            // Don't overwrite a position that was already verified by fingerprint
+                            // matching earlier in this sync cycle. A previous session's spread
+                            // at a slightly different strike would otherwise replace today's
+                            // correctly-tracked position, corrupting premiumPaid and causing
+                            // negative max profit in the UI.
+                            if (!account.isOptionVerified(shortKey)) {
+                                account.addOptionsPosition(shortKey, shortLeg);
+                            }
                             account.markOptionVerified(shortKey);
-                            account.addOptionsPosition(longKey, longLeg);
+                            if (!account.isOptionVerified(longKey)) {
+                                account.addOptionsPosition(longKey, longLeg);
+                            }
                             account.markOptionVerified(longKey);
                             LOG.info("[BrokerSync] Detected " + ("CALL".equals(type) ? "bear call" : "bull put")
                                     + " spread for " + underlying + ": short K=" + shortLeg.getStrike()

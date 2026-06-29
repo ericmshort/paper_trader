@@ -102,6 +102,7 @@ public class DashboardController implements Initializable {
     @FXML private TableColumn<PremiumSellerRow, String> prmColCurrentPrice;
     @FXML private TableColumn<PremiumSellerRow, String> prmColExpiry;
     @FXML private TableColumn<PremiumSellerRow, String> prmColDte;
+    @FXML private TableColumn<PremiumSellerRow, String> prmColPremium;
     @FXML private TableColumn<PremiumSellerRow, String> prmColMax;
     @FXML private TableColumn<PremiumSellerRow, String> prmColPnl;
     @FXML private TableColumn<PremiumSellerRow, String> prmColPct;
@@ -414,6 +415,9 @@ public class DashboardController implements Initializable {
         tradingLoop.setCircuitBreakerPct(appConfig.getCircuitBreakerPct());
         tradingLoop.setMaxConcurrentStockPositions(8);
         tradingLoop.setRegimeMaDays(5);
+        if (!appConfig.getOptionsSymbolAllowlist().isEmpty()) {
+            tradingLoop.setOptionsWatchlist(appConfig.getOptionsSymbolAllowlist());
+        }
 
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "trading-loop");
@@ -599,6 +603,17 @@ public class DashboardController implements Initializable {
         prmColCurrentPrice.setCellValueFactory(new PropertyValueFactory<>("currentPrice"));
         prmColExpiry.setCellValueFactory(new PropertyValueFactory<>("expiry"));
         prmColDte.setCellValueFactory(new PropertyValueFactory<>("dte"));
+        prmColPremium.setCellValueFactory(new PropertyValueFactory<>("premiumCollected"));
+        prmColPremium.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String value, boolean empty) {
+                super.updateItem(value, empty);
+                if (empty || value == null) { setText(null); setTextFill(Color.BLACK); return; }
+                setText(value);
+                PremiumSellerRow row = getTableView().getItems().get(getIndex());
+                setTextFill(row.getMaxProfitRaw() >= 0 ? Color.GREEN : Color.RED);
+            }
+        });
         prmColMax.setCellValueFactory(new PropertyValueFactory<>("maxProfit"));
         prmColPnl.setCellValueFactory(new PropertyValueFactory<>("currentPnl"));
         prmColPct.setCellValueFactory(new PropertyValueFactory<>("pctCaptured"));
