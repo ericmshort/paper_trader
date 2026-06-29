@@ -1313,8 +1313,19 @@ public class DashboardController implements Initializable {
                     entry[0], r.getPricePerUnit(), pnl, r.getTimestamp(), r.getGroupId()));
             reduceOptionPosition(openShortPremiums, key, entry, qty);
         } else {
-            // Selling a long leg — skip if P&L is already captured by the short-leg close
-            if (useReasonPnl) return;
+            // Selling a long leg.
+            // If this group was already recorded (by the short-leg close), skip to avoid double-counting.
+            // But if it hasn't been recorded yet (e.g. only the long-leg close was written to the DB),
+            // capture the P&L from the reason string rather than per-leg price arithmetic.
+            if (useReasonPnl && processedGroupIds.contains(groupId)) return;
+            if (useReasonPnl && !processedGroupIds.contains(groupId)) {
+                processedGroupIds.add(groupId);
+                double[] entry = openLongPremiums.getOrDefault(key, new double[]{r.getPricePerUnit(), r.getQuantity()});
+                closed.add(new ClosedTradeRecord(r.getSymbol(), type + " (Short)", r.getQuantity(),
+                        entry[0], r.getPricePerUnit(), reasonPnl, r.getTimestamp(), r.getGroupId()));
+                reduceOptionPosition(openLongPremiums, key, entry, r.getQuantity());
+                return;
+            }
             double[] entry = openLongPremiums.getOrDefault(key, new double[]{r.getPricePerUnit(), r.getQuantity()});
             double pnl = (r.getPricePerUnit() - entry[0]) * 100.0 * r.getQuantity() - r.getFeeCharged();
             closed.add(new ClosedTradeRecord(r.getSymbol(), type, r.getQuantity(),
