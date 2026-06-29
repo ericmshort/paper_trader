@@ -19,6 +19,7 @@ public class Account {
     private volatile boolean tradingHalted;
     private volatile boolean dailyLossHalted;
     private final Set<String> verifiedOptionsKeys = ConcurrentHashMap.newKeySet();
+    private final Map<String, Long> optionAddTimestamps = new ConcurrentHashMap<>();
     private volatile boolean brokerSyncComplete = false;
 
     public Account() {
@@ -117,10 +118,19 @@ public class Account {
 
     public synchronized void addOptionsPosition(String key, OptionsPosition pos) {
         optionsPositions.put(key, pos);
+        optionAddTimestamps.put(key, System.currentTimeMillis());
     }
 
     public void removeOptionsPosition(String key) {
         optionsPositions.remove(key);
+        optionAddTimestamps.remove(key);
+    }
+
+    /** Returns true if this option key was added to local state within the last 90 seconds.
+     *  Used by BrokerSync to avoid evicting positions whose Alpaca fills are still settling. */
+    public boolean isOptionRecentlyAdded(String key) {
+        Long ts = optionAddTimestamps.get(key);
+        return ts != null && System.currentTimeMillis() - ts < 90_000L;
     }
 
     public synchronized void reset(double startingBalance) {
@@ -132,5 +142,6 @@ public class Account {
         this.dailyLossHalted = false;
         this.brokerSyncComplete = false;
         this.verifiedOptionsKeys.clear();
+        this.optionAddTimestamps.clear();
     }
 }

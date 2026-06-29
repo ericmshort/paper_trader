@@ -293,10 +293,10 @@ public class TransactionLog {
             return symbol + (isShort
                     ? ("CALL".equals(type) ? "_IRONCONDOR_SHORTCALL" : "_IRONCONDOR_SHORTPUT")
                     : ("CALL".equals(type) ? "_IRONCONDOR_LONGCALL"  : "_IRONCONDOR_LONGPUT"));
-        } else if (upper.contains("BEAR CALL SPREAD")) {
-            return symbol + (isShort ? "_BEARCALLSPREAD_SHORT" : "_BEARCALLSPREAD_LONG");
-        } else if (upper.contains("BULL PUT SPREAD")) {
-            return symbol + (isShort ? "_BULLPUTSPREAD_SHORT" : "_BULLPUTSPREAD_LONG");
+        } else if (upper.contains("CALL SPREAD") || upper.contains("BEAR CALL SPREAD")) {
+            return symbol + (isShort ? "_CALLSPREAD_SHORTCALL" : "_CALLSPREAD_LONGCALL");
+        } else if (upper.contains("PUT SPREAD") || upper.contains("BULL PUT SPREAD")) {
+            return symbol + (isShort ? "_PUTSPREAD_SHORTPUT" : "_PUTSPREAD_LONGPUT");
         }
         return symbol + "_" + type;
     }
@@ -306,12 +306,12 @@ public class TransactionLog {
         java.util.List<String> candidates;
         if ("CALL".equals(type)) {
             candidates = isShortClose
-                    ? java.util.Arrays.asList(symbol + "_IRONCONDOR_SHORTCALL", symbol + "_BEARCALLSPREAD_SHORT", symbol + "_CALL")
-                    : java.util.Arrays.asList(symbol + "_IRONCONDOR_LONGCALL",  symbol + "_BEARCALLSPREAD_LONG",  symbol + "_CALL");
+                    ? java.util.Arrays.asList(symbol + "_IRONCONDOR_SHORTCALL", symbol + "_CALLSPREAD_SHORTCALL", symbol + "_BEARCALLSPREAD_SHORT", symbol + "_CALL")
+                    : java.util.Arrays.asList(symbol + "_IRONCONDOR_LONGCALL",  symbol + "_CALLSPREAD_LONGCALL",  symbol + "_BEARCALLSPREAD_LONG",  symbol + "_CALL");
         } else {
             candidates = isShortClose
-                    ? java.util.Arrays.asList(symbol + "_IRONCONDOR_SHORTPUT", symbol + "_BULLPUTSPREAD_SHORT", symbol + "_PUT")
-                    : java.util.Arrays.asList(symbol + "_IRONCONDOR_LONGPUT",  symbol + "_BULLPUTSPREAD_LONG",  symbol + "_PUT");
+                    ? java.util.Arrays.asList(symbol + "_IRONCONDOR_SHORTPUT", symbol + "_PUTSPREAD_SHORTPUT", symbol + "_BULLPUTSPREAD_SHORT", symbol + "_PUT")
+                    : java.util.Arrays.asList(symbol + "_IRONCONDOR_LONGPUT",  symbol + "_PUTSPREAD_LONGPUT",  symbol + "_BULLPUTSPREAD_LONG",  symbol + "_PUT");
         }
         for (String candidate : candidates) {
             if (openOptions.containsKey(candidate)) return candidate;

@@ -63,4 +63,13 @@ public interface OptionsSubmitter {
     default int closeAllOptionsPositions() {
         return -1;
     }
+
+    /**
+     * Same as closeAllOptionsPositions but skips any OCC symbol present in {@code skipOccSymbols}.
+     * Used by the daily-loss HALT handler to avoid force-closing premium-seller credit spreads,
+     * which are bounded-risk and must be closed as atomic multi-leg orders via their own exit logic.
+     */
+    default int closeNonPremiumOptionsPositions(java.util.Set<String> skipOccSymbols) {
+        return -1;
+    }
 }

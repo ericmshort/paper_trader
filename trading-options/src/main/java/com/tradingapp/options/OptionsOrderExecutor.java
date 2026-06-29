@@ -44,6 +44,10 @@ public class OptionsOrderExecutor {
     public void setClock(java.util.function.LongSupplier c) { this.clockMs = c; }
     public int closeAllFromBroker() { return submitter != null ? submitter.closeAllOptionsPositions() : -1; }
 
+    public int closeNonPremiumFromBroker(java.util.Set<String> skipOccSymbols) {
+        return submitter != null ? submitter.closeNonPremiumOptionsPositions(skipOccSymbols) : -1;
+    }
+
     private TransactionRecord ts(TransactionRecord r) { r.setTimestamp(clockMs.getAsLong()); return r; }
 
     public void buyCall(String symbol, double strike, LocalDate expiry, int contracts,

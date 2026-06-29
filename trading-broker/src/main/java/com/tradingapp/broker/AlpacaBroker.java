@@ -506,7 +506,7 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
 
                 // Build fingerprint → (key, existing position) map before any removals.
                 // Preserves strategy-specific keys (e.g. NKE_STRADDLE_CALL,
-                // BRZE_BULLPUTSPREAD_SHORT) across sync ticks. Without this, every sync
+                // BRZE_PUTSPREAD_SHORTPUT) across sync ticks. Without this, every sync
                 // collapses multi-leg positions into SYMBOL_CALL / SYMBOL_PUT, causing
                 // closeDirectionalLeg to fire on straddle and credit-spread legs.
                 Map<String, String> keyByFingerprint = new HashMap<>();
@@ -600,14 +600,14 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                             shortLeg = p1; longLeg = p0;
                         }
                         if (shortLeg != null) {
-                            // Credit spread: assign strategy-specific keys so closeCreditSpreadIfNeeded
-                            // handles them atomically rather than closeDirectionalLeg doing single-leg closes.
+                            // Credit spread: use PremiumSellerRouter's canonical key suffixes so
+                            // buildPremiumRows() and checkExit*Spread() can locate both legs.
                             String shortKey = "CALL".equals(type)
-                                    ? underlying + "_BEARCALLSPREAD_SHORT"
-                                    : underlying + "_BULLPUTSPREAD_SHORT";
+                                    ? underlying + "_CALLSPREAD_SHORTCALL"
+                                    : underlying + "_PUTSPREAD_SHORTPUT";
                             String longKey = "CALL".equals(type)
-                                    ? underlying + "_BEARCALLSPREAD_LONG"
-                                    : underlying + "_BULLPUTSPREAD_LONG";
+                                    ? underlying + "_CALLSPREAD_LONGCALL"
+                                    : underlying + "_PUTSPREAD_LONGPUT";
                             account.addOptionsPosition(shortKey, shortLeg);
                             account.markOptionVerified(shortKey);
                             account.addOptionsPosition(longKey, longLeg);
@@ -637,8 +637,13 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                 List<com.tradingapp.account.Position> staleStocks = account.getPositions().values().stream()
                         .filter(p -> !p.isBrokerVerified())
                         .collect(java.util.stream.Collectors.toList());
+                // Skip options that were added locally within the last 90 seconds — Alpaca
+                // fill confirmations can lag by 30-60 s at market open, and removing a
+                // position that simply hasn't been confirmed yet causes the system to
+                // re-enter it on the very next tick, creating duplicate positions.
                 List<String> staleOptions = account.getOptionsPositions().keySet().stream()
                         .filter(k -> !account.isOptionVerified(k))
+                        .filter(k -> !account.isOptionRecentlyAdded(k))
                         .collect(java.util.stream.Collectors.toList());
 
                 if (!staleStocks.isEmpty() || !staleOptions.isEmpty()) {
@@ -860,6 +865,34 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
             return found;
         } catch (Exception e) {
             LOG.warning("Force-close-all failed: " + e.getMessage());
+            return -1;
+        }
+    }
+
+    @Override
+    public int closeNonPremiumOptionsPositions(java.util.Set<String> skipOccSymbols) {
+        try {
+            JSONArray positions = getJsonArray("/positions");
+            if (positions == null) return 0;
+            int found = 0;
+            for (int i = 0; i < positions.length(); i++) {
+                String symbol = positions.getJSONObject(i).optString("symbol");
+                if (!isOccSymbol(symbol)) continue;
+                if (skipOccSymbols.contains(symbol)) continue;
+                found++;
+                LOG.info("Force-close (non-premium): " + symbol);
+                try {
+                    HttpResponse<String> resp = deletePosition(symbol);
+                    if (resp.statusCode() != 200 && resp.statusCode() != 201) {
+                        LOG.warning("Force-close failed for " + symbol + " (" + resp.statusCode() + "): " + resp.body());
+                    }
+                } catch (Exception e) {
+                    LOG.warning("Force-close error for " + symbol + ": " + e.getMessage());
+                }
+            }
+            return found;
+        } catch (Exception e) {
+            LOG.warning("Force-close non-premium failed: " + e.getMessage());
             return -1;
         }
     }

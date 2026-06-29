@@ -355,10 +355,18 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
         if (account.isDailyLossHalted()) {
             if (!haltCloseDone) {
-                int result = optExec.closeAllFromBroker();
+                // Credit spreads have bounded risk and close as atomic multi-leg orders via their
+                // own exit logic. Exclude them from the HALT force-close to avoid Alpaca rejecting
+                // individual-leg DELETEs on defined spreads and to prevent BrokerSync eviction races.
+                java.util.Set<String> premiumOcc = account.getOptionsPositions().entrySet().stream()
+                        .filter(e -> PremiumSellerRouter.isPremiumKey(e.getKey()))
+                        .map(e -> e.getValue().getBrokerOccSymbol())
+                        .filter(s -> s != null && !s.isEmpty())
+                        .collect(java.util.stream.Collectors.toSet());
+                int result = optExec.closeNonPremiumFromBroker(premiumOcc);
                 if (result == 0) {
                     haltCloseDone = true;
-                    researchCallback.accept("HALT: all options positions confirmed closed");
+                    researchCallback.accept("HALT: all non-premium options positions confirmed closed");
                 } else if (result > 0) {
                     researchCallback.accept("HALT: " + result + " position(s) submitted for close — retrying next tick");
                 } else if (closePositionsOnHalt) {

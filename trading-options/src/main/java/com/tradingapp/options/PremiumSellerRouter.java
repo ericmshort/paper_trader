@@ -82,6 +82,10 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     // When non-null, only these strategies attempt new entries (all others still close open positions)
     private java.util.Set<String> enabledStrategies = null;
 
+    // When non-empty, new entries are restricted to symbols in this set.
+    // Exits for any open position still run regardless.
+    private java.util.Set<String> allowlist = new java.util.HashSet<>();
+
     public PremiumSellerRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
                                Account account, PriceHistory priceHistory,
                                Consumer<String> log) {
@@ -102,6 +106,10 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
     public void setEnabledStrategies(java.util.Set<String> strategies) {
         this.enabledStrategies = strategies;
+    }
+
+    public void setAllowlist(java.util.Set<String> symbols) {
+        this.allowlist = new java.util.HashSet<>(symbols);
     }
 
     private boolean isEnabled(String strategy) {
@@ -164,6 +172,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
         // Skip new entries while daily loss limit is active
         if (account.isDailyLossHalted()) return;
+
+        // Skip new entries for symbols not in the allowlist (exits above still run).
+        if (!allowlist.isEmpty() && !allowlist.contains(symbol)) return;
 
         // Skip new entries if max-loss-at-risk across open premium positions exceeds the cap.
         // Uses spread width × |contracts| × 100 per position — more accurate than cash-deployed
@@ -636,5 +647,11 @@ public class PremiumSellerRouter implements OptionsEvaluator {
             || posKey.startsWith(symbol + "_IRONCONDOR_")
             || posKey.startsWith(symbol + "_CSP_")
             || posKey.equals(symbol + "_CC_CALL");
+    }
+
+    public static boolean isPremiumKey(String posKey) {
+        return posKey.contains("_PUTSPREAD_") || posKey.contains("_CALLSPREAD_")
+            || posKey.contains("_IRONCONDOR_") || posKey.contains("_CSP_")
+            || posKey.endsWith("_CC_CALL");
     }
 }

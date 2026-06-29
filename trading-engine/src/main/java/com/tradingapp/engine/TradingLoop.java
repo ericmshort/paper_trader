@@ -493,7 +493,16 @@ public class TradingLoop implements Runnable {
                         }
                         uiRefreshCallback.run();
                     }
-                } else if (!hasPosition && !orbFormationPeriod && !time.isAfter(LAST_ENTRY_TIME)
+                }
+                // Premium seller evaluates first so multi-day spreads have first claim on
+                // portfolio capacity. Options router runs second. Stock entries run last.
+                if (premiumSellerEvaluator != null) {
+                    premiumSellerEvaluator.evaluateWithSignals(symbol, price, buys, sells, signalStr, featureCsv, signals);
+                }
+                if (optionsEvaluator != null) {
+                    optionsEvaluator.evaluateWithSignals(symbol, price, buys, sells, signalStr, featureCsv, signals);
+                }
+                if (!hasPosition && !orbFormationPeriod && !time.isAfter(LAST_ENTRY_TIME)
                         && (stockWatchlist == null || stockWatchlist.contains(symbol))
                         && (weightedBuys >= SIGNAL_THRESHOLD
                                 || (signals.stream().anyMatch(s -> "ORB".equals(s.getIndicatorName())
@@ -567,14 +576,6 @@ public class TradingLoop implements Runnable {
                 prevOrbBuy.put(symbol, signals.stream().anyMatch(
                         s -> "ORB".equals(s.getIndicatorName())
                                 && s.getDirection() == SignalResult.Direction.BUY));
-                // Always call the router even when halted — the router's halt handler is what
-                // calls forceCloseAllForSymbol to close open positions on the halt tick itself.
-                if (optionsEvaluator != null) {
-                    optionsEvaluator.evaluateWithSignals(symbol, price, buys, sells, signalStr, featureCsv, signals);
-                }
-                if (premiumSellerEvaluator != null) {
-                    premiumSellerEvaluator.evaluateWithSignals(symbol, price, buys, sells, signalStr, featureCsv, signals);
-                }
                 researchCallback.accept(time + " | " + symbol + " $" + String.format("%.2f", price)
                         + " | " + signalStr + " | BUY=" + buys + " SELL=" + sells);
             }
