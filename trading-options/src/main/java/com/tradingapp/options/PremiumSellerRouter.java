@@ -214,8 +214,14 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         // Skip new entries if max-loss-at-risk across open premium positions exceeds the cap.
         // Uses spread width × |contracts| × 100 per position — more accurate than cash-deployed
         // for credit spreads, which receive cash on entry and look cheap on a deployment basis.
-        double portfolioValue = account.getTotalPortfolioValue();
-        if (portfolioValue > 0 && premiumMaxLossAtRisk() / portfolioValue >= maxPortfolioExposure) return;
+        //
+        // Use last_equity (yesterday's close from Alpaca) as the fixed denominator so that
+        // collecting premiums intraday doesn't inflate the portfolio value and dilute the cap.
+        // Falls back to broker portfolio_value then local total if last_equity isn't available.
+        double baseline = account.getLastEquity() > 0 ? account.getLastEquity()
+                : account.getBrokerPortfolioValue() > 0 ? account.getBrokerPortfolioValue()
+                : account.getTotalPortfolioValue();
+        if (baseline > 0 && premiumMaxLossAtRisk() / baseline >= maxPortfolioExposure) return;
 
         // ── 2. New entries (once per day per symbol per strategy) ─────────────
         boolean inUptrend = uptrendSupplier == null || uptrendSupplier.getAsBoolean();
@@ -418,7 +424,8 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     private void tryEnterPutSpread(String symbol, double price, double sigma, LocalDate today,
                                    String signalStr, String featureCsv) {
         if (account.getOptionsPositions().containsKey(symbol + PUTSPREAD_SHORT)
-                || account.getOptionsPositions().containsKey(symbol + PUTSPREAD_LONG)) return;
+                || account.getOptionsPositions().containsKey(symbol + PUTSPREAD_LONG)
+                || account.isOptionRecentlyAdded(symbol + PUTSPREAD_SHORT)) return;
         if (account.getOptionsPositions().containsKey(symbol + CALLSPREAD_SHORT)) return; // call spread takes priority
         if (today.equals(lastExitDate.get(symbol + "_PUTSPREAD"))) return;
 
@@ -454,7 +461,8 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     private void tryEnterCallSpread(String symbol, double price, double sigma, LocalDate today,
                                     String signalStr, String featureCsv) {
         if (account.getOptionsPositions().containsKey(symbol + CALLSPREAD_SHORT)
-                || account.getOptionsPositions().containsKey(symbol + CALLSPREAD_LONG)) return;
+                || account.getOptionsPositions().containsKey(symbol + CALLSPREAD_LONG)
+                || account.isOptionRecentlyAdded(symbol + CALLSPREAD_SHORT)) return;
         if (account.getOptionsPositions().containsKey(symbol + PUTSPREAD_SHORT)) return; // PCS takes priority
         if (today.equals(lastExitDate.get(symbol + "_CALLSPREAD"))) return;
 
@@ -491,7 +499,8 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         if (account.getOptionsPositions().containsKey(symbol + IC_SHORTCALL)
                 || account.getOptionsPositions().containsKey(symbol + IC_LONGCALL)
                 || account.getOptionsPositions().containsKey(symbol + IC_SHORTPUT)
-                || account.getOptionsPositions().containsKey(symbol + IC_LONGPUT)) return;
+                || account.getOptionsPositions().containsKey(symbol + IC_LONGPUT)
+                || account.isOptionRecentlyAdded(symbol + IC_SHORTCALL)) return;
         if (today.equals(lastExitDate.get(symbol + "_IRONCONDOR"))) return;
 
         LocalDate expiry = bsEngine.selectExpiry(symbol);

@@ -349,6 +349,10 @@ public class TradingLoop implements Runnable {
                             .sum();
                     dayStartValue = account.getBalance() + rstStockMV + rstOptsBasis;
                 }
+                // Sync the capacity baseline used by PremiumSellerRouter so it reflects the
+                // new account state (e.g. after a paper account reset) rather than the old
+                // last_equity from the previous account.
+                account.setLastEquity(dayStartValue);
                 researchCallback.accept(String.format(
                         "Daily loss limit reset — new baseline: $%.0f", dayStartValue));
             }

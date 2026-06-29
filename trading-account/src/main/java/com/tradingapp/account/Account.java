@@ -129,7 +129,9 @@ public class Account {
 
     public void removeOptionsPosition(String key) {
         optionsPositions.remove(key);
-        optionAddTimestamps.remove(key);
+        // Preserve the timestamp so isOptionRecentlyAdded still returns true during the 90s
+        // window after removal. This prevents PremiumSellerRouter from immediately re-entering
+        // a position whose Alpaca order was rejected and rolled back.
     }
 
     /** Returns true if this option key was added to local state within the last 90 seconds.
