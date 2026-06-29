@@ -212,6 +212,13 @@ public class TransactionLog {
         double realizedPnL = 0.0;
 
         for (TransactionRecord r : asc) {
+            // Imported records are Alpaca fill history written by syncOrderHistory().
+            // They represent broker-side events already captured in the actual position
+            // state (broker sync reconciles on startup). Including them here causes
+            // buy_to_close fills (CALL_BUY imported) to be misread as new long opens,
+            // leaving phantom SYMBOL_CALL / SYMBOL_PUT positions in the account.
+            if (r.getReason() != null && r.getReason().contains("(imported)")) continue;
+
             switch (r.getAction()) {
                 case BUY -> {
                     int prev = openShares.getOrDefault(r.getSymbol(), 0);
@@ -234,8 +241,15 @@ public class TransactionLog {
                         openShares.put(r.getSymbol(), remaining);
                     }
                 }
-                case CALL_BUY -> restoreOptionOpen(r, "CALL", openOptions);
-                case PUT_BUY  -> restoreOptionOpen(r, "PUT",  openOptions);
+                case CALL_BUY -> {
+                    // qty < 0: new recordClose format — buy_to_close a short call (treat as close)
+                    if (r.getQuantity() < 0) restoreOptionClose(r, "CALL", openOptions);
+                    else                     restoreOptionOpen(r,  "CALL", openOptions);
+                }
+                case PUT_BUY -> {
+                    if (r.getQuantity() < 0) restoreOptionClose(r, "PUT", openOptions);
+                    else                     restoreOptionOpen(r,  "PUT", openOptions);
+                }
                 case CALL_SELL -> {
                     if (r.getReason() != null && r.getReason().contains("(SHORT)")) {
                         restoreOptionOpen(r, "CALL", openOptions);
