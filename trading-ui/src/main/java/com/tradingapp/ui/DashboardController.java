@@ -766,9 +766,22 @@ public class DashboardController implements Initializable {
     private double buildOptionsRows(List<OptionsPositionRow> rows) {
         double totalUnrealized = 0.0;
 
+        // Build a set of (symbol|type) pairs that have short legs in the account.
+        // Short options are exclusively from PremiumSellerRouter; any long position that
+        // shares a symbol+type with a short is the paired long leg of a spread — both
+        // should be hidden here even if broker sync assigned them a generic key instead
+        // of a _PUTSPREAD_ / _CALLSPREAD_ key (which can happen when multiple spreads for
+        // the same symbol/type/expiry were open simultaneously and confused the pair detector).
+        java.util.Set<String> shortSymbolTypes = account.getOptionsPositions().values().stream()
+                .filter(p -> p.getContracts() < 0)
+                .map(p -> p.getSymbol() + "|" + p.getType())
+                .collect(java.util.stream.Collectors.toSet());
+
         Map<String, List<Map.Entry<String, OptionsPosition>>> groups = new java.util.LinkedHashMap<>();
         for (Map.Entry<String, OptionsPosition> entry : account.getOptionsPositions().entrySet()) {
             if (PremiumSellerRouter.isPremiumKey(entry.getKey())) continue;
+            if (entry.getValue().getContracts() < 0) continue; // short = premium seller short leg
+            if (shortSymbolTypes.contains(entry.getValue().getSymbol() + "|" + entry.getValue().getType())) continue; // paired long
             String gk = strategyGroupKey(entry.getKey(), entry.getValue().getSymbol());
             groups.computeIfAbsent(gk, k -> new ArrayList<>()).add(entry);
         }
