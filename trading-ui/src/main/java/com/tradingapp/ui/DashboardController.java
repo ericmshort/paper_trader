@@ -1429,8 +1429,8 @@ public class DashboardController implements Initializable {
             } else {
                 boolean bothCalls = first.getType().contains("Call") && r.getType().contains("Call");
                 boolean bothPuts  = first.getType().contains("Put")  && r.getType().contains("Put");
-                String type = bothCalls ? "Call Credit Spread"
-                            : bothPuts  ? "Put Credit Spread"
+                String type = bothCalls ? "Call Spread"
+                            : bothPuts  ? "Put Spread"
                             : "Straddle/Strangle";
                 result.add(new ClosedTradeRecord(
                         first.getSymbol(), type, first.getQuantity(),
@@ -1440,7 +1440,17 @@ public class DashboardController implements Initializable {
                         Math.min(first.getTimestampRaw(), r.getTimestampRaw())));
             }
         }
-        result.addAll(pending.values());
+        // Unmatched records with a groupId are orphaned spread legs — relabel to show spread origin.
+        for (ClosedTradeRecord orphan : pending.values()) {
+            if (orphan.getGroupId() != null) {
+                String t = orphan.getType().contains("Call") ? "Call Spread" : "Put Spread";
+                result.add(new ClosedTradeRecord(orphan.getSymbol(), t, orphan.getQuantity(),
+                        orphan.getEntryRaw(), orphan.getExitRaw(), orphan.getPnlRaw(),
+                        orphan.getTimestampRaw(), orphan.getGroupId()));
+            } else {
+                result.add(orphan);
+            }
+        }
         result.sort(Comparator.comparingLong(ClosedTradeRecord::getTimestampRaw).reversed());
         return result;
     }
