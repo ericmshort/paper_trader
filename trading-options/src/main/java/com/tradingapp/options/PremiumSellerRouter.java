@@ -427,6 +427,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                 || account.getOptionsPositions().containsKey(symbol + PUTSPREAD_LONG)
                 || account.isOptionRecentlyAdded(symbol + PUTSPREAD_SHORT)) return;
         if (account.getOptionsPositions().containsKey(symbol + CALLSPREAD_SHORT)) return; // call spread takes priority
+        // Catch orphaned single PUT legs assigned generic keys by broker sync (e.g. SYMBOL_PUT_K800)
+        if (account.getOptionsPositions().keySet().stream()
+                .anyMatch(k -> k.startsWith(symbol + "_") && k.contains("PUT"))) return;
         if (today.equals(lastExitDate.get(symbol + "_PUTSPREAD"))) return;
 
         LocalDate expiry = bsEngine.selectExpiry(symbol);
@@ -464,6 +467,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                 || account.getOptionsPositions().containsKey(symbol + CALLSPREAD_LONG)
                 || account.isOptionRecentlyAdded(symbol + CALLSPREAD_SHORT)) return;
         if (account.getOptionsPositions().containsKey(symbol + PUTSPREAD_SHORT)) return; // PCS takes priority
+        // Catch orphaned single CALL legs assigned generic keys by broker sync (e.g. SYMBOL_CALL_K800)
+        if (account.getOptionsPositions().keySet().stream()
+                .anyMatch(k -> k.startsWith(symbol + "_") && k.contains("CALL"))) return;
         if (today.equals(lastExitDate.get(symbol + "_CALLSPREAD"))) return;
 
         LocalDate expiry = bsEngine.selectExpiry(symbol);
@@ -501,6 +507,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                 || account.getOptionsPositions().containsKey(symbol + IC_SHORTPUT)
                 || account.getOptionsPositions().containsKey(symbol + IC_LONGPUT)
                 || account.isOptionRecentlyAdded(symbol + IC_SHORTCALL)) return;
+        // Catch orphaned single legs assigned generic keys by broker sync
+        if (account.getOptionsPositions().keySet().stream()
+                .anyMatch(k -> k.startsWith(symbol + "_"))) return;
         if (today.equals(lastExitDate.get(symbol + "_IRONCONDOR"))) return;
 
         LocalDate expiry = bsEngine.selectExpiry(symbol);
