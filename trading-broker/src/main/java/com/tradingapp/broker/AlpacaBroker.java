@@ -609,15 +609,22 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                                     ? underlying + "_CALLSPREAD_LONGCALL"
                                     : underlying + "_PUTSPREAD_LONGPUT";
                             // Don't overwrite a position that was already verified by fingerprint
-                            // matching earlier in this sync cycle. A previous session's spread
-                            // at a slightly different strike would otherwise replace today's
-                            // correctly-tracked position, corrupting premiumPaid and causing
-                            // negative max profit in the UI.
-                            if (!account.isOptionVerified(shortKey)) {
+                            // matching (same strike in Alpaca as local). Also don't overwrite a
+                            // locally-tracked spread with positive premiumPaid: that indicates
+                            // today's entry was recorded locally but Alpaca is returning a stale
+                            // fill from a prior session at a different strike. The isOptionVerified
+                            // guard alone doesn't cover this case because fingerprint match requires
+                            // identical strikes — if Alpaca has K=1110 and local DB has K=1115, no
+                            // fingerprint match occurs and the key is never marked verified.
+                            com.tradingapp.account.OptionsPosition existingShort =
+                                    account.getOptionsPositions().get(shortKey);
+                            boolean hasTrackedSpread = existingShort != null
+                                    && existingShort.getPremiumPaid() > 0;
+                            if (!account.isOptionVerified(shortKey) && !hasTrackedSpread) {
                                 account.addOptionsPosition(shortKey, shortLeg);
                             }
                             account.markOptionVerified(shortKey);
-                            if (!account.isOptionVerified(longKey)) {
+                            if (!account.isOptionVerified(longKey) && !hasTrackedSpread) {
                                 account.addOptionsPosition(longKey, longLeg);
                             }
                             account.markOptionVerified(longKey);
