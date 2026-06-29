@@ -419,6 +419,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                                    String signalStr, String featureCsv) {
         if (account.getOptionsPositions().containsKey(symbol + PUTSPREAD_SHORT)
                 || account.getOptionsPositions().containsKey(symbol + PUTSPREAD_LONG)) return;
+        if (account.getOptionsPositions().containsKey(symbol + CALLSPREAD_SHORT)) return; // call spread takes priority
         if (today.equals(lastExitDate.get(symbol + "_PUTSPREAD"))) return;
 
         LocalDate expiry = bsEngine.selectExpiry(symbol);
