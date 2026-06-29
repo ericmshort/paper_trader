@@ -212,15 +212,10 @@ public class TransactionLog {
         double realizedPnL = 0.0;
 
         for (TransactionRecord r : asc) {
-            // Imported records are Alpaca fill history written by syncOrderHistory().
-            // They represent broker-side events already captured in the actual position
-            // state (broker sync reconciles on startup). Including them here causes
-            // buy_to_close fills (CALL_BUY imported) to be misread as new long opens,
-            // leaving phantom SYMBOL_CALL / SYMBOL_PUT positions in the account.
-            if (r.getReason() != null && r.getReason().contains("(imported)")) continue;
-
+            boolean imported = r.getReason() != null && r.getReason().contains("(imported)");
             switch (r.getAction()) {
                 case BUY -> {
+                    if (imported) continue;
                     int prev = openShares.getOrDefault(r.getSymbol(), 0);
                     double prevAvg = avgCost.getOrDefault(r.getSymbol(), 0.0);
                     int newTotal = prev + r.getQuantity();
@@ -231,6 +226,7 @@ public class TransactionLog {
                     avgCost.put(r.getSymbol(), newAvg);
                 }
                 case SELL -> {
+                    if (imported) continue;
                     double entry = avgCost.getOrDefault(r.getSymbol(), r.getPricePerUnit());
                     realizedPnL += (r.getPricePerUnit() - entry) * r.getQuantity() - r.getFeeCharged();
                     int remaining = openShares.getOrDefault(r.getSymbol(), 0) - r.getQuantity();
@@ -242,26 +238,39 @@ public class TransactionLog {
                     }
                 }
                 case CALL_BUY -> {
-                    // qty < 0: new recordClose format — buy_to_close a short call (treat as close)
-                    if (r.getQuantity() < 0) restoreOptionClose(r, "CALL", openOptions);
-                    else                     restoreOptionOpen(r,  "CALL", openOptions);
+                    if (imported) {
+                        // Imported CALL_BUY = Alpaca buy_to_close a short call.
+                        // Route as a short-leg close so the short position is removed.
+                        restoreOptionClose(r, "CALL", true, openOptions);
+                    } else if (r.getQuantity() < 0) {
+                        // New recordClose format: CALL_BUY qty<0 = buy_to_close a short call.
+                        restoreOptionClose(r, "CALL", true, openOptions);
+                    } else {
+                        restoreOptionOpen(r, "CALL", openOptions);
+                    }
                 }
                 case PUT_BUY -> {
-                    if (r.getQuantity() < 0) restoreOptionClose(r, "PUT", openOptions);
-                    else                     restoreOptionOpen(r,  "PUT", openOptions);
+                    if (imported) {
+                        restoreOptionClose(r, "PUT", true, openOptions);
+                    } else if (r.getQuantity() < 0) {
+                        restoreOptionClose(r, "PUT", true, openOptions);
+                    } else {
+                        restoreOptionOpen(r, "PUT", openOptions);
+                    }
                 }
                 case CALL_SELL -> {
                     if (r.getReason() != null && r.getReason().contains("(SHORT)")) {
-                        restoreOptionOpen(r, "CALL", openOptions);
+                        if (!imported) restoreOptionOpen(r, "CALL", openOptions);
                     } else {
-                        restoreOptionClose(r, "CALL", openOptions);
+                        // Imported CALL_SELL = sell_to_close a long call — handled correctly by close path.
+                        restoreOptionClose(r, "CALL", false, openOptions);
                     }
                 }
                 case PUT_SELL -> {
                     if (r.getReason() != null && r.getReason().contains("(SHORT)")) {
-                        restoreOptionOpen(r, "PUT", openOptions);
+                        if (!imported) restoreOptionOpen(r, "PUT", openOptions);
                     } else {
-                        restoreOptionClose(r, "PUT", openOptions);
+                        restoreOptionClose(r, "PUT", false, openOptions);
                     }
                 }
             }
@@ -296,7 +305,11 @@ public class TransactionLog {
 
     private void restoreOptionClose(TransactionRecord r, String type,
                                     Map<String, OptionsPosition> openOptions) {
-        boolean isShortClose = r.getQuantity() < 0;
+        restoreOptionClose(r, type, r.getQuantity() < 0, openOptions);
+    }
+
+    private void restoreOptionClose(TransactionRecord r, String type, boolean isShortClose,
+                                    Map<String, OptionsPosition> openOptions) {
         String key = findMatchingCloseKey(openOptions, r.getSymbol(), type, isShortClose);
         if (key != null) openOptions.remove(key);
     }
