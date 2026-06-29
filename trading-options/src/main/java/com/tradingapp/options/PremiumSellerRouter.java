@@ -54,7 +54,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     private static final double PROFIT_TARGET   = 0.50;   // close at 50% of credit
     private static final int    CLOSE_DTE       = 7;      // close when < 7 DTE
     private static final double IV_PREMIUM      = 0.15;   // IV > HV edge: 15% premium on short legs
-    private static final int    MAX_CONTRACTS   = 10;
+    private int maxContracts = 10;
 
     public static final String STRATEGY_PUT_CREDIT_SPREAD  = "PUT_CREDIT_SPREAD";
     public static final String STRATEGY_CALL_CREDIT_SPREAD = "CALL_CREDIT_SPREAD";
@@ -713,9 +713,11 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         return K;
     }
 
+    public void setMaxContracts(int v) { this.maxContracts = v; }
+
     private int creditContracts(double cash, double riskPerShare) {
         if (riskPerShare <= 0) return 0;
-        return Math.min(MAX_CONTRACTS, Math.max(1, (int) (cash * 0.02 / (riskPerShare * 100))));
+        return Math.min(maxContracts, Math.max(1, (int) (cash * 0.02 / (riskPerShare * 100))));
     }
 
     private double computeVol(String symbol) {
