@@ -101,6 +101,8 @@ public class TradingLoop implements Runnable {
     // 0 = immediate (current behavior). 1 = give it 1 bar (~1 min) to recover first.
     private int lossLimitRecoveryBars = 0;
     private int lossLimitBreachCount  = 0;
+    private final java.util.concurrent.atomic.AtomicBoolean dailyLossResetRequested =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
     private Set<String> stockWatchlist = null; // null = all symbols eligible
     private CandleHistory candleHistory;
     private NewsSentimentCache sentimentCache;
@@ -184,18 +186,10 @@ public class TradingLoop implements Runnable {
 
     public void setDailyLossLimitPct(double pct) { this.dailyLossLimitPct = pct; }
 
+    /** Thread-safe: may be called from any thread (e.g. FX button click). */
     public void resetDailyLossHalt() {
         account.setDailyLossHalted(false);
-        lossLimitBreachCount = 0;
-        // Reset the baseline to the current portfolio value so the daily loss
-        // limit is measured from now, not from the old value that triggered the halt.
-        double stockMV = account.getPositions().values().stream()
-                .mapToDouble(com.tradingapp.account.Position::getMarketValue).sum();
-        double optsBasis = account.getOptionsPositions().values().stream()
-                .filter(p -> p.getContracts() > 0)
-                .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
-                .sum();
-        dayStartValue = account.getBalance() + stockMV + optsBasis;
+        dailyLossResetRequested.set(true);
     }
     public void setLossLimitRecoveryBars(int n)  { this.lossLimitRecoveryBars = n; }
     public void setAccurateOptionsValuation(boolean v) { this.accurateOptionsValuation = v; }
@@ -318,6 +312,26 @@ public class TradingLoop implements Runnable {
                 if (premiumSellerEvaluator != null && !account.isDailyLossHalted()) {
                     premiumSellerEvaluator.markPositionsToMarket(symbol, price);
                 }
+            }
+
+            // Honor a manual daily-loss reset requested from the UI (e.g. new paper account).
+            if (dailyLossResetRequested.compareAndSet(true, false)) {
+                account.setDailyLossHalted(false);
+                lossLimitBreachCount = 0;
+                double brokerPv = account.getBrokerPortfolioValue();
+                if (brokerPv > 0) {
+                    dayStartValue = brokerPv;
+                } else {
+                    double rstStockMV = account.getPositions().values().stream()
+                            .mapToDouble(Position::getMarketValue).sum();
+                    double rstOptsBasis = account.getOptionsPositions().values().stream()
+                            .filter(p -> p.getContracts() > 0)
+                            .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
+                            .sum();
+                    dayStartValue = account.getBalance() + rstStockMV + rstOptsBasis;
+                }
+                researchCallback.accept(String.format(
+                        "Daily loss limit reset — new baseline: $%.0f", dayStartValue));
             }
 
             // Single aggregate loss check with all symbols' fresh prices.
