@@ -76,6 +76,7 @@ public class DashboardController implements Initializable {
     @FXML private Label availableCashLabel;
     @FXML private Label optionsCashDeployedLabel;
     @FXML private Label haltedLabel;
+    @FXML private Button resetDailyLossButton;
     @FXML private Label winsLabel;
     @FXML private Label lossesLabel;
     @FXML private Label winRateLabel;
@@ -946,6 +947,7 @@ public class DashboardController implements Initializable {
             double winRate,
             double realizedPnl,
             boolean tradingHalted,
+            boolean dailyLossHalted,
             List<PremiumSellerRow> premiumRows,
             double premiumTotalPnl
     ) {}
@@ -990,7 +992,7 @@ public class DashboardController implements Initializable {
         return new UiSnapshot(history, availableCash, stockHoldings, optionHoldings, totalPortfolio,
                 optionsCashDeployed, optionRows, optTotalUnrealized, stockRows, stkTotalUnrealized,
                 totalUnrealizedPnl, wins, losses, winRate, realizedPnl, account.isTradingHalted(),
-                premiumRows, premiumTotalPnl);
+                account.isDailyLossHalted(), premiumRows, premiumTotalPnl);
     }
 
     // Must be called on the FX thread. Only touches FX nodes.
@@ -1073,7 +1075,16 @@ public class DashboardController implements Initializable {
         pnlButton.setText(String.format("P&L: $%,.2f", s.realizedPnl()));
         equitySeries.getData().add(new XYChart.Data<>(tickCount++, s.totalPortfolio()));
         if (equitySeries.getData().size() > 200) equitySeries.getData().remove(0);
-        haltedLabel.setText(s.tradingHalted() ? "⛔ TRADING HALTED — portfolio exhausted" : "");
+        if (s.tradingHalted()) {
+            haltedLabel.setText("⛔ TRADING HALTED — portfolio exhausted");
+            resetDailyLossButton.setVisible(false);
+        } else if (s.dailyLossHalted()) {
+            haltedLabel.setText("⛔ DAILY LOSS LIMIT HIT — trading halted");
+            resetDailyLossButton.setVisible(true);
+        } else {
+            haltedLabel.setText("");
+            resetDailyLossButton.setVisible(false);
+        }
     }
 
     private void refreshUi() {
@@ -1101,14 +1112,27 @@ public class DashboardController implements Initializable {
 
         if (account.isTradingHalted()) {
             haltedLabel.setText("⛔ TRADING HALTED — portfolio exhausted");
+            resetDailyLossButton.setVisible(false);
+        } else if (account.isDailyLossHalted()) {
+            haltedLabel.setText("⛔ DAILY LOSS LIMIT HIT — trading halted");
+            resetDailyLossButton.setVisible(true);
         } else {
             haltedLabel.setText("");
+            resetDailyLossButton.setVisible(false);
         }
     }
 
     @FXML
     private void onPnlClicked() {
         showPnlBreakdown();
+    }
+
+    @FXML
+    private void onResetDailyLossClicked() {
+        if (tradingLoop != null) tradingLoop.resetDailyLossHalt();
+        account.setDailyLossHalted(false);
+        haltedLabel.setText("");
+        resetDailyLossButton.setVisible(false);
     }
 
     private List<ClosedTradeRecord> computeClosedTrades() {

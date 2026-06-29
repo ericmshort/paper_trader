@@ -40,6 +40,11 @@
                             <Label fx:id="haltedLabel"
                                    text=""
                                    style="-fx-font-size: 14px; -fx-font-weight: bold; -fx-text-fill: #ff4444;"/>
+                            <Button fx:id="resetDailyLossButton"
+                                    text="Reset Daily Loss Limit"
+                                    onAction="#onResetDailyLossClicked"
+                                    visible="false"
+                                    style="-fx-font-size: 13px; -fx-background-color: #cc4400; -fx-text-fill: white; -fx-cursor: hand;"/>
                         </HBox>
                         <!-- Row 2: Performance stats -->
                         <HBox spacing="20">

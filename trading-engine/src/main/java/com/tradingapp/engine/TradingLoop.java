@@ -183,6 +183,12 @@ public class TradingLoop implements Runnable {
     }
 
     public void setDailyLossLimitPct(double pct) { this.dailyLossLimitPct = pct; }
+
+    public void resetDailyLossHalt() {
+        account.setDailyLossHalted(false);
+        dayStartValue = -1;
+        lastDayTrackingDate = null;
+    }
     public void setLossLimitRecoveryBars(int n)  { this.lossLimitRecoveryBars = n; }
     public void setAccurateOptionsValuation(boolean v) { this.accurateOptionsValuation = v; }
     public void setMaxPortfolioExposure(double fraction) { this.maxPortfolioExposure = fraction; }
