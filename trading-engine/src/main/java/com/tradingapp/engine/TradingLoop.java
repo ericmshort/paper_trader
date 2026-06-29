@@ -273,14 +273,28 @@ public class TradingLoop implements Runnable {
                 // intraday, dayStartValue is set from yesterday's close but the portfolio is already
                 // depleted. Without this check, the halt is cleared and trading resumes from the
                 // already-degraded baseline until the new limit is hit again.
+                //
+                // Use the broker's own portfolio_value for the current-value side so both sides
+                // of the comparison use Alpaca's mark-to-market figures. The previous hybrid
+                // (cash + stockMV + optsBasis) mixed broker cash with locally-tracked options
+                // at entry value, causing false positives when the Alpaca account state didn't
+                // match local tracking (e.g., after a paper account reset or a position entered
+                // on a separate account). Falls back to the hybrid for sim brokers that don't
+                // provide portfolio_value.
                 if (dailyLossLimitPct > 0 && dayStartValue > 0) {
-                    double stockMV = account.getPositions().values().stream()
-                            .mapToDouble(Position::getMarketValue).sum();
-                    double optsBasis = account.getOptionsPositions().values().stream()
-                            .filter(p -> p.getContracts() > 0)
-                            .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
-                            .sum();
-                    double currentVal = account.getBalance() + stockMV + optsBasis;
+                    double brokerPv = account.getBrokerPortfolioValue();
+                    double currentVal;
+                    if (brokerPv > 0) {
+                        currentVal = brokerPv;
+                    } else {
+                        double stockMV = account.getPositions().values().stream()
+                                .mapToDouble(Position::getMarketValue).sum();
+                        double optsBasis = account.getOptionsPositions().values().stream()
+                                .filter(p -> p.getContracts() > 0)
+                                .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
+                                .sum();
+                        currentVal = account.getBalance() + stockMV + optsBasis;
+                    }
                     if (currentVal < dayStartValue * (1 - dailyLossLimitPct)) {
                         account.setDailyLossHalted(true);
                         researchCallback.accept(String.format(
