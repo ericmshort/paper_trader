@@ -186,8 +186,16 @@ public class TradingLoop implements Runnable {
 
     public void resetDailyLossHalt() {
         account.setDailyLossHalted(false);
-        dayStartValue = -1;
-        lastDayTrackingDate = null;
+        lossLimitBreachCount = 0;
+        // Reset the baseline to the current portfolio value so the daily loss
+        // limit is measured from now, not from the old value that triggered the halt.
+        double stockMV = account.getPositions().values().stream()
+                .mapToDouble(com.tradingapp.account.Position::getMarketValue).sum();
+        double optsBasis = account.getOptionsPositions().values().stream()
+                .filter(p -> p.getContracts() > 0)
+                .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
+                .sum();
+        dayStartValue = account.getBalance() + stockMV + optsBasis;
     }
     public void setLossLimitRecoveryBars(int n)  { this.lossLimitRecoveryBars = n; }
     public void setAccurateOptionsValuation(boolean v) { this.accurateOptionsValuation = v; }
