@@ -135,6 +135,9 @@ public class Account {
 
     public synchronized void reset(double startingBalance) {
         this.balance = startingBalance;
+        this.buyingPower = 0.0;
+        this.lastEquity = 0.0;
+        this.brokerPortfolioValue = -1.0;
         this.positions.clear();
         this.optionsPositions.clear();
         this.totalRealizedPnL = 0.0;
