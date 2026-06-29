@@ -11,15 +11,22 @@ public class PremiumSellerRow {
     private final String currentPnl;
     private final String pctCaptured;
     private final double pnlRaw;
+    private final String lowStrike;
+    private final String highStrike;
+    private final String currentPrice;
 
     public PremiumSellerRow(String symbol, String strategy, String shortStrike, String expiry,
-                            long dteValue, double maxProfitRaw, double pnlRaw) {
+                            long dteValue, double maxProfitRaw, double pnlRaw,
+                            String lowStrike, String highStrike, String currentPrice) {
         this.symbol      = symbol;
         this.strategy    = strategy;
         this.shortStrike = shortStrike;
         this.expiry      = expiry;
         this.dte         = dteValue + "d";
         this.pnlRaw      = pnlRaw;
+        this.lowStrike   = lowStrike;
+        this.highStrike  = highStrike;
+        this.currentPrice = currentPrice;
 
         this.maxProfit   = String.format("$%.0f", maxProfitRaw);
 
@@ -31,13 +38,16 @@ public class PremiumSellerRow {
         this.pctCaptured = String.format("%.0f%%", Math.max(-999, Math.min(999, pct)));
     }
 
-    public String getSymbol()      { return symbol; }
-    public String getStrategy()    { return strategy; }
-    public String getShortStrike() { return shortStrike; }
-    public String getExpiry()      { return expiry; }
-    public String getDte()         { return dte; }
-    public String getMaxProfit()   { return maxProfit; }
-    public String getCurrentPnl()  { return currentPnl; }
-    public String getPctCaptured() { return pctCaptured; }
-    public double getPnlRaw()      { return pnlRaw; }
+    public String getSymbol()       { return symbol; }
+    public String getStrategy()     { return strategy; }
+    public String getShortStrike()  { return shortStrike; }
+    public String getExpiry()       { return expiry; }
+    public String getDte()          { return dte; }
+    public String getMaxProfit()    { return maxProfit; }
+    public String getCurrentPnl()   { return currentPnl; }
+    public String getPctCaptured()  { return pctCaptured; }
+    public double getPnlRaw()       { return pnlRaw; }
+    public String getLowStrike()    { return lowStrike; }
+    public String getHighStrike()   { return highStrike; }
+    public String getCurrentPrice() { return currentPrice; }
 }

@@ -185,14 +185,16 @@
                                VBox.vgrow="ALWAYS"
                                style="-fx-background-color: #1a1a2e;">
                         <columns>
-                            <TableColumn fx:id="prmColSymbol"   text="Symbol"   prefWidth="80"/>
-                            <TableColumn fx:id="prmColStrategy" text="Strategy" prefWidth="145"/>
-                            <TableColumn fx:id="prmColStrike"   text="Short K"  prefWidth="100"/>
-                            <TableColumn fx:id="prmColExpiry"   text="Expiry"   prefWidth="110"/>
-                            <TableColumn fx:id="prmColDte"      text="DTE"      prefWidth="55"/>
-                            <TableColumn fx:id="prmColMax"      text="Max Profit" prefWidth="100"/>
-                            <TableColumn fx:id="prmColPnl"      text="P&amp;L"  prefWidth="100"/>
-                            <TableColumn fx:id="prmColPct"      text="Captured Pct" prefWidth="110"/>
+                            <TableColumn fx:id="prmColSymbol"       text="Symbol"   prefWidth="80"/>
+                            <TableColumn fx:id="prmColStrategy"     text="Strategy" prefWidth="145"/>
+                            <TableColumn fx:id="prmColLowStrike"    text="Low K"    prefWidth="75"/>
+                            <TableColumn fx:id="prmColHighStrike"   text="High K"   prefWidth="75"/>
+                            <TableColumn fx:id="prmColCurrentPrice" text="Stock $"  prefWidth="75"/>
+                            <TableColumn fx:id="prmColExpiry"       text="Expiry"   prefWidth="110"/>
+                            <TableColumn fx:id="prmColDte"          text="DTE"      prefWidth="55"/>
+                            <TableColumn fx:id="prmColMax"          text="Max Profit" prefWidth="100"/>
+                            <TableColumn fx:id="prmColPnl"          text="P&amp;L"  prefWidth="100"/>
+                            <TableColumn fx:id="prmColPct"          text="Captured Pct" prefWidth="110"/>
                         </columns>
                     </TableView>
                     <Separator/>

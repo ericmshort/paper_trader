@@ -96,7 +96,9 @@ public class DashboardController implements Initializable {
     @FXML private TableView<PremiumSellerRow> premiumTable;
     @FXML private TableColumn<PremiumSellerRow, String> prmColSymbol;
     @FXML private TableColumn<PremiumSellerRow, String> prmColStrategy;
-    @FXML private TableColumn<PremiumSellerRow, String> prmColStrike;
+    @FXML private TableColumn<PremiumSellerRow, String> prmColLowStrike;
+    @FXML private TableColumn<PremiumSellerRow, String> prmColHighStrike;
+    @FXML private TableColumn<PremiumSellerRow, String> prmColCurrentPrice;
     @FXML private TableColumn<PremiumSellerRow, String> prmColExpiry;
     @FXML private TableColumn<PremiumSellerRow, String> prmColDte;
     @FXML private TableColumn<PremiumSellerRow, String> prmColMax;
@@ -589,7 +591,9 @@ public class DashboardController implements Initializable {
     private void setupPremiumTableColumns() {
         prmColSymbol.setCellValueFactory(new PropertyValueFactory<>("symbol"));
         prmColStrategy.setCellValueFactory(new PropertyValueFactory<>("strategy"));
-        prmColStrike.setCellValueFactory(new PropertyValueFactory<>("shortStrike"));
+        prmColLowStrike.setCellValueFactory(new PropertyValueFactory<>("lowStrike"));
+        prmColHighStrike.setCellValueFactory(new PropertyValueFactory<>("highStrike"));
+        prmColCurrentPrice.setCellValueFactory(new PropertyValueFactory<>("currentPrice"));
         prmColExpiry.setCellValueFactory(new PropertyValueFactory<>("expiry"));
         prmColDte.setCellValueFactory(new PropertyValueFactory<>("dte"));
         prmColMax.setCellValueFactory(new PropertyValueFactory<>("maxProfit"));
@@ -629,9 +633,14 @@ public class DashboardController implements Initializable {
             double closeCost = (sCur - lCur) * 100 * c;
             double pnl = credit - closeCost;
             long dte = java.time.temporal.ChronoUnit.DAYS.between(today, shortPos.getExpiry());
+            List<Double> stockPrices = priceHistory.getPrices(symbol);
+            String stockPriceStr = stockPrices.isEmpty() ? "—" : String.format("$%.2f", stockPrices.get(stockPrices.size() - 1));
             rows.add(new PremiumSellerRow(symbol, "Put Credit Spread",
                     String.format("$%.0f", shortPos.getStrike()),
-                    shortPos.getExpiry().toString(), Math.max(0, dte), credit, pnl));
+                    shortPos.getExpiry().toString(), Math.max(0, dte), credit, pnl,
+                    String.format("$%.0f", longPos.getStrike()),
+                    String.format("$%.0f", shortPos.getStrike()),
+                    stockPriceStr));
         }
 
         // Call Credit Spreads
@@ -651,9 +660,14 @@ public class DashboardController implements Initializable {
             double closeCost = (sCur - lCur) * 100 * c;
             double pnl = credit - closeCost;
             long dte = java.time.temporal.ChronoUnit.DAYS.between(today, shortPos.getExpiry());
+            List<Double> stockPrices = priceHistory.getPrices(symbol);
+            String stockPriceStr = stockPrices.isEmpty() ? "—" : String.format("$%.2f", stockPrices.get(stockPrices.size() - 1));
             rows.add(new PremiumSellerRow(symbol, "Call Credit Spread",
                     String.format("$%.0f", shortPos.getStrike()),
-                    shortPos.getExpiry().toString(), Math.max(0, dte), credit, pnl));
+                    shortPos.getExpiry().toString(), Math.max(0, dte), credit, pnl,
+                    String.format("$%.0f", shortPos.getStrike()),
+                    String.format("$%.0f", longPos.getStrike()),
+                    stockPriceStr));
         }
 
         // Iron Condors
@@ -678,8 +692,13 @@ public class DashboardController implements Initializable {
             double pnl = credit - closeCost;
             long dte = java.time.temporal.ChronoUnit.DAYS.between(today, scPos.getExpiry());
             String shortStrikes = String.format("$%.0f/$%.0f", spPos.getStrike(), scPos.getStrike());
+            List<Double> icStockPrices = priceHistory.getPrices(symbol);
+            String icStockPriceStr = icStockPrices.isEmpty() ? "—" : String.format("$%.2f", icStockPrices.get(icStockPrices.size() - 1));
             rows.add(new PremiumSellerRow(symbol, "Iron Condor", shortStrikes,
-                    scPos.getExpiry().toString(), Math.max(0, dte), credit, pnl));
+                    scPos.getExpiry().toString(), Math.max(0, dte), credit, pnl,
+                    String.format("$%.0f", spPos.getStrike()),
+                    String.format("$%.0f", scPos.getStrike()),
+                    icStockPriceStr));
         }
 
         // Cash-Secured Puts
@@ -694,9 +713,12 @@ public class DashboardController implements Initializable {
             double curPrem = computeOptionCurrentPremium(pos);
             double pnl = credit - curPrem * 100 * c;
             long dte = java.time.temporal.ChronoUnit.DAYS.between(today, pos.getExpiry());
+            List<Double> cspStockPrices = priceHistory.getPrices(symbol);
+            String cspStockPriceStr = cspStockPrices.isEmpty() ? "—" : String.format("$%.2f", cspStockPrices.get(cspStockPrices.size() - 1));
+            String cspStrike = String.format("$%.0f", pos.getStrike());
             rows.add(new PremiumSellerRow(symbol, "Cash-Secured Put",
-                    String.format("$%.0f", pos.getStrike()),
-                    pos.getExpiry().toString(), Math.max(0, dte), credit, pnl));
+                    cspStrike, pos.getExpiry().toString(), Math.max(0, dte), credit, pnl,
+                    cspStrike, "—", cspStockPriceStr));
         }
 
         // Covered Calls
@@ -711,9 +733,12 @@ public class DashboardController implements Initializable {
             double curPrem = computeOptionCurrentPremium(pos);
             double pnl = credit - curPrem * 100 * c;
             long dte = java.time.temporal.ChronoUnit.DAYS.between(today, pos.getExpiry());
+            List<Double> ccStockPrices = priceHistory.getPrices(symbol);
+            String ccStockPriceStr = ccStockPrices.isEmpty() ? "—" : String.format("$%.2f", ccStockPrices.get(ccStockPrices.size() - 1));
+            String ccStrike = String.format("$%.0f", pos.getStrike());
             rows.add(new PremiumSellerRow(symbol, "Covered Call",
-                    String.format("$%.0f", pos.getStrike()),
-                    pos.getExpiry().toString(), Math.max(0, dte), credit, pnl));
+                    ccStrike, pos.getExpiry().toString(), Math.max(0, dte), credit, pnl,
+                    "—", ccStrike, ccStockPriceStr));
         }
 
         return rows;
@@ -725,6 +750,7 @@ public class DashboardController implements Initializable {
 
         Map<String, List<Map.Entry<String, OptionsPosition>>> groups = new java.util.LinkedHashMap<>();
         for (Map.Entry<String, OptionsPosition> entry : account.getOptionsPositions().entrySet()) {
+            if (PremiumSellerRouter.isPremiumKey(entry.getKey())) continue;
             String gk = strategyGroupKey(entry.getKey(), entry.getValue().getSymbol());
             groups.computeIfAbsent(gk, k -> new ArrayList<>()).add(entry);
         }
