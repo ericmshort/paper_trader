@@ -588,53 +588,77 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                     String underlying = firstOcc.underlying;
                     String type = firstOcc.type;
 
-                    if (group.size() == 2) {
-                        com.tradingapp.account.OptionsPosition p0 =
-                                (com.tradingapp.account.OptionsPosition) group.get(0)[1];
-                        com.tradingapp.account.OptionsPosition p1 =
-                                (com.tradingapp.account.OptionsPosition) group.get(1)[1];
-                        com.tradingapp.account.OptionsPosition shortLeg = null, longLeg = null;
-                        if (p0.getContracts() < 0 && p1.getContracts() > 0) {
-                            shortLeg = p0; longLeg = p1;
-                        } else if (p0.getContracts() > 0 && p1.getContracts() < 0) {
-                            shortLeg = p1; longLeg = p0;
-                        }
-                        if (shortLeg != null) {
-                            // Credit spread: use PremiumSellerRouter's canonical key suffixes so
-                            // buildPremiumRows() and checkExit*Spread() can locate both legs.
-                            String shortKey = "CALL".equals(type)
-                                    ? underlying + "_CALLSPREAD_SHORTCALL"
-                                    : underlying + "_PUTSPREAD_SHORTPUT";
-                            String longKey = "CALL".equals(type)
-                                    ? underlying + "_CALLSPREAD_LONGCALL"
-                                    : underlying + "_PUTSPREAD_LONGPUT";
-                            // Don't overwrite a position that was already verified by fingerprint
-                            // matching (same strike in Alpaca as local). Also don't overwrite a
-                            // locally-tracked spread with positive premiumPaid: that indicates
-                            // today's entry was recorded locally but Alpaca is returning a stale
-                            // fill from a prior session at a different strike. The isOptionVerified
-                            // guard alone doesn't cover this case because fingerprint match requires
-                            // identical strikes — if Alpaca has K=1110 and local DB has K=1115, no
-                            // fingerprint match occurs and the key is never marked verified.
-                            com.tradingapp.account.OptionsPosition existingShort =
-                                    account.getOptionsPositions().get(shortKey);
-                            boolean hasTrackedSpread = existingShort != null
-                                    && existingShort.getPremiumPaid() > 0;
-                            if (!account.isOptionVerified(shortKey) && !hasTrackedSpread) {
-                                account.addOptionsPosition(shortKey, shortLeg);
-                            }
-                            account.markOptionVerified(shortKey);
-                            if (!account.isOptionVerified(longKey) && !hasTrackedSpread) {
-                                account.addOptionsPosition(longKey, longLeg);
-                            }
-                            account.markOptionVerified(longKey);
-                            LOG.info("[BrokerSync] Detected " + ("CALL".equals(type) ? "bear call" : "bull put")
-                                    + " spread for " + underlying + ": short K=" + shortLeg.getStrike()
-                                    + " long K=" + longLeg.getStrike());
-                            continue;
-                        }
+                    // Separate legs by direction to detect one or more credit spread pairs.
+                    // A group can have > 2 legs when multiple spreads for the same symbol+type+expiry
+                    // were entered in separate sessions (e.g. two CRWD PUT spreads at different strikes).
+                    // Previously only group.size()==2 was handled, causing all legs of larger groups
+                    // to fall through to generic keys (SYMBOL_PUT, SYMBOL_PUT_K640, …) and appear in
+                    // the Options Positions tab instead of the Premium Seller tab.
+                    List<com.tradingapp.account.OptionsPosition> shortLegs = new java.util.ArrayList<>();
+                    List<com.tradingapp.account.OptionsPosition> longLegs  = new java.util.ArrayList<>();
+                    for (Object[] entry : group) {
+                        com.tradingapp.account.OptionsPosition p =
+                                (com.tradingapp.account.OptionsPosition) entry[1];
+                        if (p.getContracts() < 0) shortLegs.add(p);
+                        else                       longLegs.add(p);
                     }
-                    // Standalone or non-credit-spread: use generic key with strike suffix for uniqueness
+
+                    if (!shortLegs.isEmpty() && !longLegs.isEmpty()) {
+                        // First pair → canonical PremiumSellerRouter keys so checkExit*Spread() works.
+                        com.tradingapp.account.OptionsPosition shortLeg = shortLegs.get(0);
+                        com.tradingapp.account.OptionsPosition longLeg  = longLegs.get(0);
+                        String shortKey = "CALL".equals(type)
+                                ? underlying + "_CALLSPREAD_SHORTCALL"
+                                : underlying + "_PUTSPREAD_SHORTPUT";
+                        String longKey = "CALL".equals(type)
+                                ? underlying + "_CALLSPREAD_LONGCALL"
+                                : underlying + "_PUTSPREAD_LONGPUT";
+                        // Don't overwrite a position that was already verified by fingerprint
+                        // matching (same strike in Alpaca as local). Also don't overwrite a
+                        // locally-tracked spread with positive premiumPaid: that indicates
+                        // today's entry was recorded locally but Alpaca is returning a stale
+                        // fill from a prior session at a different strike. The isOptionVerified
+                        // guard alone doesn't cover this case because fingerprint match requires
+                        // identical strikes — if Alpaca has K=1110 and local DB has K=1115, no
+                        // fingerprint match occurs and the key is never marked verified.
+                        com.tradingapp.account.OptionsPosition existingShort =
+                                account.getOptionsPositions().get(shortKey);
+                        boolean hasTrackedSpread = existingShort != null
+                                && existingShort.getPremiumPaid() > 0;
+                        if (!account.isOptionVerified(shortKey) && !hasTrackedSpread) {
+                            account.addOptionsPosition(shortKey, shortLeg);
+                        }
+                        account.markOptionVerified(shortKey);
+                        if (!account.isOptionVerified(longKey) && !hasTrackedSpread) {
+                            account.addOptionsPosition(longKey, longLeg);
+                        }
+                        account.markOptionVerified(longKey);
+                        LOG.info("[BrokerSync] Detected " + ("CALL".equals(type) ? "bear call" : "bull put")
+                                + " spread for " + underlying + ": short K=" + shortLeg.getStrike()
+                                + " long K=" + longLeg.getStrike()
+                                + (shortLegs.size() > 1 ? " (+" + (shortLegs.size() - 1) + " extra spreads)" : ""));
+
+                        // Additional pairs → strike-suffixed premium keys so isPremiumKey() still
+                        // returns true (they won't pollute Options Positions) but they don't collide
+                        // with the canonical key used by PremiumSellerRouter exit logic.
+                        int pairs = Math.min(shortLegs.size(), longLegs.size());
+                        for (int idx = 1; idx < pairs; idx++) {
+                            com.tradingapp.account.OptionsPosition sl = shortLegs.get(idx);
+                            com.tradingapp.account.OptionsPosition ll = longLegs.get(idx);
+                            String sk = "CALL".equals(type)
+                                    ? underlying + "_CALLSPREAD_SHORTCALL_K" + (int) sl.getStrike()
+                                    : underlying + "_PUTSPREAD_SHORTPUT_K" + (int) sl.getStrike();
+                            String lk = "CALL".equals(type)
+                                    ? underlying + "_CALLSPREAD_LONGCALL_K" + (int) ll.getStrike()
+                                    : underlying + "_PUTSPREAD_LONGPUT_K" + (int) ll.getStrike();
+                            if (!account.isOptionVerified(sk)) account.addOptionsPosition(sk, sl);
+                            account.markOptionVerified(sk);
+                            if (!account.isOptionVerified(lk)) account.addOptionsPosition(lk, ll);
+                            account.markOptionVerified(lk);
+                        }
+                        continue;
+                    }
+                    // Standalone or same-direction legs: use generic key with strike suffix for uniqueness
                     for (Object[] entry : group) {
                         com.tradingapp.account.OptionsPosition pos =
                                 (com.tradingapp.account.OptionsPosition) entry[1];
