@@ -1165,6 +1165,10 @@ public class DashboardController implements Initializable {
         Set<String> processedGroupIds = new HashSet<>(); // tracks which mleg close groups have had P&L assigned
 
         for (TransactionRecord r : records) {
+            // Skip Alpaca order-history imports: they duplicate fills already tracked locally
+            // and create spurious open/close pairs that pollute the P&L breakdown.
+            if (r.getReason() != null && r.getReason().contains("(imported)")) continue;
+
             switch (r.getAction()) {
                 case BUY -> {
                     int prev = openShares.getOrDefault(r.getSymbol(), 0);
@@ -1190,8 +1194,23 @@ public class DashboardController implements Initializable {
                         openShares.put(r.getSymbol(), remaining);
                     }
                 }
-                case CALL_BUY -> accumulateOption(openLongPremiums, r, "_CALL");
-                case PUT_BUY  -> accumulateOption(openLongPremiums, r, "_PUT");
+                case CALL_BUY -> {
+                    if (r.getQuantity() < 0) {
+                        // Negative qty = buy_to_close a short (new recordClose format)
+                        processShortClose(r, "_CALL", "Call Option",
+                                openShortPremiums, closed, processedGroupIds);
+                    } else {
+                        accumulateOption(openLongPremiums, r, "_CALL");
+                    }
+                }
+                case PUT_BUY -> {
+                    if (r.getQuantity() < 0) {
+                        processShortClose(r, "_PUT", "Put Option",
+                                openShortPremiums, closed, processedGroupIds);
+                    } else {
+                        accumulateOption(openLongPremiums, r, "_PUT");
+                    }
+                }
                 case CALL_SELL -> processOptionSell(r, "_CALL", "Call Option",
                         openLongPremiums, openShortPremiums, closed, processedGroupIds);
                 case PUT_SELL  -> processOptionSell(r, "_PUT",  "Put Option",
@@ -1201,6 +1220,36 @@ public class DashboardController implements Initializable {
 
         Collections.reverse(closed); // most recent first
         return mergeMultiLegClosedTrades(closed);
+    }
+
+    /**
+     * Handles a CALL_BUY/PUT_BUY record with quantity < 0: this is a buy_to_close of a short leg
+     * (the new recordClose format writes CALL_BUY for short closes instead of CALL_SELL qty<0).
+     */
+    private static void processShortClose(TransactionRecord r, String suffix, String type,
+                                          Map<String, double[]> openShortPremiums,
+                                          List<ClosedTradeRecord> closed,
+                                          Set<String> processedGroupIds) {
+        String key = r.getSymbol() + suffix;
+        int qty = Math.abs(r.getQuantity());
+        double[] entry = openShortPremiums.getOrDefault(key, new double[]{r.getPricePerUnit(), qty});
+
+        String groupId = r.getGroupId();
+        double reasonPnl = parseReasonPnl(r.getReason());
+        boolean useReasonPnl = !Double.isNaN(reasonPnl) && groupId != null && r.getFeeCharged() == 0;
+
+        double pnl;
+        if (useReasonPnl && !processedGroupIds.contains(groupId)) {
+            pnl = reasonPnl;
+            processedGroupIds.add(groupId);
+        } else if (useReasonPnl) {
+            return; // P&L already recorded for this group — skip duplicate
+        } else {
+            pnl = (entry[0] - r.getPricePerUnit()) * 100.0 * qty - r.getFeeCharged();
+        }
+        closed.add(new ClosedTradeRecord(r.getSymbol(), type + " (Short)", qty,
+                entry[0], r.getPricePerUnit(), pnl, r.getTimestamp(), r.getGroupId()));
+        reduceOptionPosition(openShortPremiums, key, entry, qty);
     }
 
     /** Accumulates multiple BUY records for the same option key into a weighted-average position. */
@@ -1248,15 +1297,15 @@ public class DashboardController implements Initializable {
         boolean useReasonPnl = !Double.isNaN(reasonPnl) && groupId != null && r.getFeeCharged() == 0;
 
         if (r.getQuantity() < 0) {
-            // Buying back a short (quantity is negative in the log for buy-to-close)
+            // Buying back a short (old format: CALL_SELL qty<0 before recordClose fix)
             int qty = Math.abs(r.getQuantity());
             double[] entry = openShortPremiums.getOrDefault(key, new double[]{r.getPricePerUnit(), qty});
             double pnl;
             if (useReasonPnl && !processedGroupIds.contains(groupId)) {
-                pnl = reasonPnl; // total net P&L for this multi-leg group
+                pnl = reasonPnl;
                 processedGroupIds.add(groupId);
             } else if (useReasonPnl) {
-                pnl = 0; // P&L already recorded for this group's first close record
+                return; // P&L already recorded for this group — skip duplicate
             } else {
                 pnl = (entry[0] - r.getPricePerUnit()) * 100.0 * qty - r.getFeeCharged();
             }
@@ -1264,15 +1313,10 @@ public class DashboardController implements Initializable {
                     entry[0], r.getPricePerUnit(), pnl, r.getTimestamp(), r.getGroupId()));
             reduceOptionPosition(openShortPremiums, key, entry, qty);
         } else {
-            // Selling a long leg
+            // Selling a long leg — skip if P&L is already captured by the short-leg close
+            if (useReasonPnl) return;
             double[] entry = openLongPremiums.getOrDefault(key, new double[]{r.getPricePerUnit(), r.getQuantity()});
-            double pnl;
-            if (useReasonPnl) {
-                // P&L is captured on the first short-leg close for this multi-leg group
-                pnl = 0;
-            } else {
-                pnl = (r.getPricePerUnit() - entry[0]) * 100.0 * r.getQuantity() - r.getFeeCharged();
-            }
+            double pnl = (r.getPricePerUnit() - entry[0]) * 100.0 * r.getQuantity() - r.getFeeCharged();
             closed.add(new ClosedTradeRecord(r.getSymbol(), type, r.getQuantity(),
                     entry[0], r.getPricePerUnit(), pnl, r.getTimestamp(), r.getGroupId()));
             reduceOptionPosition(openLongPremiums, key, entry, r.getQuantity());
@@ -1280,26 +1324,33 @@ public class DashboardController implements Initializable {
     }
 
     /**
-     * Parses the net P&L (credit − close cost) from a multi-leg strategy close reason.
-     * Handles both IC format ("close=X ... credit=Y") and spread format ("close cost=X ... credit=Y").
-     * Returns NaN if the reason is not a recognizable credit strategy close.
+     * Parses the net P&L from a multi-leg strategy close reason string.
+     * Handles:
+     *   "Profit target 50%: +$1976"  → 1976.0
+     *   "credit=X close cost=Y"       → X - Y  (legacy IC format)
+     *   "credit=X close=Y"            → X - Y  (legacy spread format)
+     * Returns NaN for price-stop and DTE exits where no dollar P&L is embedded.
      */
     private static double parseReasonPnl(String reason) {
         if (reason == null) return Double.NaN;
+
+        // Primary format emitted by PremiumSellerRouter: "Profit target 50%: +$1976"
+        int plusDollar = reason.indexOf(": +$");
+        if (plusDollar >= 0) return parseReasonDouble(reason, plusDollar + 4);
+
+        // Legacy format with embedded credit/cost fields
         int creditIdx = reason.indexOf("credit=");
         if (creditIdx < 0) return Double.NaN;
         double credit = parseReasonDouble(reason, creditIdx + 7);
         if (Double.isNaN(credit)) return Double.NaN;
-
-        double closeCost;
         int costIdx = reason.indexOf("close cost=");
         if (costIdx >= 0) {
-            closeCost = parseReasonDouble(reason, costIdx + 11);
-        } else {
-            int closeIdx = reason.indexOf("close=");
-            if (closeIdx < 0) return Double.NaN;
-            closeCost = parseReasonDouble(reason, closeIdx + 6);
+            double closeCost = parseReasonDouble(reason, costIdx + 11);
+            return Double.isNaN(closeCost) ? Double.NaN : credit - closeCost;
         }
+        int closeIdx = reason.indexOf("close=");
+        if (closeIdx < 0) return Double.NaN;
+        double closeCost = parseReasonDouble(reason, closeIdx + 6);
         return Double.isNaN(closeCost) ? Double.NaN : credit - closeCost;
     }
 
