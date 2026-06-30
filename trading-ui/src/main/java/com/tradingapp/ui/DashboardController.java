@@ -1027,6 +1027,25 @@ public class DashboardController implements Initializable {
         List<PremiumSellerRow> premiumRows = buildPremiumRows();
         double premiumTotalPnl = premiumRows.stream().mapToDouble(PremiumSellerRow::getPnlRaw).sum();
 
+        // Reconcile against Alpaca's authoritative portfolio value. Records may show phantom
+        // profit when positions were opened with inflated premiums (IV_PREMIUM bug, now fixed).
+        // When the gap between broker reality and record-based realized P&L exceeds $10,
+        // inject a synthetic "Balance adj" loss so wins/losses/total P&L are correct.
+        if (brokerPv > 0) {
+            double trueRealizedPnl = (brokerPv - Account.STARTING_BALANCE)
+                    - optTotalUnrealized - stkTotalUnrealized - premiumTotalPnl;
+            double gap = trueRealizedPnl - realizedPnl;
+            if (gap < -10.0) {
+                closedTrades.add(new ClosedTradeRecord(
+                        "Balance adj", "Portfolio adj", 0, 0.0, 0.0, gap, System.currentTimeMillis()));
+                realizedPnl += gap;
+                wins   = (int) closedTrades.stream().filter(t -> t.getPnlRaw() >= 0).count();
+                losses = (int) closedTrades.stream().filter(t -> t.getPnlRaw() <  0).count();
+                int adjTotal = wins + losses;
+                winRate = adjTotal > 0 ? (wins * 100.0 / adjTotal) : 0.0;
+            }
+        }
+
         return new UiSnapshot(history, availableCash, stockHoldings, optionHoldings, totalPortfolio,
                 optionsCashDeployed, optionRows, optTotalUnrealized, stockRows, stkTotalUnrealized,
                 totalUnrealizedPnl, wins, losses, winRate, realizedPnl, account.isTradingHalted(),
@@ -1104,7 +1123,7 @@ public class DashboardController implements Initializable {
         optionsCashDeployedLabel.setText(String.format("Options Reserved: $%,.2f", s.optionsCashDeployed()));
         optionsTable.setItems(FXCollections.observableArrayList(s.optionRows()));
         stockPositionsTable.setItems(FXCollections.observableArrayList(s.stockRows()));
-        unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", s.totalUnrealizedPnl()));
+        unrealizedPnlLabel.setText(formatUnrealizedPnl("Total P&L", s.totalUnrealizedPnl()));
         optionsTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total P&L", s.optTotalUnrealized()));
         stockTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", s.stkTotalUnrealized()));
         winsLabel.setText("Wins: " + s.wins());
@@ -1146,7 +1165,7 @@ public class DashboardController implements Initializable {
         availableCashLabel.setText(String.format("Cash: $%,.2f", availableCash));
         optionsCashDeployedLabel.setText(String.format("Options Reserved: $%,.2f", computeOptionsCashDeployed()));
         pnlButton.setText(String.format("P&L: $%,.2f", realizedPnl));
-        unrealizedPnlLabel.setText(formatUnrealizedPnl("Unrealized P&L", unrealizedPnl));
+        unrealizedPnlLabel.setText(formatUnrealizedPnl("Total P&L", unrealizedPnl));
 
         if (account.isTradingHalted()) {
             haltedLabel.setText("⛔ TRADING HALTED — portfolio exhausted");
