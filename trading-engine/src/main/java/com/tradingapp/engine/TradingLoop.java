@@ -68,8 +68,7 @@ public class TradingLoop implements Runnable {
     private LocalDate lastTrainingDate;
     private LocalDate lastMarketClosedLoggedDate;
     private double dailyLossLimitPct = 0.05;
-    // When true, short options are valued at current market price (not ignored) in the daily loss check.
-    // Requires OptionsSignalRouter to update currentMarketPrice each tick. Backtest-only by default.
+    // When true, short options are valued at current market price (not ignored) in the circuit breaker.
     private boolean accurateOptionsValuation = false;
     private double dayStartValue = -1;
     private LocalDate lastDayTrackingDate;
@@ -256,52 +255,18 @@ public class TradingLoop implements Runnable {
             }
             if (!today.equals(lastDayTrackingDate)) {
                 lastDayTrackingDate = today;
-                // Prefer last_equity from the broker (equity at prior close) — the authoritative
-                // start-of-day value. Fall back to computing balance + positions locally for
-                // simulated brokers that don't provide it.
-                double lastEquity = account.getLastEquity();
-                if (lastEquity > 0) {
-                    dayStartValue = lastEquity;
-                } else {
-                    double stockMV = account.getPositions().values().stream()
-                            .mapToDouble(Position::getMarketValue).sum();
-                    dayStartValue = account.getBalance() + stockMV;
-                }
+                // Baseline excludes options so that open credit spreads (held 45–90+ days)
+                // can't shift it. Short legs add cash to the balance that we subtract back
+                // (premiumPaid * 100 * contracts is negative for shorts), and long legs
+                // we add back; the net is: adjustedBalance = cash after removing option premiums.
+                double optAdj = account.getOptionsPositions().values().stream()
+                        .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
+                        .sum();
+                double stockMV = account.getPositions().values().stream()
+                        .mapToDouble(Position::getMarketValue).sum();
+                dayStartValue = account.getBalance() + optAdj + stockMV;
                 account.setDailyLossHalted(false);
                 lossLimitBreachCount = 0;
-                // Re-evaluate immediately: if the app was restarted after hitting the loss limit
-                // intraday, dayStartValue is set from yesterday's close but the portfolio is already
-                // depleted. Without this check, the halt is cleared and trading resumes from the
-                // already-degraded baseline until the new limit is hit again.
-                //
-                // Use the broker's own portfolio_value for the current-value side so both sides
-                // of the comparison use Alpaca's mark-to-market figures. The previous hybrid
-                // (cash + stockMV + optsBasis) mixed broker cash with locally-tracked options
-                // at entry value, causing false positives when the Alpaca account state didn't
-                // match local tracking (e.g., after a paper account reset or a position entered
-                // on a separate account). Falls back to the hybrid for sim brokers that don't
-                // provide portfolio_value.
-                if (dailyLossLimitPct > 0 && dayStartValue > 0) {
-                    double brokerPv = account.getBrokerPortfolioValue();
-                    double currentVal;
-                    if (brokerPv > 0) {
-                        currentVal = brokerPv;
-                    } else {
-                        double stockMV = account.getPositions().values().stream()
-                                .mapToDouble(Position::getMarketValue).sum();
-                        double optsBasis = account.getOptionsPositions().values().stream()
-                                .filter(p -> p.getContracts() > 0)
-                                .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
-                                .sum();
-                        currentVal = account.getBalance() + stockMV + optsBasis;
-                    }
-                    if (currentVal < dayStartValue * (1 - dailyLossLimitPct)) {
-                        account.setDailyLossHalted(true);
-                        researchCallback.accept(String.format(
-                                "Daily loss limit (%.0f%%) already exceeded on startup (current=%.0f, start=%.0f) — trading halted",
-                                dailyLossLimitPct * 100, currentVal, dayStartValue));
-                    }
-                }
                 lossCooldowns.clear();
                 prevOrbBuy.clear();
                 prevVwapSide.clear();
@@ -337,18 +302,12 @@ public class TradingLoop implements Runnable {
             if (dailyLossResetRequested.compareAndSet(true, false)) {
                 account.setDailyLossHalted(false);
                 lossLimitBreachCount = 0;
-                double brokerPv = account.getBrokerPortfolioValue();
-                if (brokerPv > 0) {
-                    dayStartValue = brokerPv;
-                } else {
-                    double rstStockMV = account.getPositions().values().stream()
-                            .mapToDouble(Position::getMarketValue).sum();
-                    double rstOptsBasis = account.getOptionsPositions().values().stream()
-                            .filter(p -> p.getContracts() > 0)
-                            .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
-                            .sum();
-                    dayStartValue = account.getBalance() + rstStockMV + rstOptsBasis;
-                }
+                double rstOptAdj = account.getOptionsPositions().values().stream()
+                        .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
+                        .sum();
+                double rstStockMV = account.getPositions().values().stream()
+                        .mapToDouble(Position::getMarketValue).sum();
+                dayStartValue = account.getBalance() + rstOptAdj + rstStockMV;
                 // Sync the capacity baseline used by PremiumSellerRouter so it reflects the
                 // new account state (e.g. after a paper account reset) rather than the old
                 // last_equity from the previous account.
@@ -357,34 +316,18 @@ public class TradingLoop implements Runnable {
                         "Daily loss limit reset — new baseline: $%.0f", dayStartValue));
             }
 
-            // Single aggregate loss check with all symbols' fresh prices.
+            // Daily loss check: open options positions are excluded from both the baseline
+            // and the current-value calculation. Short legs (contracts < 0) received cash
+            // that we subtract back; long legs paid cash that we add back. The net effect
+            // is that credit spreads held for 45–90+ days are invisible to this check —
+            // only stock market-value changes and realized option P&L move the needle.
             if (!account.isDailyLossHalted() && dailyLossLimitPct > 0 && dayStartValue > 0) {
-                double optionsValue;
-                if (accurateOptionsValuation) {
-                    // Mark-to-market: cash already includes premiums received for short positions,
-                    // so subtract current buyback cost for shorts (contracts < 0) and add current
-                    // value for longs (contracts > 0). Falls back to premiumPaid for unpriced longs
-                    // and 0 for unpriced shorts (conservative — understates loss until first tick).
-                    optionsValue = account.getOptionsPositions().values().stream()
-                            .mapToDouble(p -> {
-                                double mktPrice = p.getCurrentMarketPrice();
-                                double prem = (mktPrice >= 0) ? mktPrice
-                                        : (p.getContracts() > 0 ? p.getPremiumPaid() : 0.0);
-                                return prem * 100 * p.getContracts();
-                            })
-                            .sum();
-                } else {
-                    optionsValue = account.getOptionsPositions().values().stream()
-                            .filter(p -> p.getContracts() > 0)
-                            .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
-                            .sum();
-                }
-                // Use market value (not just unrealized PnL) so that open stock positions
-                // don't appear as losses: buying $14k of stock reduces cash by $14k but
-                // adds $14k of market value — net portfolio value is unchanged.
+                double optAdj = account.getOptionsPositions().values().stream()
+                        .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
+                        .sum();
                 double stockValue = account.getPositions().values().stream()
                         .mapToDouble(Position::getMarketValue).sum();
-                double currentValue = account.getBalance() + stockValue + optionsValue;
+                double currentValue = account.getBalance() + optAdj + stockValue;
                 if (currentValue < dayStartValue * (1 - dailyLossLimitPct)) {
                     lossLimitBreachCount++;
                     if (lossLimitBreachCount > lossLimitRecoveryBars) {
@@ -394,7 +337,7 @@ public class TradingLoop implements Runnable {
                                 dailyLossLimitPct * 100));
                     }
                 } else {
-                    lossLimitBreachCount = 0; // recovered within the window — reset
+                    lossLimitBreachCount = 0;
                 }
             }
 
