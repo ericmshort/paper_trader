@@ -1027,24 +1027,12 @@ public class DashboardController implements Initializable {
         List<PremiumSellerRow> premiumRows = buildPremiumRows();
         double premiumTotalPnl = premiumRows.stream().mapToDouble(PremiumSellerRow::getPnlRaw).sum();
 
-        // Reconcile against Alpaca's authoritative portfolio value. Records may show phantom
-        // profit when positions were opened with inflated premiums (IV_PREMIUM bug, now fixed).
-        // When the gap between broker reality and record-based realized P&L exceeds $10,
-        // inject a synthetic "Balance adj" loss so wins/losses/total P&L are correct.
-        if (brokerPv > 0) {
-            double trueRealizedPnl = (brokerPv - Account.STARTING_BALANCE)
-                    - optTotalUnrealized - stkTotalUnrealized - premiumTotalPnl;
-            double gap = trueRealizedPnl - realizedPnl;
-            if (gap < -10.0) {
-                closedTrades.add(new ClosedTradeRecord(
-                        "Balance adj", "Portfolio adj", 0, 0.0, 0.0, gap, System.currentTimeMillis()));
-                realizedPnl += gap;
-                wins   = (int) closedTrades.stream().filter(t -> t.getPnlRaw() >= 0).count();
-                losses = (int) closedTrades.stream().filter(t -> t.getPnlRaw() <  0).count();
-                int adjTotal = wins + losses;
-                winRate = adjTotal > 0 ? (wins * 100.0 / adjTotal) : 0.0;
-            }
-        }
+        closedTrades = reconcileClosedTrades(closedTrades, brokerPv, optTotalUnrealized, stkTotalUnrealized, premiumTotalPnl);
+        realizedPnl  = closedTrades.stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
+        wins         = (int) closedTrades.stream().filter(t -> t.getPnlRaw() >= 0).count();
+        losses       = (int) closedTrades.stream().filter(t -> t.getPnlRaw() <  0).count();
+        int adjTotal = wins + losses;
+        winRate      = adjTotal > 0 ? (wins * 100.0 / adjTotal) : 0.0;
 
         return new UiSnapshot(history, availableCash, stockHoldings, optionHoldings, totalPortfolio,
                 optionsCashDeployed, optionRows, optTotalUnrealized, stockRows, stkTotalUnrealized,
@@ -1190,6 +1178,40 @@ public class DashboardController implements Initializable {
         account.setDailyLossHalted(false);
         haltedLabel.setText("");
         resetDailyLossButton.setVisible(false);
+    }
+
+    /**
+     * Returns computeClosedTrades() with a reconciliation entry injected when Alpaca's
+     * authoritative portfolio value diverges from the record-based realized P&L. This
+     * handles phantom wins written before the IV_PREMIUM bug was fixed.
+     */
+    private List<ClosedTradeRecord> computeReconciledClosedTrades() {
+        List<ClosedTradeRecord> trades = computeClosedTrades();
+        double brokerPv = account.getBrokerPortfolioValue();
+        if (brokerPv <= 0) return trades;
+        double optTotalUnrealized  = buildOptionsRows(new ArrayList<>());
+        double stkTotalUnrealized  = buildStockRows(new ArrayList<>());
+        double premiumTotalPnl     = buildPremiumRows().stream().mapToDouble(PremiumSellerRow::getPnlRaw).sum();
+        return reconcileClosedTrades(trades, brokerPv, optTotalUnrealized, stkTotalUnrealized, premiumTotalPnl);
+    }
+
+    /**
+     * Injects a synthetic "Balance adj" loss into the closed-trade list when the record-based
+     * realized P&L exceeds the broker-derived true realized P&L by more than $10.
+     */
+    private static List<ClosedTradeRecord> reconcileClosedTrades(
+            List<ClosedTradeRecord> trades, double brokerPv,
+            double optTotalUnrealized, double stkTotalUnrealized, double premiumTotalPnl) {
+        if (brokerPv <= 0) return trades;
+        double recordPnl = trades.stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
+        double trueRealizedPnl = (brokerPv - Account.STARTING_BALANCE)
+                - optTotalUnrealized - stkTotalUnrealized - premiumTotalPnl;
+        double gap = trueRealizedPnl - recordPnl;
+        if (gap < -10.0) {
+            trades.add(new ClosedTradeRecord(
+                    "Balance adj", "Portfolio adj", 0, 0.0, 0.0, gap, System.currentTimeMillis()));
+        }
+        return trades;
     }
 
     private List<ClosedTradeRecord> computeClosedTrades() {
@@ -1557,7 +1579,7 @@ public class DashboardController implements Initializable {
     }
 
     private void showPnlBreakdown() {
-        List<ClosedTradeRecord> trades = computeClosedTrades();
+        List<ClosedTradeRecord> trades = computeReconciledClosedTrades();
 
         TableView<ClosedTradeRecord> table = new TableView<>();
         table.setStyle("-fx-background-color: #1a1a2e;");

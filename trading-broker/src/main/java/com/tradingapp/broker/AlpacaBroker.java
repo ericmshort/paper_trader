@@ -547,9 +547,15 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                             // positions that appeared in Alpaca but weren't locally tracked.
                             com.tradingapp.account.OptionsPosition existing = posByFingerprint.get(fp);
                             if (existingKey != null && existing != null) {
-                                // Matched: update broker OCC symbol, market price, and re-verify
+                                // Matched: update broker OCC symbol, market price, and re-verify.
+                                // Also correct premiumPaid from Alpaca's avg_entry_price — this fixes
+                                // positions that were entered with inflated premiums (IV_PREMIUM bug,
+                                // now removed) whose transaction records still carry the old price.
+                                // Without this correction, exit checks see a phantom credit and fire
+                                // a false 50% profit target on every restart.
                                 existing.setBrokerOccSymbol(symbol);
                                 existing.setCurrentMarketPrice(currentPrice);
+                                if (avgCost > 0) existing.setPremiumPaid(avgCost);
                                 account.addOptionsPosition(existingKey, existing);
                                 account.markOptionVerified(existingKey);
                             } else {
