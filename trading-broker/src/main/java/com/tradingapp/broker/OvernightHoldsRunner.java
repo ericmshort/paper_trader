@@ -43,6 +43,10 @@ public class OvernightHoldsRunner {
     private static final Set<String> STRATEGIES = Set.of(
             "HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM", "LONG_CALL", "LONG_PUT");
 
+    // Floor thresholds to sweep: fraction of entry premium that must remain to hold overnight.
+    // 0.0 = hold everything, 0.3 = close if worth < 30% of entry, etc.
+    private static final double[] FLOOR_THRESHOLDS = { 0.3, 0.5, 0.7, 0.8 };
+
     public static void main(String[] args) throws Exception {
         AppConfig cfg = AppConfig.load();
         if (cfg.getAlpacaApiKey().isBlank() || cfg.getAlpacaApiSecret().isBlank()) {
@@ -74,30 +78,26 @@ public class OvernightHoldsRunner {
         IntradayBacktestEngine engine = new IntradayBacktestEngine(new IndicatorEngine(), new FeeCalculator());
         double maxExposure = cfg.getMaxPortfolioExposurePct() / 100.0;
 
-        System.out.println("\n=== Overnight Holds Backtest: Force-close at 15:45 ET ===");
-        System.out.println("Config: options-only, 28-sym allowlist, LONG_CALL+LONG_PUT, SL=30%, putMin=3\n");
+        System.out.println("\n=== Overnight Holds Backtest ===");
+        System.out.println("Period : " + startDate + " → " + endDate);
+        System.out.println("Config : options-only, 28-sym allowlist, LONG_CALL+LONG_PUT, SL=30%, putMin=3\n");
 
-        System.out.println("--- Force-close ON (production) ---");
-        IntradayBacktestResult withClose = runSim(engine, watchlist, barsBySymbol, 100_000.0, maxExposure, true);
-        printRow(withClose);
+        System.out.printf("%-42s  %8s  %8s  %7s  %6s%n", "Config", "Return", "MaxDD", "Trades", "WinRate");
+        System.out.println("-".repeat(80));
 
-        System.out.println("\n--- Force-close OFF (hold until expiry / stop-loss only) ---");
-        IntradayBacktestResult withoutClose = runSim(engine, watchlist, barsBySymbol, 100_000.0, maxExposure, false);
-        printRow(withoutClose);
+        // Baseline: force-close all at 15:45
+        IntradayBacktestResult forceClose = runSim(engine, watchlist, barsBySymbol, 100_000.0, maxExposure, true, 0.0);
+        printSummaryRow("Force-close ON  (production)", forceClose);
 
-        System.out.println("\n=== COMPARISON ===");
-        System.out.printf("%-40s  %8s  %8s  %7s  %7s%n", "Config", "Return", "MaxDD", "Trades", "WinRate");
-        System.out.println("-".repeat(78));
-        printSummaryRow("Force-close ON  (production)",  withClose);
-        printSummaryRow("Force-close OFF (hold to expiry/SL)", withoutClose);
+        // Floor sweep: avoidOvernight=false, cut only losers below threshold
+        for (double floor : FLOOR_THRESHOLDS) {
+            IntradayBacktestResult r = runSim(engine, watchlist, barsBySymbol, 100_000.0, maxExposure, false, floor);
+            printSummaryRow(String.format("Floor %.0f%% (cut < %.0f%% of entry)", floor * 100, floor * 100), r);
+        }
 
-        double delta = withoutClose.getTotalReturnPct() - withClose.getTotalReturnPct();
-        System.out.printf("%nLifting force-close: %+.2fpp return, %+.2fpp MaxDD%n",
-                delta,
-                withoutClose.getMaxDrawdownPct() - withClose.getMaxDrawdownPct());
-        System.out.println(delta > 0.5 ? "▲ Better WITHOUT force-close"
-                         : delta < -0.5 ? "▼ Better WITH force-close"
-                         : "→ No meaningful difference");
+        // Far end: hold everything overnight, no floor
+        IntradayBacktestResult holdAll = runSim(engine, watchlist, barsBySymbol, 100_000.0, maxExposure, false, 0.0);
+        printSummaryRow("Hold all overnight (no floor)", holdAll);
     }
 
     private static IntradayBacktestResult runSim(
@@ -106,7 +106,8 @@ public class OvernightHoldsRunner {
             Map<String, List<IntradayBar>> barsBySymbol,
             double startBalance,
             double maxExposure,
-            boolean avoidOvernight) throws Exception {
+            boolean avoidOvernight,
+            double overnightFloor) throws Exception {
 
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(new Account(), null);
         OptionsSignalRouter router = new OptionsSignalRouter(
@@ -117,6 +118,7 @@ public class OvernightHoldsRunner {
         router.setDowntrendPutMinSignals(3);
         router.setStopLossFrac(0.30);
         router.setAvoidOvernightHolds(avoidOvernight);
+        router.setOvernightMinPremiumFrac(overnightFloor);
 
         Consumer<TradingLoop> loopConfig = loop -> {
             router.setUptrendSupplier(loop::isUptrend);
@@ -129,15 +131,9 @@ public class OvernightHoldsRunner {
                 msg -> {}, Set.of(), loopConfig);
     }
 
-    private static void printRow(IntradayBacktestResult r) {
-        double wr = r.getTotalTrades() > 0 ? 100.0 * r.getWins() / r.getTotalTrades() : 0;
-        System.out.printf("Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (WR:%.1f%%)%n",
-                r.getTotalReturnPct(), r.getMaxDrawdownPct(), r.getTotalTrades(), wr);
-    }
-
     private static void printSummaryRow(String label, IntradayBacktestResult r) {
         double wr = r.getTotalTrades() > 0 ? 100.0 * r.getWins() / r.getTotalTrades() : 0;
-        System.out.printf("%-40s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
+        System.out.printf("%-42s  %7.2f%%  %7.2f%%  %7d  %5.1f%%%n",
                 label, r.getTotalReturnPct(), r.getMaxDrawdownPct(), r.getTotalTrades(), wr);
     }
 }

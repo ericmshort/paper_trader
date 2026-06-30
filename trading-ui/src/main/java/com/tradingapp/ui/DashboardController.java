@@ -104,6 +104,7 @@ public class DashboardController implements Initializable {
     @FXML private TableColumn<PremiumSellerRow, String> prmColDte;
     @FXML private TableColumn<PremiumSellerRow, String> prmColPremium;
     @FXML private TableColumn<PremiumSellerRow, String> prmColMax;
+    @FXML private TableColumn<PremiumSellerRow, String> prmColMaxLoss;
     @FXML private TableColumn<PremiumSellerRow, String> prmColPnl;
     @FXML private TableColumn<PremiumSellerRow, String> prmColPct;
     @FXML private Label premiumTotalLabel;
@@ -616,6 +617,7 @@ public class DashboardController implements Initializable {
             }
         });
         prmColMax.setCellValueFactory(new PropertyValueFactory<>("maxProfit"));
+        prmColMaxLoss.setCellValueFactory(new PropertyValueFactory<>("maxLoss"));
         prmColPnl.setCellValueFactory(new PropertyValueFactory<>("currentPnl"));
         prmColPct.setCellValueFactory(new PropertyValueFactory<>("pctCaptured"));
         prmColPnl.setCellFactory(col -> new TableCell<>() {
@@ -652,11 +654,12 @@ public class DashboardController implements Initializable {
             double closeCost = (sCur - lCur) * 100 * c;
             double pnl = credit - closeCost;
             long dte = java.time.temporal.ChronoUnit.DAYS.between(today, shortPos.getExpiry());
+            double pcsMaxLoss = (shortPos.getStrike() - longPos.getStrike()) * 100 * c - credit;
             List<Double> stockPrices = priceHistory.getPrices(symbol);
             String stockPriceStr = stockPrices.isEmpty() ? "—" : String.format("$%.2f", stockPrices.get(stockPrices.size() - 1));
             rows.add(new PremiumSellerRow(symbol, "Put Credit Spread",
                     String.format("$%.0f", shortPos.getStrike()),
-                    shortPos.getExpiry().toString(), Math.max(0, dte), credit, pnl,
+                    shortPos.getExpiry().toString(), Math.max(0, dte), credit, pnl, pcsMaxLoss,
                     String.format("$%.0f", longPos.getStrike()),
                     String.format("$%.0f", shortPos.getStrike()),
                     stockPriceStr));
@@ -679,11 +682,12 @@ public class DashboardController implements Initializable {
             double closeCost = (sCur - lCur) * 100 * c;
             double pnl = credit - closeCost;
             long dte = java.time.temporal.ChronoUnit.DAYS.between(today, shortPos.getExpiry());
+            double ccsMaxLoss = (longPos.getStrike() - shortPos.getStrike()) * 100 * c - credit;
             List<Double> stockPrices = priceHistory.getPrices(symbol);
             String stockPriceStr = stockPrices.isEmpty() ? "—" : String.format("$%.2f", stockPrices.get(stockPrices.size() - 1));
             rows.add(new PremiumSellerRow(symbol, "Call Credit Spread",
                     String.format("$%.0f", shortPos.getStrike()),
-                    shortPos.getExpiry().toString(), Math.max(0, dte), credit, pnl,
+                    shortPos.getExpiry().toString(), Math.max(0, dte), credit, pnl, ccsMaxLoss,
                     String.format("$%.0f", shortPos.getStrike()),
                     String.format("$%.0f", longPos.getStrike()),
                     stockPriceStr));
@@ -710,11 +714,14 @@ public class DashboardController implements Initializable {
             double closeCost = ((scCur - lcCur) + (spCur - lpCur)) * 100 * c;
             double pnl = credit - closeCost;
             long dte = java.time.temporal.ChronoUnit.DAYS.between(today, scPos.getExpiry());
+            double putWing = spPos.getStrike() - lpPos.getStrike();
+            double callWing = lcPos.getStrike() - scPos.getStrike();
+            double icMaxLoss = Math.max(putWing, callWing) * 100 * c - credit;
             String shortStrikes = String.format("$%.0f/$%.0f", spPos.getStrike(), scPos.getStrike());
             List<Double> icStockPrices = priceHistory.getPrices(symbol);
             String icStockPriceStr = icStockPrices.isEmpty() ? "—" : String.format("$%.2f", icStockPrices.get(icStockPrices.size() - 1));
             rows.add(new PremiumSellerRow(symbol, "Iron Condor", shortStrikes,
-                    scPos.getExpiry().toString(), Math.max(0, dte), credit, pnl,
+                    scPos.getExpiry().toString(), Math.max(0, dte), credit, pnl, icMaxLoss,
                     String.format("$%.0f", spPos.getStrike()),
                     String.format("$%.0f", scPos.getStrike()),
                     icStockPriceStr));
@@ -736,7 +743,7 @@ public class DashboardController implements Initializable {
             String cspStockPriceStr = cspStockPrices.isEmpty() ? "—" : String.format("$%.2f", cspStockPrices.get(cspStockPrices.size() - 1));
             String cspStrike = String.format("$%.0f", pos.getStrike());
             rows.add(new PremiumSellerRow(symbol, "Cash-Secured Put",
-                    cspStrike, pos.getExpiry().toString(), Math.max(0, dte), credit, pnl,
+                    cspStrike, pos.getExpiry().toString(), Math.max(0, dte), credit, pnl, -1,
                     cspStrike, "—", cspStockPriceStr));
         }
 
@@ -756,7 +763,7 @@ public class DashboardController implements Initializable {
             String ccStockPriceStr = ccStockPrices.isEmpty() ? "—" : String.format("$%.2f", ccStockPrices.get(ccStockPrices.size() - 1));
             String ccStrike = String.format("$%.0f", pos.getStrike());
             rows.add(new PremiumSellerRow(symbol, "Covered Call",
-                    ccStrike, pos.getExpiry().toString(), Math.max(0, dte), credit, pnl,
+                    ccStrike, pos.getExpiry().toString(), Math.max(0, dte), credit, pnl, -1,
                     "—", ccStrike, ccStockPriceStr));
         }
 
@@ -1179,9 +1186,24 @@ public class DashboardController implements Initializable {
         Set<String> processedGroupIds = new HashSet<>(); // tracks which mleg close groups have had P&L assigned
 
         for (TransactionRecord r : records) {
-            // Skip Alpaca order-history imports: they duplicate fills already tracked locally
-            // and create spurious open/close pairs that pollute the P&L breakdown.
-            if (r.getReason() != null && r.getReason().contains("(imported)")) continue;
+            boolean imported = r.getReason() != null && r.getReason().contains("(imported)");
+            if (imported) {
+                // Imported CALL_SELL/PUT_SELL can close a locally-tracked long (e.g. EOD force-close
+                // submitted to Alpaca, then re-imported from order history via syncOrderHistory).
+                // Allow through ONLY when the symbol has a locally-tracked long but no short open —
+                // the short-open guard prevents spurious closure of credit spread long legs whose
+                // short-leg open was also imported as a duplicate open record.
+                boolean allowThrough = switch (r.getAction()) {
+                    case CALL_SELL -> r.getQuantity() > 0
+                            && openLongPremiums.containsKey(r.getSymbol() + "_CALL")
+                            && !openShortPremiums.containsKey(r.getSymbol() + "_CALL");
+                    case PUT_SELL -> r.getQuantity() > 0
+                            && openLongPremiums.containsKey(r.getSymbol() + "_PUT")
+                            && !openShortPremiums.containsKey(r.getSymbol() + "_PUT");
+                    default -> false;
+                };
+                if (!allowThrough) continue;
+            }
 
             switch (r.getAction()) {
                 case BUY -> {

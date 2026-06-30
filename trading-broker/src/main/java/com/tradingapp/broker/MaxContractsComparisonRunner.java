@@ -41,7 +41,7 @@ import java.util.function.Supplier;
 public class MaxContractsComparisonRunner {
 
     private static final ZoneId ET = ZoneId.of("America/New_York");
-    private static final int[]  SWEEP = {1, 2, 3, 5, 7, 10, 15, 20};
+    private static final int[]  SWEEP = {20, 25};
 
     public static void main(String[] args) throws Exception {
         AppConfig cfg = AppConfig.load();
@@ -97,9 +97,6 @@ public class MaxContractsComparisonRunner {
         double maxExposure  = cfg.getMaxPortfolioExposurePct() / 100.0;
         double lossLimitPct = cfg.getDailyLossLimitPct();
 
-        IntradayBacktestEngine engine = new IntradayBacktestEngine(
-                new IndicatorEngine(), new FeeCalculator()).setCollectEventLog(true);
-
         // Results indexed by maxContracts value
         Map<Integer, IntradayBacktestResult> results = new LinkedHashMap<>();
         Map<Integer, List<String>> premLogs = new LinkedHashMap<>();
@@ -108,6 +105,8 @@ public class MaxContractsComparisonRunner {
             System.out.printf("Running maxContracts=%d...%n", mc);
             List<String> premLog = new ArrayList<>();
             PremiumSellerRouter router = buildPremiumRouter(vixCache, premLog, maxExposure, mc);
+            IntradayBacktestEngine engine = new IntradayBacktestEngine(
+                    new IndicatorEngine(), new FeeCalculator());
 
             long t0 = System.currentTimeMillis();
             IntradayBacktestResult result = engine.run(watchlist, barsBySymbol, 100_000.0, router,
@@ -127,6 +126,7 @@ public class MaxContractsComparisonRunner {
 
             results.put(mc, result);
             premLogs.put(mc, premLog);
+            System.gc();
         }
 
         printSummaryTable(results);

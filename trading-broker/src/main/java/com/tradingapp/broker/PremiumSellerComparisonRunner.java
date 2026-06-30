@@ -34,16 +34,25 @@ import java.util.TreeMap;
 import java.util.function.Supplier;
 
 /**
- * 800-day backtest: all enabled strategies from live app settings (intraday + premium seller).
- * Writes a report to ~/.tradingapp/backtest-report.txt with daily P&L and per-symbol attribution.
+ * Compares two variants over the full cached history:
+ *   A) Production  — current app.properties settings (intraday + PCS + CCS)
+ *   B) Floor 50%   — same strategies, avoidOvernight=false, overnightFloor=0.50
+ *
+ * Bars are fetched once and reused for both runs.
  *
  * Run via:
  *   mvn install && mvn -pl trading-broker exec:java \
  *       -Dexec.mainClass=com.tradingapp.broker.PremiumSellerComparisonRunner
+ *
+ * Reports written to:
+ *   ~/.tradingapp/backtest-report.txt          (production)
+ *   ~/.tradingapp/backtest-report-floor50.txt  (floor 50%)
  */
 public class PremiumSellerComparisonRunner {
 
     private static final ZoneId ET = ZoneId.of("America/New_York");
+
+    record VariantResult(IntradayBacktestResult result, List<String> premLog) {}
 
     public static void main(String[] args) throws Exception {
         AppConfig cfg = AppConfig.load();
@@ -55,14 +64,17 @@ public class PremiumSellerComparisonRunner {
         LocalDate endDate = LocalDate.now(ET).minusDays(1);
         while (endDate.getDayOfWeek() == DayOfWeek.SATURDAY || endDate.getDayOfWeek() == DayOfWeek.SUNDAY)
             endDate = endDate.minusDays(1);
-        LocalDate startDate = endDate.minusDays(800);
+        LocalDate startDate = earliestCachedDate("SPY");
+        if (startDate == null) {
+            System.err.println("ERROR: no cached data found for SPY under ~/.tradingapp/bar-cache/1min/SPY/");
+            System.exit(1);
+        }
 
-        Path reportPath = Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-report.txt");
-        Files.createDirectories(reportPath.getParent());
+        Path reportDir = Path.of(System.getProperty("user.home"), ".tradingapp");
+        Files.createDirectories(reportDir);
 
-        System.out.println("=== Backtest: All Enabled Strategies ===");
+        System.out.println("=== Backtest Comparison: Production vs Floor 50% ===");
         System.out.printf("Period : %s → %s%n", startDate, endDate);
-        System.out.println("Report : " + reportPath);
         System.out.println();
 
         List<String> watchlist = new ArrayList<>(
@@ -89,15 +101,64 @@ public class PremiumSellerComparisonRunner {
             System.err.println("ERROR: no bar data fetched");
             System.exit(1);
         }
-        System.out.printf("Loaded %d/%d symbols. Running sim...%n%n", barsBySymbol.size(), total);
+        System.out.printf("Loaded %d/%d symbols.%n%n", barsBySymbol.size(), total);
 
         VixCache vixCache = new VixCache();
         vixCache.load(startDate, endDate);
 
+        IntradayBacktestEngine engine = new IntradayBacktestEngine(
+                new IndicatorEngine(), new FeeCalculator()).setCollectEventLog(true);
+
+        System.out.println("Running A: Production (avoidOvernight=" + cfg.isAvoidOvernightHolds() + ", floor=" +
+                (int) (cfg.getOvernightMinPremiumFrac() * 100) + "%)...");
+        long t0 = System.currentTimeMillis();
+        VariantResult prod = runVariant(engine, watchlist, barsBySymbol, vixCache, cfg, optAllowlist,
+                cfg.isAvoidOvernightHolds(), cfg.getOvernightMinPremiumFrac());
+        System.out.printf("  done in %ds%n", (System.currentTimeMillis() - t0) / 1000);
+
+        System.out.println("Running B: Floor 50% (avoidOvernight=false, floor=50%)...");
+        t0 = System.currentTimeMillis();
+        VariantResult floor50 = runVariant(engine, watchlist, barsBySymbol, vixCache, cfg, optAllowlist,
+                false, 0.50);
+        System.out.printf("  done in %ds%n%n", (System.currentTimeMillis() - t0) / 1000);
+
+        // ── Comparison table ──────────────────────────────────────────────────
+        System.out.println("=== RESULTS ===");
+        System.out.printf("%-42s  %8s  %8s  %7s  %6s  %5s  %5s%n",
+                "Variant", "Return", "MaxDD", "Trades", "WinRate", "PCS", "CCS");
+        System.out.println("-".repeat(90));
+        printRow("A) Production", prod);
+        printRow("B) Floor 50%", floor50);
+        System.out.println();
+
+        // ── Write detailed reports ────────────────────────────────────────────
+        Path prodReport  = reportDir.resolve("backtest-report.txt");
+        Path floorReport = reportDir.resolve("backtest-report-floor50.txt");
+        writeReport(prodReport,  prod,    startDate, endDate, cfg,
+                "A) Production", cfg.isAvoidOvernightHolds(), cfg.getOvernightMinPremiumFrac());
+        writeReport(floorReport, floor50, startDate, endDate, cfg,
+                "B) Floor 50%", false, 0.50);
+
+        System.out.println("Reports written:");
+        System.out.println("  Production : " + prodReport);
+        System.out.println("  Floor 50%  : " + floorReport);
+    }
+
+    // ── Simulation ────────────────────────────────────────────────────────────
+
+    private static VariantResult runVariant(
+            IntradayBacktestEngine engine,
+            List<String> watchlist,
+            Map<String, List<IntradayBar>> barsBySymbol,
+            VixCache vixCache,
+            AppConfig cfg,
+            Set<String> optAllowlist,
+            boolean avoidOvernight,
+            double floorFrac) throws Exception {
+
         double maxExposure  = cfg.getMaxPortfolioExposurePct() / 100.0;
         double lossLimitPct = cfg.getDailyLossLimitPct();
 
-        // Intraday router — all enabled strategies from live config
         BlackScholesEngine bs = new BlackScholesEngine();
         bs.setVixProvider(vixCache::getVix, vixCache.baselineVix());
         OptionsOrderExecutor optExec = new OptionsOrderExecutor(new Account(), null);
@@ -106,11 +167,12 @@ public class PremiumSellerComparisonRunner {
         intradayRouter.setMaxPortfolioExposure(maxExposure);
         intradayRouter.setEnabledStrategies(cfg.getEnabledStrategies());
         if (cfg.getOptionsEntryStartTime() != null) intradayRouter.setEntryStartTime(cfg.getOptionsEntryStartTime());
-        if (cfg.getOptionsForceCloseTime() != null) intradayRouter.setForceCloseTime(cfg.getOptionsForceCloseTime());
+        if (cfg.getOptionsForceCloseTime()  != null) intradayRouter.setForceCloseTime(cfg.getOptionsForceCloseTime());
         intradayRouter.setPositionBudgetFrac(cfg.getPositionBudgetFrac());
         intradayRouter.setMaxContractsPerTrade(cfg.getMaxContractsPerTrade());
         intradayRouter.setStopLossFrac(cfg.getOptionsStopLossFrac());
-        intradayRouter.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
+        intradayRouter.setAvoidOvernightHolds(avoidOvernight);
+        intradayRouter.setOvernightMinPremiumFrac(floorFrac);
         if (cfg.getOptionsEntryCutoff() != null) intradayRouter.setEntryCutoff(cfg.getOptionsEntryCutoff());
         intradayRouter.setOptionsAllowlist(optAllowlist);
         intradayRouter.setCallsDisabledSymbols(cfg.getOptionsCallsDisabled());
@@ -120,9 +182,7 @@ public class PremiumSellerComparisonRunner {
         intradayRouter.setReversalMinConsecutive(2);
         intradayRouter.setProfitTarget(cfg.getProfitTarget());
         intradayRouter.setEntryConfirmationTicks(Math.max(1, cfg.getEntryConfirmationTicks() / 12));
-        intradayRouter.setOvernightMinPremiumFrac(cfg.getOvernightMinPremiumFrac());
 
-        // Premium seller router — PCS + CCS (as configured in live app)
         List<String> premLog = new ArrayList<>();
         BlackScholesEngine bsPrem = new BlackScholesEngine();
         bsPrem.setVixProvider(vixCache::getVix, vixCache.baselineVix());
@@ -136,10 +196,6 @@ public class PremiumSellerComparisonRunner {
 
         OptionsEvaluator optEval = new CompositeEvaluator(intradayRouter, premRouter);
 
-        IntradayBacktestEngine engine = new IntradayBacktestEngine(
-                new IndicatorEngine(), new FeeCalculator()).setCollectEventLog(true);
-
-        long t0 = System.currentTimeMillis();
         IntradayBacktestResult result = engine.run(watchlist, barsBySymbol, 100_000.0, optEval,
                 msg -> {}, Set.of(),
                 loop -> {
@@ -153,37 +209,48 @@ public class PremiumSellerComparisonRunner {
                     loop.setMarketRegimeFilterEnabled(cfg.isMarketRegimeFilterEnabled());
                     intradayRouter.setClosePositionsOnHalt(true);
                 });
-        long elapsed = System.currentTimeMillis() - t0;
 
-        double wr = result.getTotalTrades() > 0 ? 100.0 * result.getWins() / result.getTotalTrades() : 0.0;
-        System.out.printf("Return: %+.2f%%  MaxDD: %.2f%%  Trades: %d  WinRate: %.1f%%  (%ds)%n%n",
-                result.getTotalReturnPct(), result.getMaxDrawdownPct(),
-                result.getTotalTrades(), wr, elapsed / 1000);
-
-        writeReport(reportPath, result, premLog, startDate, endDate, cfg);
-        System.out.println("Report written to: " + reportPath);
+        return new VariantResult(result, premLog);
     }
 
-    // ── Report ────────────────────────────────────────────────────────────────
+    // ── Output ────────────────────────────────────────────────────────────────
 
-    private static void writeReport(Path path, IntradayBacktestResult r,
-                                    List<String> premLog,
-                                    LocalDate startDate, LocalDate endDate,
-                                    AppConfig cfg) throws Exception {
+    private static void printRow(String label, VariantResult vr) {
+        IntradayBacktestResult r = vr.result();
+        double wr = r.getTotalTrades() > 0 ? 100.0 * r.getWins() / r.getTotalTrades() : 0.0;
+        int[] counts = parsePremCounts(vr.premLog());
+        System.out.printf("%-42s  %7.2f%%  %7.2f%%  %7d  %5.1f%%  %5d  %5d%n",
+                label, r.getTotalReturnPct(), r.getMaxDrawdownPct(),
+                r.getTotalTrades(), wr, counts[0], counts[1]);
+    }
 
-        // Parse premLog for per-symbol P&L attribution
-        Map<String, double[]> symPnl = new TreeMap<>(); // sym → [pcs_pnl, ccs_pnl, pcs_n, ccs_n]
-        int pcsOpens = 0, ccsOpens = 0;
-
+    /** Returns [pcsOpens, ccsOpens]. */
+    private static int[] parsePremCounts(List<String> premLog) {
+        int pcs = 0, ccs = 0;
         for (String line : premLog) {
-            boolean isPcs  = line.contains("PUT CREDIT SPREAD")  && !line.contains("closed:");
-            boolean isCcs  = line.contains("CALL CREDIT SPREAD") && !line.contains("closed:");
+            if (line.contains("PUT CREDIT SPREAD")  && !line.contains("closed:")) pcs++;
+            if (line.contains("CALL CREDIT SPREAD") && !line.contains("closed:")) ccs++;
+        }
+        return new int[]{pcs, ccs};
+    }
+
+    private static void writeReport(Path path, VariantResult vr,
+                                    LocalDate startDate, LocalDate endDate,
+                                    AppConfig cfg, String variantLabel,
+                                    boolean avoidOvernight, double floorFrac) throws Exception {
+
+        IntradayBacktestResult r = vr.result();
+        List<String> premLog = vr.premLog();
+
+        Map<String, double[]> symPnl = new TreeMap<>();
+        int pcsOpens = 0, ccsOpens = 0;
+        for (String line : premLog) {
+            boolean isPcs      = line.contains("PUT CREDIT SPREAD")  && !line.contains("closed:");
+            boolean isCcs      = line.contains("CALL CREDIT SPREAD") && !line.contains("closed:");
             boolean isPcsClose = line.contains("PUT CREDIT SPREAD closed:");
             boolean isCcsClose = line.contains("CALL CREDIT SPREAD closed:");
-
-            if (isPcs)  pcsOpens++;
-            if (isCcs)  ccsOpens++;
-
+            if (isPcs) pcsOpens++;
+            if (isCcs) ccsOpens++;
             if (isPcsClose || isCcsClose) {
                 String sym = line.split(" ")[0];
                 double pnl = 0;
@@ -197,31 +264,31 @@ public class PremiumSellerComparisonRunner {
         }
 
         try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(path))) {
-
-            out.println("=== Backtest Report: All Enabled Strategies ===");
+            out.println("=== Backtest Report: " + variantLabel + " ===");
             out.printf("Period    : %s → %s%n", startDate, endDate);
             out.printf("Generated : %s%n%n", ZonedDateTime.now(ET).format(
                     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z")));
 
-            out.println("─── App Settings (app.properties) ───────────────────────────────────────────");
+            out.println("─── Settings ─────────────────────────────────────────────────────────────────");
+            out.printf ("  Variant              : %s%n", variantLabel);
+            out.printf ("  Avoid overnight holds: %s%n", avoidOvernight ? "YES" : "NO");
+            out.printf ("  Overnight floor      : %.0f%%%n", floorFrac * 100);
             out.println("  Intraday strategies:");
             for (String s : cfg.getEnabledStrategies())
                 out.println("    • " + s);
-            out.println("  Premium selling strategies:");
+            out.println("  Premium selling:");
             out.println("    • PUT_CREDIT_SPREAD (PCS)");
             out.println("    • CALL_CREDIT_SPREAD (CCS)");
-            out.printf("  Market regime filter : %s%n", cfg.isMarketRegimeFilterEnabled() ? "ON" : "OFF");
-            out.printf("  Max portfolio exposure: %.0f%%%n", cfg.getMaxPortfolioExposurePct());
-            out.printf("  Daily loss limit     : %.1f%%%n", cfg.getDailyLossLimitPct());
-            out.printf("  Avoid overnight holds: %s%n", cfg.isAvoidOvernightHolds() ? "YES" : "NO");
-            out.printf("  Stop loss fraction   : %.0f%%%n", cfg.getOptionsStopLossFrac() * 100);
-            out.printf("  Profit target        : %.0f%%%n", cfg.getProfitTarget() * 100);
-            out.printf("  Position budget      : %.0f%% of capital per trade%n", cfg.getPositionBudgetFrac() * 100);
+            out.printf ("  Market regime filter : %s%n", cfg.isMarketRegimeFilterEnabled() ? "ON" : "OFF");
+            out.printf ("  Max portfolio exposure: %.0f%%%n", cfg.getMaxPortfolioExposurePct());
+            out.printf ("  Daily loss limit     : %.1f%%%n", cfg.getDailyLossLimitPct());
+            out.printf ("  Stop loss fraction   : %.0f%%%n", cfg.getOptionsStopLossFrac() * 100);
+            out.printf ("  Profit target        : %.0f%%%n", cfg.getProfitTarget() * 100);
+            out.printf ("  Position budget      : %.0f%% of capital per trade%n", cfg.getPositionBudgetFrac() * 100);
             if (cfg.getOptionsEntryCutoff() != null)
                 out.printf("  Entry cutoff         : %s%n", cfg.getOptionsEntryCutoff());
             out.println();
 
-            // ── 1. Overall results ────────────────────────────────────────────
             out.println("─── Overall Results ──────────────────────────────────────────────────────────");
             out.printf("  Return       : %+.2f%%%n", r.getTotalReturnPct());
             out.printf("  Max Drawdown : %.2f%%%n",  r.getMaxDrawdownPct());
@@ -232,13 +299,11 @@ public class PremiumSellerComparisonRunner {
             out.printf("  PCS opens    : %d%n", pcsOpens);
             out.printf("  CCS opens    : %d%n%n", ccsOpens);
 
-            // ── 2. Daily P&L ──────────────────────────────────────────────────
             out.println("─── Daily P&L ────────────────────────────────────────────────────────────────");
             out.printf("  %-12s  %14s  %12s  %9s  %9s%n", "Date", "Balance", "Daily P&L", "Daily %", "Return%");
             out.println("  " + "-".repeat(64));
-            List<BacktestDataPoint> curve = r.getEquityCurve();
             double prev = 100_000.0;
-            for (BacktestDataPoint dp : curve) {
+            for (BacktestDataPoint dp : r.getEquityCurve()) {
                 double bal      = dp.getPortfolioValue();
                 double delta    = bal - prev;
                 double dailyPct = prev > 0 ? delta / prev * 100.0 : 0.0;
@@ -249,7 +314,6 @@ public class PremiumSellerComparisonRunner {
             }
             out.println();
 
-            // ── 3. Per-symbol premium P&L attribution ─────────────────────────
             out.println("─── Per-Symbol Premium P&L Attribution ──────────────────────────────────────");
             out.printf("  %-8s  %6s  %6s  %8s  %8s  %9s%n",
                     "Symbol", "PCS_N", "CCS_N", "PCS_P&L", "CCS_P&L", "Total_P&L");
@@ -269,7 +333,21 @@ public class PremiumSellerComparisonRunner {
         }
     }
 
-    // ── Composite evaluator ───────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static LocalDate earliestCachedDate(String symbol) throws Exception {
+        java.nio.file.Path dir = java.nio.file.Path.of(
+                System.getProperty("user.home"), ".tradingapp", "bar-cache", "1min", symbol);
+        if (!java.nio.file.Files.isDirectory(dir)) return null;
+        return java.nio.file.Files.list(dir)
+                .map(p -> p.getFileName().toString())
+                .filter(n -> n.endsWith(".json"))
+                .map(n -> n.replace(".json", ""))
+                .map(n -> { try { return LocalDate.parse(n); } catch (Exception e) { return null; } })
+                .filter(d -> d != null)
+                .min(LocalDate::compareTo)
+                .orElse(null);
+    }
 
     static class CompositeEvaluator implements OptionsEvaluator {
         private final OptionsEvaluator primary;

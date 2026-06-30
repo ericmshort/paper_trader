@@ -53,7 +53,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     private static final double MIN_CREDIT_PCT  = 0.20;   // skip if credit < 20% of spread
     private static final double PROFIT_TARGET   = 0.50;   // close at 50% of credit
     private static final int    CLOSE_DTE       = 7;      // close when < 7 DTE
-    private static final double IV_PREMIUM      = 0.15;   // IV > HV edge: 15% premium on short legs
+    // IV_PREMIUM removed: sigma is historical vol but BS(HV) ≈ Alpaca market price in practice.
+    // Inflating premiumPaid by 15% caused exit checks to see a false >50% profit the moment
+    // syncAccount() set currentMarketPrice to the real (uninflated) Alpaca option price.
     private int maxContracts = 15;
 
     public static final String STRATEGY_PUT_CREDIT_SPREAD  = "PUT_CREDIT_SPREAD";
@@ -449,7 +451,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         double longK  = bsEngine.roundStrike(shortK - SPREAD_WIDTH);
         if (longK <= 0) return;
 
-        double shortPrem = bsEngine.putPrice(price, shortK, RISK_FREE_RATE, T, sigma) * (1 + IV_PREMIUM);
+        double shortPrem = bsEngine.putPrice(price, shortK, RISK_FREE_RATE, T, sigma);
         double longPrem  = bsEngine.putPrice(price, longK,  RISK_FREE_RATE, T, sigma);
         double credit    = shortPrem - longPrem;
         if (credit < SPREAD_WIDTH * MIN_CREDIT_PCT) {
@@ -488,7 +490,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         double shortK = findOtmCallStrike(price, T, sigma);
         double longK  = bsEngine.roundStrike(shortK + SPREAD_WIDTH);
 
-        double shortPrem = bsEngine.callPrice(price, shortK, RISK_FREE_RATE, T, sigma) * (1 + IV_PREMIUM);
+        double shortPrem = bsEngine.callPrice(price, shortK, RISK_FREE_RATE, T, sigma);
         double longPrem  = bsEngine.callPrice(price, longK,  RISK_FREE_RATE, T, sigma);
         double credit    = shortPrem - longPrem;
         if (credit < SPREAD_WIDTH * MIN_CREDIT_PCT) {
@@ -531,9 +533,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         double longCallK  = bsEngine.roundStrike(shortCallK + SPREAD_WIDTH);
         if (longPutK <= 0 || shortPutK >= shortCallK) return;
 
-        double spPrem = bsEngine.putPrice (price, shortPutK,  RISK_FREE_RATE, T, sigma) * (1 + IV_PREMIUM);
+        double spPrem = bsEngine.putPrice (price, shortPutK,  RISK_FREE_RATE, T, sigma);
         double lpPrem = bsEngine.putPrice (price, longPutK,   RISK_FREE_RATE, T, sigma);
-        double scPrem = bsEngine.callPrice(price, shortCallK, RISK_FREE_RATE, T, sigma) * (1 + IV_PREMIUM);
+        double scPrem = bsEngine.callPrice(price, shortCallK, RISK_FREE_RATE, T, sigma);
         double lcPrem = bsEngine.callPrice(price, longCallK,  RISK_FREE_RATE, T, sigma);
 
         double credit = (spPrem - lpPrem) + (scPrem - lcPrem);
@@ -567,7 +569,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         if (T <= 0) return;
 
         double K    = findOtmPutStrike(price, T, sigma);
-        double prem = bsEngine.putPrice(price, K, RISK_FREE_RATE, T, sigma) * (1 + IV_PREMIUM);
+        double prem = bsEngine.putPrice(price, K, RISK_FREE_RATE, T, sigma);
         if (prem < 1.00) return;
 
         // Secured capital = strike × 100 per contract; cap at 20% of balance
@@ -593,7 +595,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         if (T <= 0) return;
 
         double callK = findOtmCallStrike(price, T, sigma);
-        double prem  = bsEngine.callPrice(price, callK, RISK_FREE_RATE, T, sigma) * (1 + IV_PREMIUM);
+        double prem  = bsEngine.callPrice(price, callK, RISK_FREE_RATE, T, sigma);
         if (prem < 0.50) return;
 
         int maxContracts = Math.min(3, (int) (account.getBalance() / (price * 100)));
@@ -670,17 +672,16 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
     /**
      * Current price for a SHORT leg we need to buy back.
-     * Uses Alpaca's live market price if available (same source as the UI),
-     * falling back to BS * (1 + IV_PREMIUM) so the estimate is consistent with
-     * the inflated premium we received at entry. Avoids a false-profit asymmetry
-     * that would trigger the exit target immediately after entry.
+     * Uses Alpaca's live market price if available, otherwise falls back to BS(HV).
+     * Entry premiumPaid is also stored as BS(HV) (no IV inflation), so both sides use
+     * the same pricing basis — preventing a false-profit signal when Alpaca prices arrive.
      */
     private double shortLegCurrentPrice(OptionsPosition pos, double S, double T, double sigma) {
         double mkt = pos.getCurrentMarketPrice();
         if (mkt >= 0) return mkt;
         return "CALL".equals(pos.getType())
-                ? bsCall(S, pos.getStrike(), T, sigma) * (1 + IV_PREMIUM)
-                : bsPut (S, pos.getStrike(), T, sigma) * (1 + IV_PREMIUM);
+                ? bsCall(S, pos.getStrike(), T, sigma)
+                : bsPut (S, pos.getStrike(), T, sigma);
     }
 
     /** Current price for a LONG leg we need to sell to close. Uses Alpaca live price if available. */
