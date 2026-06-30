@@ -51,6 +51,7 @@ public class SettingsController implements Initializable {
     @FXML private CheckBox premiumSellerEnabledCheck;
     @FXML private CheckBox premiumPcsCheck;
     @FXML private CheckBox premiumCcsCheck;
+    @FXML private TextField premiumMaxContractsField;
     @FXML private TextField optionsStopLossField;
     @FXML private TextField downtrendPutMinSignalsField;
     @FXML private TextField entryStartTimeField;
@@ -138,6 +139,7 @@ public class SettingsController implements Initializable {
         Set<String> premStrats = cfg.getPremiumEnabledStrategies();
         premiumPcsCheck.setSelected(premStrats.contains(com.tradingapp.options.PremiumSellerRouter.STRATEGY_PUT_CREDIT_SPREAD));
         premiumCcsCheck.setSelected(premStrats.contains(com.tradingapp.options.PremiumSellerRouter.STRATEGY_CALL_CREDIT_SPREAD));
+        premiumMaxContractsField.setText(String.valueOf(cfg.getPremiumSellerMaxContracts()));
         optionsStopLossField.setText(String.valueOf((int) Math.round(cfg.getOptionsStopLossFrac() * 100)));
         downtrendPutMinSignalsField.setText(String.valueOf(cfg.getDowntrendPutMinSignals()));
         entryStartTimeField.setText(cfg.getOptionsEntryStartTime() != null ? cfg.getOptionsEntryStartTime().toString() : "");
@@ -370,6 +372,10 @@ public class SettingsController implements Initializable {
         if (premiumCcsCheck.isSelected()) premStrats.add(com.tradingapp.options.PremiumSellerRouter.STRATEGY_CALL_CREDIT_SPREAD);
         cfg.setPremiumEnabledStrategies(premStrats);
         try {
+            int mc = Integer.parseInt(premiumMaxContractsField.getText().strip());
+            cfg.setPremiumSellerMaxContracts(Math.min(50, Math.max(1, mc)));
+        } catch (NumberFormatException ignored) {}
+        try {
             int days = Integer.parseInt(earningsBlackoutField.getText().strip());
             cfg.setEarningsBlackoutDays(Math.max(0, days));
         } catch (NumberFormatException ignored) {}
@@ -470,6 +476,7 @@ public class SettingsController implements Initializable {
         boolean enabled = premiumSellerEnabledCheck.isSelected();
         premiumPcsCheck.setDisable(!enabled);
         premiumCcsCheck.setDisable(!enabled);
+        premiumMaxContractsField.setDisable(!enabled);
     }
 
     private void setStatus(String msg, boolean success) {

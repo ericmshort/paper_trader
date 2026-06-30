@@ -54,7 +54,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     private static final double PROFIT_TARGET   = 0.50;   // close at 50% of credit
     private static final int    CLOSE_DTE       = 7;      // close when < 7 DTE
     private static final double IV_PREMIUM      = 0.15;   // IV > HV edge: 15% premium on short legs
-    private int maxContracts = 10;
+    private int maxContracts = 15;
 
     public static final String STRATEGY_PUT_CREDIT_SPREAD  = "PUT_CREDIT_SPREAD";
     public static final String STRATEGY_CALL_CREDIT_SPREAD = "CALL_CREDIT_SPREAD";

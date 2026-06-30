@@ -328,6 +328,7 @@ public class DashboardController implements Initializable {
             premiumSellerRouter.setEnabledStrategies(appConfig.getPremiumEnabledStrategies());
         }
         premiumSellerRouter.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
+        premiumSellerRouter.setMaxContracts(appConfig.getPremiumSellerMaxContracts());
         premiumSellerRouter.setAllowlist(appConfig.getOptionsSymbolAllowlist());
         String dataDir = new java.io.File(transactionLog.getDbPath()).getParent();
         premiumSellerRouter.restoreExitDates(dataDir);

@@ -329,6 +329,14 @@
     <Label text="PCS prefers bullish signals; CCS prefers bearish. If both qualify on the same symbol, PCS takes priority and CCS is skipped."
            style="-fx-font-size: 11px; -fx-text-fill: #888888;" wrapText="true" maxWidth="520"/>
 
+    <HBox spacing="10" alignment="CENTER_LEFT">
+        <Label text="Max Contracts per Spread:" style="-fx-text-fill: #e0e0e0;"/>
+        <TextField fx:id="premiumMaxContractsField" prefWidth="60"
+                   style="-fx-background-color: #16213e; -fx-text-fill: #e0e0e0; -fx-border-color: #333366; -fx-border-radius: 4;"/>
+        <Label text="(limits contracts per PCS/CCS position; formula: min(max, 2% of cash ÷ risk))"
+               style="-fx-font-size: 11px; -fx-text-fill: #888888;"/>
+    </HBox>
+
     <Separator/>
 
     <!-- Actions -->
