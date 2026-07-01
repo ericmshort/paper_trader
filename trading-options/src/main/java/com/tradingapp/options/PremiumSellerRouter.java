@@ -95,6 +95,43 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     // into a still-empty position book before Alpaca returns real positions.
     private volatile boolean newEntryBlocked = false;
 
+    // Skip new entries before this minute-of-day (e.g. 45 = 9:45 AM). 0 = no restriction.
+    private int minEntryMinuteOfDay = 0;
+
+    // Maximum concurrent open spread positions (PCS + CCS). 0 = unlimited.
+    private int maxConcurrentSpreads = 0;
+
+    // Maximum positions per sector. 0 = unlimited.
+    private int maxPositionsPerSector = 0;
+
+    // When true, PCS entries require non-negative MACD value (upward momentum filter).
+    private boolean pcsRequireNonNegativeMacd = false;
+
+    // When true, CCS entries require at least one SELL signal (directional confirmation).
+    private boolean ccsRequireSellSignal = false;
+
+    // When true, always pick the nearest qualifying monthly expiry rather than splitting
+    // symbols across two months — keeps DTE shorter (~21-35 days vs up to ~60).
+    private boolean useShortExpiry = false;
+
+    // Sector groupings for concentration limiting. Symbols not listed are in their own bucket.
+    private static final java.util.Map<String, String> SECTOR_MAP;
+    static {
+        SECTOR_MAP = new java.util.HashMap<>();
+        for (String s : new String[]{"KLAC","MU","AVGO","LRCX","NVDA","TSM","AMAT","AMD","ARM"})
+            SECTOR_MAP.put(s, "SEMIS");
+        for (String s : new String[]{"LLY","REGN","ISRG","VRTX","UNH"})
+            SECTOR_MAP.put(s, "HEALTH");
+        for (String s : new String[]{"BLK","GS","COIN"})
+            SECTOR_MAP.put(s, "FINANCE");
+        for (String s : new String[]{"NOW","META","NFLX","CRWD","PANW","NET","MSFT","ORCL","PLTR"})
+            SECTOR_MAP.put(s, "TECH");
+        for (String s : new String[]{"CAT","DE","LMT","NOC"})
+            SECTOR_MAP.put(s, "INDUSTRIAL");
+        for (String s : new String[]{"SPY","QQQ"})
+            SECTOR_MAP.put(s, "ETF");
+    }
+
     public PremiumSellerRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
                                Account account, PriceHistory priceHistory,
                                Consumer<String> log) {
@@ -122,6 +159,12 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     }
 
     public void setNewEntryBlocked(boolean v) { this.newEntryBlocked = v; }
+    public void setMinEntryTime(int hour, int minute) { this.minEntryMinuteOfDay = hour * 60 + minute; }
+    public void setMaxConcurrentSpreads(int max) { this.maxConcurrentSpreads = max; }
+    public void setSectorConcentrationLimit(int max) { this.maxPositionsPerSector = max; }
+    public void setPcsRequireNonNegativeMacd(boolean v) { this.pcsRequireNonNegativeMacd = v; }
+    public void setCcsRequireSellSignal(boolean v) { this.ccsRequireSellSignal = v; }
+    public void setUseShortExpiry(boolean v) { this.useShortExpiry = v; }
 
     /** Load persisted exit dates from <dataDir>/premium-exit-dates.properties, discarding any not from today. */
     public void restoreExitDates(String dataDir) {
@@ -236,19 +279,49 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                 : account.getTotalPortfolioValue();
         if (baseline > 0 && premiumMaxLossAtRisk() / baseline >= maxPortfolioExposure) return;
 
+        // Skip new entries before the minimum entry time (avoids wide open bid-ask spreads).
+        if (minEntryMinuteOfDay > 0) {
+            ZonedDateTime now = clock.get();
+            int minuteOfDay = now.getHour() * 60 + now.getMinute();
+            if (minuteOfDay < minEntryMinuteOfDay) return;
+        }
+
+        // Cap total concurrent spread positions.
+        if (maxConcurrentSpreads > 0 && countOpenSpreads() >= maxConcurrentSpreads) return;
+
+        // Cap per-sector concentration.
+        if (maxPositionsPerSector > 0) {
+            String sector = SECTOR_MAP.getOrDefault(symbol, symbol);
+            if (countOpenSpreadsBySector(sector) >= maxPositionsPerSector) return;
+        }
+
         // ── 2. New entries (once per day per symbol per strategy) ─────────────
         boolean inUptrend = uptrendSupplier == null || uptrendSupplier.getAsBoolean();
 
+        // Extract MACD value and sell-signal presence from raw signals for entry filters.
+        double macdValue = Double.NaN;
+        boolean hasSellSignal = false;
+        for (SignalResult sr : rawSignals) {
+            if ("MACD".equals(sr.getIndicatorName())) macdValue = sr.getValue();
+            if (sr.getDirection() == SignalResult.Direction.SELL) hasSellSignal = true;
+        }
+
         // Put Credit Spread / CSP: bullish or neutral — require uptrend (SPY above regime MA)
         if (buys >= sells && sells < 2 && inUptrend) {
-            if (isEnabled(STRATEGY_PUT_CREDIT_SPREAD))
-                tryEnterPutSpread(symbol, price, sigma, today, signalStr, featureCsv);
-            if (isEnabled(STRATEGY_CASH_SECURED_PUT))
-                tryEnterCsp(symbol, price, sigma, today, signalStr, featureCsv);
+            // Optional MACD momentum filter: skip PCS when MACD is negative (downward momentum).
+            boolean macdOk = !pcsRequireNonNegativeMacd || Double.isNaN(macdValue) || macdValue >= 0;
+            if (macdOk) {
+                if (isEnabled(STRATEGY_PUT_CREDIT_SPREAD))
+                    tryEnterPutSpread(symbol, price, sigma, today, signalStr, featureCsv);
+                if (isEnabled(STRATEGY_CASH_SECURED_PUT))
+                    tryEnterCsp(symbol, price, sigma, today, signalStr, featureCsv);
+            }
         }
-        // Call Credit Spread: bearish or neutral
+        // Call Credit Spread: bearish or neutral — optional directional confirmation filter.
         if (sells >= buys && buys < 2 && isEnabled(STRATEGY_CALL_CREDIT_SPREAD)) {
-            tryEnterCallSpread(symbol, price, sigma, today, signalStr, featureCsv);
+            if (!ccsRequireSellSignal || hasSellSignal) {
+                tryEnterCallSpread(symbol, price, sigma, today, signalStr, featureCsv);
+            }
         }
         // Iron Condor: neutral (no strong directional push)
         if (buys <= 1 && sells <= 1 && isEnabled(STRATEGY_IRON_CONDOR)) {
@@ -258,6 +331,26 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         if (buys >= 2 && isEnabled(STRATEGY_COVERED_CALL)) {
             tryEnterCoveredCall(symbol, price, sigma, today, signalStr, featureCsv);
         }
+    }
+
+    /** Count open PCS and CCS positions (one per spread, keyed by the short leg). */
+    private int countOpenSpreads() {
+        int count = 0;
+        for (String key : account.getOptionsPositions().keySet()) {
+            if (key.endsWith(PUTSPREAD_SHORT) || key.endsWith(CALLSPREAD_SHORT)) count++;
+        }
+        return count;
+    }
+
+    /** Count open PCS and CCS positions for a given sector. */
+    private int countOpenSpreadsBySector(String sector) {
+        int count = 0;
+        for (String key : account.getOptionsPositions().keySet()) {
+            if (!key.endsWith(PUTSPREAD_SHORT) && !key.endsWith(CALLSPREAD_SHORT)) continue;
+            String sym = key.replace(PUTSPREAD_SHORT, "").replace(CALLSPREAD_SHORT, "");
+            if (sector.equals(SECTOR_MAP.getOrDefault(sym, sym))) count++;
+        }
+        return count;
     }
 
     // ── Exit checks ───────────────────────────────────────────────────────────
@@ -481,7 +574,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                 .anyMatch(k -> k.startsWith(symbol + "_") && k.contains("PUT"))) return;
         if (today.equals(lastExitDate.get(symbol + "_PUTSPREAD"))) return;
 
-        LocalDate expiry = bsEngine.selectExpiry(symbol);
+        LocalDate expiry = useShortExpiry ? bsEngine.selectNearestQualifyingExpiry() : bsEngine.selectExpiry(symbol);
         double T = bsEngine.timeToExpiry(expiry);
         if (T <= 0) return;
 
@@ -525,7 +618,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                 .anyMatch(k -> k.startsWith(symbol + "_") && k.contains("CALL"))) return;
         if (today.equals(lastExitDate.get(symbol + "_CALLSPREAD"))) return;
 
-        LocalDate expiry = bsEngine.selectExpiry(symbol);
+        LocalDate expiry = useShortExpiry ? bsEngine.selectNearestQualifyingExpiry() : bsEngine.selectExpiry(symbol);
         double T = bsEngine.timeToExpiry(expiry);
         if (T <= 0) return;
 

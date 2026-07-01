@@ -151,6 +151,20 @@ public class BlackScholesEngine {
     }
 
     /**
+     * Returns the nearest monthly expiry that is at least 21 days away. Unlike
+     * {@link #selectExpiry(String)}, does not split symbols across two months — all
+     * symbols use the same (nearest qualifying) expiry, keeping average DTE shorter.
+     */
+    public LocalDate selectNearestQualifyingExpiry() {
+        LocalDate next = nextMonthlyExpiry();
+        long daysToNext = ChronoUnit.DAYS.between(today(), next);
+        if (daysToNext < 21) {
+            return thirdFriday(next.plusMonths(1).withDayOfMonth(1));
+        }
+        return next;
+    }
+
+    /**
      * Picks the next Friday at least 7 days away for near-term/day-trading strategies.
      */
     public LocalDate selectNearTermExpiry() {
