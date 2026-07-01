@@ -255,16 +255,13 @@ public class TradingLoop implements Runnable {
             }
             if (!today.equals(lastDayTrackingDate)) {
                 lastDayTrackingDate = today;
-                // Baseline excludes options so that open credit spreads (held 45–90+ days)
-                // can't shift it. Short legs add cash to the balance that we subtract back
-                // (premiumPaid * 100 * contracts is negative for shorts), and long legs
-                // we add back; the net is: adjustedBalance = cash after removing option premiums.
-                double optAdj = account.getOptionsPositions().values().stream()
-                        .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
-                        .sum();
+                // Credit spreads (premium seller positions) are exempt from the daily loss limit.
+                // Their cash flows are tracked in premiumCashBalance so that
+                // (balance - premiumCash) + nonPremiumOptAdj strips them out entirely.
+                double optAdj = account.getNonPremiumOptionsOptAdj();
                 double stockMV = account.getPositions().values().stream()
                         .mapToDouble(Position::getMarketValue).sum();
-                dayStartValue = account.getBalance() + optAdj + stockMV;
+                dayStartValue = (account.getBalance() - account.getPremiumCashBalance()) + optAdj + stockMV;
                 account.setDailyLossHalted(false);
                 lossLimitBreachCount = 0;
                 lossCooldowns.clear();
@@ -302,12 +299,10 @@ public class TradingLoop implements Runnable {
             if (dailyLossResetRequested.compareAndSet(true, false)) {
                 account.setDailyLossHalted(false);
                 lossLimitBreachCount = 0;
-                double rstOptAdj = account.getOptionsPositions().values().stream()
-                        .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
-                        .sum();
+                double rstOptAdj = account.getNonPremiumOptionsOptAdj();
                 double rstStockMV = account.getPositions().values().stream()
                         .mapToDouble(Position::getMarketValue).sum();
-                dayStartValue = account.getBalance() + rstOptAdj + rstStockMV;
+                dayStartValue = (account.getBalance() - account.getPremiumCashBalance()) + rstOptAdj + rstStockMV;
                 // Sync the capacity baseline used by PremiumSellerRouter so it reflects the
                 // new account state (e.g. after a paper account reset) rather than the old
                 // last_equity from the previous account.
@@ -316,18 +311,15 @@ public class TradingLoop implements Runnable {
                         "Daily loss limit reset — new baseline: $%.0f", dayStartValue));
             }
 
-            // Daily loss check: open options positions are excluded from both the baseline
-            // and the current-value calculation. Short legs (contracts < 0) received cash
-            // that we subtract back; long legs paid cash that we add back. The net effect
-            // is that credit spreads held for 45–90+ days are invisible to this check —
-            // only stock market-value changes and realized option P&L move the needle.
+            // Daily loss check: credit spreads (premium seller positions) are fully exempt —
+            // their cash flows are tracked in premiumCashBalance and subtracted from the
+            // balance before comparison. Only stock unrealized P&L and non-premium option
+            // cost-basis changes can trigger this limit.
             if (!account.isDailyLossHalted() && dailyLossLimitPct > 0 && dayStartValue > 0) {
-                double optAdj = account.getOptionsPositions().values().stream()
-                        .mapToDouble(p -> p.getPremiumPaid() * 100 * p.getContracts())
-                        .sum();
+                double optAdj = account.getNonPremiumOptionsOptAdj();
                 double stockValue = account.getPositions().values().stream()
                         .mapToDouble(Position::getMarketValue).sum();
-                double currentValue = account.getBalance() + optAdj + stockValue;
+                double currentValue = (account.getBalance() - account.getPremiumCashBalance()) + optAdj + stockValue;
                 if (currentValue < dayStartValue * (1 - dailyLossLimitPct)) {
                     lossLimitBreachCount++;
                     if (lossLimitBreachCount > lossLimitRecoveryBars) {

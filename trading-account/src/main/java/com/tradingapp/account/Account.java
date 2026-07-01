@@ -21,6 +21,10 @@ public class Account {
     private final Set<String> verifiedOptionsKeys = ConcurrentHashMap.newKeySet();
     private final Map<String, Long> optionAddTimestamps = new ConcurrentHashMap<>();
     private volatile boolean brokerSyncComplete = false;
+    // Running total of all cash flows attributable to premium seller positions
+    // (credits received on open, debits paid on close). Used to exclude premium
+    // spread activity from the daily loss limit calculation.
+    private volatile double premiumCashBalance = 0.0;
 
     public Account() {
         this.balance = STARTING_BALANCE;
@@ -50,6 +54,28 @@ public class Account {
     public void setTradingHalted(boolean tradingHalted) { this.tradingHalted = tradingHalted; }
 
     public synchronized void addRealizedPnL(double amount) { this.totalRealizedPnL += amount; }
+
+    public double getPremiumCashBalance() { return premiumCashBalance; }
+    public synchronized void addPremiumCash(double amount) { premiumCashBalance += amount; }
+
+    /**
+     * Returns the options cost-basis adjustment for NON-premium positions only.
+     * Premium seller positions are excluded so that credit-spread cash effects
+     * (which are tracked separately in premiumCashBalance) don't double-count.
+     * Must stay in sync with the key patterns in PremiumSellerRouter.isPremiumKey().
+     */
+    public double getNonPremiumOptionsOptAdj() {
+        return optionsPositions.entrySet().stream()
+                .filter(e -> !isPremiumKey(e.getKey()))
+                .mapToDouble(e -> e.getValue().getPremiumPaid() * 100 * e.getValue().getContracts())
+                .sum();
+    }
+
+    private static boolean isPremiumKey(String key) {
+        return key.contains("_PUTSPREAD_") || key.contains("_CALLSPREAD_")
+            || key.contains("_IRONCONDOR_") || key.contains("_CSP_")
+            || key.endsWith("_CC_CALL");
+    }
 
     public double getTotalPortfolioValue() {
         double equity = positions.values().stream().mapToDouble(Position::getMarketValue).sum();

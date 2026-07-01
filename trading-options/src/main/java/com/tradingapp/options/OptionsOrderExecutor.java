@@ -201,6 +201,7 @@ public class OptionsOrderExecutor {
             if (orderId != null) {
                 double netCredit = (shortPremium - longPremium) * 100 * contracts;
                 account.setBalance(account.getBalance() + netCredit);
+                account.addPremiumCash(netCredit);
                 account.addOptionsPosition(shortPosKey,
                         new OptionsPosition(symbol, optionType, shortStrike, expiry, -contracts, shortPremium));
                 account.addOptionsPosition(longPosKey,
@@ -253,6 +254,7 @@ public class OptionsOrderExecutor {
         double fee = CONTRACT_FEE * contracts;
         double creditReceived = fillPremium * 100 * contracts - fee;
         account.setBalance(account.getBalance() + creditReceived);
+        if (PremiumSellerRouter.isPremiumKey(posKey)) account.addPremiumCash(creditReceived);
 
         // Negative contracts marks this as a short position; closePosition math stays correct.
         OptionsPosition pos = new OptionsPosition(symbol, optionType, strike, expiry, -contracts, fillPremium);
@@ -294,6 +296,7 @@ public class OptionsOrderExecutor {
         double totalCost = fillPremium * 100 * contracts + fee;
         if (account.getBalance() < totalCost) return;
         account.setBalance(account.getBalance() - totalCost);
+        if (PremiumSellerRouter.isPremiumKey(posKey)) account.addPremiumCash(-totalCost);
 
         OptionsPosition pos = new OptionsPosition(symbol, optionType, strike, expiry, contracts, fillPremium);
         account.addOptionsPosition(posKey, pos);
@@ -461,6 +464,7 @@ public class OptionsOrderExecutor {
             String orderId = submitter.submitMultiLeg(legs, contracts);
             if (orderId != null) {
                 account.setBalance(account.getBalance() + netCredit * 100 * contracts);
+                account.addPremiumCash(netCredit * 100 * contracts);
                 account.addOptionsPosition(shortCallKey, new OptionsPosition(symbol, "CALL", shortCallK, expiry, -contracts, shortCallPrem));
                 account.addOptionsPosition(longCallKey,  new OptionsPosition(symbol, "CALL", longCallK,  expiry,  contracts, longCallPrem));
                 account.addOptionsPosition(shortPutKey,  new OptionsPosition(symbol, "PUT",  shortPutK,  expiry, -contracts, shortPutPrem));
@@ -562,6 +566,7 @@ public class OptionsOrderExecutor {
         double proceeds = accountingPremium * 100 * pos.getContracts();
         double net = proceeds - fee;
         account.setBalance(account.getBalance() + net);
+        if (PremiumSellerRouter.isPremiumKey(posKey)) account.addPremiumCash(net);
         account.removeOptionsPosition(posKey);
         double pnl = net - pos.getPremiumPaid() * 100 * pos.getContracts();
         account.addRealizedPnL(pnl);
@@ -615,6 +620,7 @@ public class OptionsOrderExecutor {
         }
 
         account.setBalance(account.getBalance() - stockCost + callCredit);
+        account.addPremiumCash(callCredit);
         account.addOrUpdatePosition(symbol, stockShares, stockPrice, com.tradingapp.account.Position.PositionType.STOCK);
         OptionsPosition callPos = new OptionsPosition(symbol, "CALL", callStrike, callExpiry, -contracts, callPremium);
         account.addOptionsPosition(posKey, callPos);
