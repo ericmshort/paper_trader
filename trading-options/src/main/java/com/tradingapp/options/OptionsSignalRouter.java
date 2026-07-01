@@ -365,6 +365,19 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                 // Credit spreads have bounded risk and close as atomic multi-leg orders via their
                 // own exit logic. Exclude them from the HALT force-close to avoid Alpaca rejecting
                 // individual-leg DELETEs on defined spreads and to prevent BrokerSync eviction races.
+                //
+                // If any premium position is not yet confirmed by Alpaca (purchaseVerified=false),
+                // its brokerOccSymbol is unknown and cannot be added to the skip set.
+                // Defer the halt close this tick so the broker can confirm the position and
+                // provide its OCC symbol before we build the skip set.
+                boolean anyPremiumUnverified = account.getOptionsPositions().entrySet().stream()
+                        .filter(e -> PremiumSellerRouter.isPremiumKey(e.getKey()))
+                        .anyMatch(e -> !e.getValue().isPurchaseVerified());
+                if (anyPremiumUnverified) {
+                    researchCallback.accept(symbol + " HALT close deferred: waiting for Alpaca to confirm new premium position(s)");
+                    researchCallback.accept(symbol + " options skip: daily loss limit active");
+                    return;
+                }
                 java.util.Set<String> premiumOcc = account.getOptionsPositions().entrySet().stream()
                         .filter(e -> PremiumSellerRouter.isPremiumKey(e.getKey()))
                         .map(e -> e.getValue().getBrokerOccSymbol())
