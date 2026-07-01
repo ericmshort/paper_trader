@@ -256,11 +256,10 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         OptionsPosition longPos  = account.getOptionsPositions().get(symbol + PUTSPREAD_LONG);
         if (shortPos == null && longPos == null) return;
         if (shortPos == null || longPos == null) {
-            // Orphaned single leg — attempt close then force-remove from local state.
-            // Without force-removal, a broker rejection leaves the position in local state
-            // and the close retries every 5-second tick indefinitely.
-            // If the leg is still real in Alpaca, broker sync will re-add it next cycle.
+            // Orphaned single leg — only close if Alpaca has already verified it.
+            // If not yet verified, the other leg may just be a pending fill.
             OptionsPosition orphanPos = shortPos != null ? shortPos : longPos;
+            if (!orphanPos.isPurchaseVerified()) return;
             String orphanKey = shortPos != null ? symbol + PUTSPREAD_SHORT : symbol + PUTSPREAD_LONG;
             double orphanT = bsEngine.timeToExpiry(orphanPos.getExpiry());
             double orphanPrem = shortPos != null
@@ -271,6 +270,8 @@ public class PremiumSellerRouter implements OptionsEvaluator {
             log.accept(symbol + " PUT SPREAD orphaned leg closed");
             return;
         }
+        // Don't run exit logic until Alpaca has confirmed both legs with real fill prices.
+        if (!shortPos.isPurchaseVerified() || !longPos.isPurchaseVerified()) return;
 
         double T = bsEngine.timeToExpiry(shortPos.getExpiry());
         long dte = ChronoUnit.DAYS.between(today, shortPos.getExpiry());
@@ -297,6 +298,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         if (shortPos == null && longPos == null) return;
         if (shortPos == null || longPos == null) {
             OptionsPosition orphanPos = shortPos != null ? shortPos : longPos;
+            if (!orphanPos.isPurchaseVerified()) return;
             String orphanKey = shortPos != null ? symbol + CALLSPREAD_SHORT : symbol + CALLSPREAD_LONG;
             double orphanT = bsEngine.timeToExpiry(orphanPos.getExpiry());
             double orphanPrem = shortPos != null
@@ -307,6 +309,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
             log.accept(symbol + " CALL SPREAD orphaned leg closed");
             return;
         }
+        if (!shortPos.isPurchaseVerified() || !longPos.isPurchaseVerified()) return;
 
         double T = bsEngine.timeToExpiry(shortPos.getExpiry());
         long dte = ChronoUnit.DAYS.between(today, shortPos.getExpiry());
@@ -336,7 +339,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         if (!anyPresent) return;
         boolean allPresent = scPos != null && lcPos != null && spPos != null && lpPos != null;
         if (!allPresent) {
-            // Orphaned IC legs — close whatever is open and bail
+            // Orphaned IC legs — only close verified legs; unverified means fill is still pending.
+            OptionsPosition firstPresent = scPos != null ? scPos : lcPos != null ? lcPos : spPos != null ? spPos : lpPos;
+            if (!firstPresent.isPurchaseVerified()) return;
             double T = scPos != null ? bsEngine.timeToExpiry(scPos.getExpiry())
                      : lcPos != null ? bsEngine.timeToExpiry(lcPos.getExpiry())
                      : spPos != null ? bsEngine.timeToExpiry(spPos.getExpiry())
@@ -348,6 +353,8 @@ public class PremiumSellerRouter implements OptionsEvaluator {
             log.accept(symbol + " IRON CONDOR orphaned leg(s) closed");
             return;
         }
+        if (!scPos.isPurchaseVerified() || !lcPos.isPurchaseVerified()
+                || !spPos.isPurchaseVerified() || !lpPos.isPurchaseVerified()) return;
 
         double T = bsEngine.timeToExpiry(scPos.getExpiry());
         long dte = ChronoUnit.DAYS.between(today, scPos.getExpiry());
@@ -383,6 +390,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     private void checkExitCsp(String symbol, double price, double sigma, LocalDate today) {
         OptionsPosition pos = account.getOptionsPositions().get(symbol + CSP_PUT);
         if (pos == null) return;
+        if (!pos.isPurchaseVerified()) return;
 
         double T = bsEngine.timeToExpiry(pos.getExpiry());
         long dte = ChronoUnit.DAYS.between(today, pos.getExpiry());
@@ -405,6 +413,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         if (!optExec.hasCoveredCallPosition(symbol + CC_CALL)) return;
         OptionsPosition pos = account.getOptionsPositions().get(symbol + CC_CALL);
         if (pos == null) return;
+        if (!pos.isPurchaseVerified()) return;
 
         double T = bsEngine.timeToExpiry(pos.getExpiry());
         long dte = ChronoUnit.DAYS.between(today, pos.getExpiry());

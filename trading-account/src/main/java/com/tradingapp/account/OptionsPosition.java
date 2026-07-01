@@ -16,6 +16,10 @@ public class OptionsPosition {
     private volatile String brokerOccSymbol;
     // Set during broker sync from Alpaca's current_price field. -1.0 = not yet set.
     private volatile double currentMarketPrice = -1.0;
+    // True once Alpaca has confirmed this position exists in /positions with a real fill price.
+    // Exit checks are suppressed until this is set to prevent false triggers on newly opened
+    // positions before the broker has acknowledged the fill.
+    private volatile boolean purchaseVerified = false;
 
     public OptionsPosition(String symbol, String type, double strike, LocalDate expiry, int contracts, double premiumPaid) {
         this.symbol = symbol;
@@ -33,6 +37,8 @@ public class OptionsPosition {
     public int getContracts() { return contracts; }
     public double getPremiumPaid() { return premiumPaid; }
     public void setPremiumPaid(double premiumPaid) { this.premiumPaid = premiumPaid; }
+    public boolean isPurchaseVerified() { return purchaseVerified; }
+    public void setPurchaseVerified(boolean purchaseVerified) { this.purchaseVerified = purchaseVerified; }
     public String getBrokerOccSymbol() { return brokerOccSymbol; }
     public void setBrokerOccSymbol(String brokerOccSymbol) { this.brokerOccSymbol = brokerOccSymbol; }
     public double getCurrentMarketPrice() { return currentMarketPrice; }

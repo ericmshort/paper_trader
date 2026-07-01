@@ -556,6 +556,7 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                                 existing.setBrokerOccSymbol(symbol);
                                 existing.setCurrentMarketPrice(currentPrice);
                                 if (avgCost > 0) existing.setPremiumPaid(avgCost);
+                                existing.setPurchaseVerified(true);
                                 account.addOptionsPosition(existingKey, existing);
                                 account.markOptionVerified(existingKey);
                             } else {
@@ -567,6 +568,7 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                                 // Pin the exact Alpaca OCC symbol so close orders bypass re-lookup.
                                 optPos.setBrokerOccSymbol(symbol);
                                 optPos.setCurrentMarketPrice(currentPrice);
+                                optPos.setPurchaseVerified(true);
                                 newBrokerOptions.add(new Object[]{occ, optPos});
                             }
                         }
