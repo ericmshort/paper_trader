@@ -648,7 +648,7 @@ public class DashboardController implements Initializable {
                     account.getOptionsPositions().get(symbol + PremiumSellerRouter.PUTSPREAD_LONG);
             if (longPos == null) continue;
             int c = Math.abs(shortPos.getContracts());
-            double credit = (shortPos.getPremiumPaid() - longPos.getPremiumPaid()) * 100 * c;
+            double credit = Math.max(0, (shortPos.getPremiumPaid() - longPos.getPremiumPaid()) * 100 * c);
             double sCur = computeOptionCurrentPremium(shortPos);
             double lCur = computeOptionCurrentPremium(longPos);
             double closeCost = (sCur - lCur) * 100 * c;
@@ -676,7 +676,7 @@ public class DashboardController implements Initializable {
                     account.getOptionsPositions().get(symbol + PremiumSellerRouter.CALLSPREAD_LONG);
             if (longPos == null) continue;
             int c = Math.abs(shortPos.getContracts());
-            double credit = (shortPos.getPremiumPaid() - longPos.getPremiumPaid()) * 100 * c;
+            double credit = Math.max(0, (shortPos.getPremiumPaid() - longPos.getPremiumPaid()) * 100 * c);
             double sCur = computeOptionCurrentPremium(shortPos);
             double lCur = computeOptionCurrentPremium(longPos);
             double closeCost = (sCur - lCur) * 100 * c;
@@ -705,8 +705,8 @@ public class DashboardController implements Initializable {
             com.tradingapp.account.OptionsPosition lpPos = account.getOptionsPositions().get(symbol + PremiumSellerRouter.IC_LONGPUT);
             if (lcPos == null || spPos == null || lpPos == null) continue;
             int c = Math.abs(scPos.getContracts());
-            double credit = ((scPos.getPremiumPaid() - lcPos.getPremiumPaid())
-                           + (spPos.getPremiumPaid() - lpPos.getPremiumPaid())) * 100 * c;
+            double credit = Math.max(0, ((scPos.getPremiumPaid() - lcPos.getPremiumPaid())
+                           + (spPos.getPremiumPaid() - lpPos.getPremiumPaid())) * 100 * c);
             double scCur = computeOptionCurrentPremium(scPos);
             double lcCur = computeOptionCurrentPremium(lcPos);
             double spCur = computeOptionCurrentPremium(spPos);

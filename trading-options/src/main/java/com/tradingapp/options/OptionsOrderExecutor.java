@@ -194,12 +194,16 @@ public class OptionsOrderExecutor {
 
         // ── Attempt atomic multi-leg submission ───────────────────────────────
         if (submitter != null) {
+            double netCredit = (shortPremium - longPremium) * 100 * contracts;
+            if (netCredit <= 0) {
+                LOG.warning(symbol + " credit-spread skip: net credit not positive (short=" + shortPremium + " long=" + longPremium + ")");
+                return false;
+            }
             List<MultiLegOrder> legs = List.of(
                     new MultiLegOrder(symbol, optionType, shortStrike, expiry, "sell", "sell_to_open"),
                     new MultiLegOrder(symbol, optionType, longStrike,  expiry, "buy",  "buy_to_open"));
             String orderId = submitter.submitMultiLeg(legs, contracts);
             if (orderId != null) {
-                double netCredit = (shortPremium - longPremium) * 100 * contracts;
                 account.setBalance(account.getBalance() + netCredit);
                 account.addPremiumCash(netCredit);
                 account.addOptionsPosition(shortPosKey,
@@ -224,6 +228,12 @@ public class OptionsOrderExecutor {
         }
 
         // ── Paper-trading: sequential (no broker, so no MLEG support) ─────────
+        double netCreditAfterSlippage = (shortPremium - OPTION_SELL_SLIPPAGE - longPremium - OPTION_BUY_SLIPPAGE)
+                * 100 * contracts;
+        if (netCreditAfterSlippage <= 0) {
+            LOG.warning(symbol + " credit-spread skip: post-slippage credit not positive (short=" + shortPremium + " long=" + longPremium + ")");
+            return false;
+        }
         if ("CALL".equals(optionType)) {
             sellCallAs(shortPosKey, symbol, shortStrike, expiry, contracts, shortPremium, signalStr, featureCsv);
             buyCallAs(longPosKey,   symbol, longStrike,  expiry, contracts, longPremium,  signalStr, featureCsv);
@@ -249,9 +259,21 @@ public class OptionsOrderExecutor {
 
     private void sell(String posKey, String symbol, String optionType, double strike, LocalDate expiry, int contracts,
                       double bsPremium, String signalStr, String featureCsv, TransactionAction action) {
-        double fillPremium = bsPremium - OPTION_SELL_SLIPPAGE;
-        if (fillPremium <= 0) return;
-        double fee = CONTRACT_FEE * contracts;
+        String externalId = null;
+        double fillPremium;
+        double fee;
+
+        if (submitter != null) {
+            externalId = submitter.submit(symbol, optionType, strike, expiry, contracts, "sell", "sell_to_open");
+            if (externalId == null) return;
+            fillPremium = bsPremium; // real fill via syncAccount; no slippage
+            fee = 0.0;
+        } else {
+            fillPremium = bsPremium - OPTION_SELL_SLIPPAGE;
+            if (fillPremium <= 0) return;
+            fee = CONTRACT_FEE * contracts;
+        }
+
         double creditReceived = fillPremium * 100 * contracts - fee;
         account.setBalance(account.getBalance() + creditReceived);
         if (PremiumSellerRouter.isPremiumKey(posKey)) account.addPremiumCash(creditReceived);
@@ -263,6 +285,7 @@ public class OptionsOrderExecutor {
         TransactionRecord rec = ts(new TransactionRecord(symbol, action, contracts, fillPremium, fee,
                 account.getBalance(), optionType + " K=" + strike + " exp=" + expiry + " (SHORT)", signalStr));
         rec.setFeatures(featureCsv);
+        rec.setExternalId(externalId);
         try {
             transactionLog.insert(rec);
         } catch (Exception e) {
