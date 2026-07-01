@@ -291,10 +291,17 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                 if (today.equals(brokerCloseAllDate)) {
                     return; // confirmed all clear with broker — nothing left to do
                 }
-                int result = optExec.closeAllFromBroker();
+                // Build the skip set from confirmed premium positions (same pattern as halt logic).
+                // Credit spreads are multi-day holds and must survive the EOD sweep.
+                java.util.Set<String> premiumOcc = account.getOptionsPositions().entrySet().stream()
+                        .filter(e -> PremiumSellerRouter.isPremiumKey(e.getKey()))
+                        .map(e -> e.getValue().getBrokerOccSymbol())
+                        .filter(s -> s != null && !s.isEmpty())
+                        .collect(java.util.stream.Collectors.toSet());
+                int result = optExec.closeNonPremiumFromBroker(premiumOcc);
                 if (result == 0) {
                     brokerCloseAllDate = today;
-                    researchCallback.accept("EOD: all options positions confirmed closed");
+                    researchCallback.accept("EOD: all non-premium options positions confirmed closed");
                 } else if (result > 0) {
                     researchCallback.accept("EOD: " + result + " position(s) submitted for close — retrying next tick");
                 } else {
