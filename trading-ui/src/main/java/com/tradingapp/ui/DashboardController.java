@@ -1,6 +1,7 @@
 package com.tradingapp.ui;
 
 import com.tradingapp.account.Account;
+import com.tradingapp.account.AuditLog;
 import com.tradingapp.account.OptionsPosition;
 import com.tradingapp.account.Position;
 import com.tradingapp.account.SafetyStop;
@@ -238,6 +239,7 @@ public class DashboardController implements Initializable {
     }
 
     private void startTradingComponents(AppConfig appConfig) {
+        AuditLog.get().init(AppConfig.getDataDir());
         boolean useWsProvider = appConfig.getQuoteProviderType() == AppConfig.QuoteProviderType.ALPACA_WEBSOCKET_FREE
                 && appConfig.isAlpacaBroker();
 

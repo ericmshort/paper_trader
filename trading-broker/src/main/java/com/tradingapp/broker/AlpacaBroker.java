@@ -1,6 +1,7 @@
 package com.tradingapp.broker;
 
 import com.tradingapp.account.Account;
+import com.tradingapp.account.AuditLog;
 import com.tradingapp.account.Position;
 import com.tradingapp.account.TransactionLog;
 import com.tradingapp.account.TransactionRecord;
@@ -83,6 +84,8 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
             r.setFeatures(features);
             r.setExternalId(orderId);
             tryInsertLog(r);
+            AuditLog.get().logTransaction("STOCK_BUY", symbol, orderId,
+                    shares, fillPrice, -shares * fillPrice, account.getBalance(), reason);
             return r;
         } catch (Exception e) {
             System.err.println("Alpaca buy failed: " + e.getMessage());
@@ -118,6 +121,8 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                     shares, fillPrice, 0.0, account.getBalance(), reason, signals);
             r.setExternalId(orderId);
             tryInsertLog(r);
+            AuditLog.get().logTransaction("STOCK_SELL", symbol, orderId,
+                    shares, fillPrice, shares * fillPrice, account.getBalance(), reason);
             return r;
         } catch (Exception e) {
             System.err.println("Alpaca sell failed: " + e.getMessage());
@@ -149,7 +154,11 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
             HttpResponse<String> resp = deletePosition(occSymbol);
             if (resp.statusCode() == 200 || resp.statusCode() == 201) {
                 JSONObject order = new JSONObject(resp.body());
-                return order.optString("id");
+                String orderId = order.optString("id");
+                AuditLog.get().logTransaction("OPTIONS_CLOSE_DIRECT", occSymbol, occSymbol,
+                        contracts, 0, 0, account.getBalance(),
+                        side + (positionIntent != null ? "/" + positionIntent : ""));
+                return orderId;
             }
 
             // Alpaca requires a limit order when there is no available market quote.
@@ -180,7 +189,11 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                     return null;
                 }
                 JSONObject order = new JSONObject(limitResp.body());
-                return order.optString("id");
+                String limitOrderId = order.optString("id");
+                AuditLog.get().logTransaction("OPTIONS_CLOSE_LIMIT", occSymbol, occSymbol,
+                        contracts, limitPrice, 0, account.getBalance(),
+                        side + (positionIntent != null ? "/" + positionIntent : "") + "/limit_fallback");
+                return limitOrderId;
             }
 
             System.err.println("Alpaca options direct close rejected (" + resp.statusCode() + "): " + body403);
@@ -304,6 +317,11 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
             JSONObject order = new JSONObject(resp.body());
             String orderId = order.optString("id");
             LOG.info("Alpaca mleg order accepted: " + orderId + " (" + legs.size() + " legs x" + contracts + ")");
+            String legDesc = legs.stream()
+                    .map(l -> l.side() + ":" + (l.occSymbol() != null ? l.occSymbol() : l.symbol() + "_" + l.optionType()))
+                    .collect(java.util.stream.Collectors.joining(","));
+            AuditLog.get().logTransaction("OPTIONS_MLEG", legs.get(0).symbol(), orderId,
+                    contracts, 0, 0, account.getBalance(), legs.size() + "legs:" + legDesc);
             return orderId;
         } catch (Exception e) {
             System.err.println("Alpaca mleg order failed: " + e.getMessage());
@@ -353,7 +371,11 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
             }
 
             JSONObject order = new JSONObject(resp.body());
-            return order.optString("id");
+            String orderId = order.optString("id");
+            AuditLog.get().logTransaction("OPTIONS_" + side.toUpperCase(), symbol, occSymbol,
+                    contracts, 0, 0, account.getBalance(),
+                    side + (positionIntent != null ? "/" + positionIntent : ""));
+            return orderId;
         } catch (Exception e) {
             System.err.println("Alpaca options order failed: " + e.getMessage());
             return null;
@@ -556,9 +578,13 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                                 existing.setBrokerOccSymbol(symbol);
                                 existing.setCurrentMarketPrice(currentPrice);
                                 if (avgCost > 0) existing.setPremiumPaid(avgCost);
+                                boolean wasUnverified = !existing.isPurchaseVerified();
                                 existing.setPurchaseVerified(true);
                                 account.addOptionsPosition(existingKey, existing);
                                 account.markOptionVerified(existingKey);
+                                if (wasUnverified) {
+                                    AuditLog.get().logVerification(existingKey, symbol, avgCost);
+                                }
                             } else {
                                 // New position: collect for spread-pair detection below
                                 int signedQty = "short".equals(side) ? -qty : qty;
@@ -702,6 +728,7 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                 }
 
                 for (com.tradingapp.account.Position stale : staleStocks) {
+                    AuditLog.get().logEviction(stale.getSymbol(), "broker_sync_stock_not_found");
                     account.removePosition(stale.getSymbol());
                     // Insert a compensating SELL so restoreAccount won't reconstruct this position
                     if (log != null) {
@@ -717,7 +744,10 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                         tryInsertLog(r);
                     }
                 }
-                staleOptions.forEach(account::removeOptionsPosition);
+                staleOptions.forEach(k -> {
+                    AuditLog.get().logEviction(k, "broker_sync_option_not_found");
+                    account.removeOptionsPosition(k);
+                });
 
                 account.setBrokerSyncComplete(true);
                 String syncMsg = "[BrokerSync] Restored " + account.getOptionsPositions().size()
@@ -901,6 +931,7 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                 if (!isOccSymbol(symbol)) continue;
                 found++;
                 LOG.info("Force-close: " + symbol);
+                AuditLog.get().logForceClose(symbol, "EOD_SWEEP_ALL");
                 try {
                     HttpResponse<String> resp = deletePosition(symbol);
                     if (resp.statusCode() != 200 && resp.statusCode() != 201) {
@@ -929,6 +960,7 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                 if (skipOccSymbols.contains(symbol)) continue;
                 found++;
                 LOG.info("Force-close (non-premium): " + symbol);
+                AuditLog.get().logForceClose(symbol, "EOD_SWEEP_NON_PREMIUM");
                 try {
                     HttpResponse<String> resp = deletePosition(symbol);
                     if (resp.statusCode() != 200 && resp.statusCode() != 201) {

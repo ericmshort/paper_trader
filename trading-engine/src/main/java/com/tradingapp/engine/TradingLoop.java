@@ -1,6 +1,7 @@
 package com.tradingapp.engine;
 
 import com.tradingapp.account.Account;
+import com.tradingapp.account.AuditLog;
 import com.tradingapp.account.OptionsPosition;
 import com.tradingapp.account.Position;
 import com.tradingapp.account.TransactionLog;
@@ -262,6 +263,9 @@ public class TradingLoop implements Runnable {
                 double stockMV = account.getPositions().values().stream()
                         .mapToDouble(Position::getMarketValue).sum();
                 dayStartValue = (account.getBalance() - account.getPremiumCashBalance()) + optAdj + stockMV;
+                AuditLog.get().logEvent("DAY_START", String.format(
+                        "date=%s|dayStartValue=%.2f|balance=%.2f|premiumCash=%.2f",
+                        today, dayStartValue, account.getBalance(), account.getPremiumCashBalance()));
                 account.setDailyLossHalted(false);
                 lossLimitBreachCount = 0;
                 lossCooldowns.clear();
@@ -324,6 +328,8 @@ public class TradingLoop implements Runnable {
                     lossLimitBreachCount++;
                     if (lossLimitBreachCount > lossLimitRecoveryBars) {
                         account.setDailyLossHalted(true);
+                        AuditLog.get().logHalt("DAILY_LOSS", currentValue, dayStartValue,
+                                dailyLossLimitPct, null);
                         researchCallback.accept(String.format(
                                 "DAILY LOSS LIMIT (%.0f%%) reached — no new positions for the rest of the session",
                                 dailyLossLimitPct * 100));
@@ -352,6 +358,8 @@ public class TradingLoop implements Runnable {
                 if (cbCurrentValue < dayStartValue * (1 - circuitBreakerPct)) {
                     circuitBreakerFired = true;
                     account.setDailyLossHalted(true);
+                    AuditLog.get().logHalt("CIRCUIT_BREAKER", cbCurrentValue, dayStartValue,
+                            circuitBreakerPct, null);
                     flattenAllStockPositions(String.format(
                             "Circuit breaker: portfolio down %.1f%% — all positions closed",
                             circuitBreakerPct * 100));
@@ -572,6 +580,7 @@ public class TradingLoop implements Runnable {
                                 && s.getDirection() == SignalResult.Direction.BUY));
                 researchCallback.accept(time + " | " + symbol + " $" + String.format("%.2f", price)
                         + " | " + signalStr + " | BUY=" + buys + " SELL=" + sells);
+                AuditLog.get().logSignal(symbol, price, buys, sells, signalStr);
             }
             // Gap 5: liquidate all equity positions at 15:45 to avoid overnight gap risk
             if (avoidOvernightHolds && !time.isBefore(PRE_CLOSE_CUTOFF)) {

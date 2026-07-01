@@ -1,6 +1,7 @@
 package com.tradingapp.options;
 
 import com.tradingapp.account.Account;
+import com.tradingapp.account.AuditLog;
 import com.tradingapp.account.OptionsPosition;
 import com.tradingapp.account.TransactionLog;
 import com.tradingapp.data.OptionsChain;
@@ -301,8 +302,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                 int result = optExec.closeNonPremiumFromBroker(premiumOcc);
                 if (result == 0) {
                     brokerCloseAllDate = today;
+                    AuditLog.get().logEvent("EOD_SWEEP", "status=confirmed_clear|premiumSkipped=" + premiumOcc.size());
                     researchCallback.accept("EOD: all non-premium options positions confirmed closed");
                 } else if (result > 0) {
+                    AuditLog.get().logEvent("EOD_SWEEP", "status=submitted|closed=" + result + "|premiumSkipped=" + premiumOcc.size());
                     researchCallback.accept("EOD: " + result + " position(s) submitted for close — retrying next tick");
                 } else {
                     // Paper trading: close this symbol's positions using local state + BS pricing
@@ -374,6 +377,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                         .filter(e -> PremiumSellerRouter.isPremiumKey(e.getKey()))
                         .anyMatch(e -> !e.getValue().isPurchaseVerified());
                 if (anyPremiumUnverified) {
+                    AuditLog.get().logEvent("HALT_CLOSE_DEFERRED", "reason=premium_unverified|symbol=" + symbol);
                     researchCallback.accept(symbol + " HALT close deferred: waiting for Alpaca to confirm new premium position(s)");
                     researchCallback.accept(symbol + " options skip: daily loss limit active");
                     return;
@@ -386,8 +390,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                 int result = optExec.closeNonPremiumFromBroker(premiumOcc);
                 if (result == 0) {
                     haltCloseDone = true;
+                    AuditLog.get().logEvent("HALT_CLOSE", "status=confirmed_clear|premiumSkipped=" + premiumOcc.size());
                     researchCallback.accept("HALT: all non-premium options positions confirmed closed");
                 } else if (result > 0) {
+                    AuditLog.get().logEvent("HALT_CLOSE", "status=submitted|closed=" + result + "|premiumSkipped=" + premiumOcc.size());
                     researchCallback.accept("HALT: " + result + " position(s) submitted for close — retrying next tick");
                 } else if (closePositionsOnHalt) {
                     // Paper trading / backtest fallback

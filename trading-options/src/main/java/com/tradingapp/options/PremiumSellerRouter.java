@@ -1,6 +1,7 @@
 package com.tradingapp.options;
 
 import com.tradingapp.account.Account;
+import com.tradingapp.account.AuditLog;
 import com.tradingapp.account.OptionsPosition;
 import com.tradingapp.account.TransactionLog;
 import com.tradingapp.data.PriceHistory;
@@ -289,6 +290,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         optExec.closeCreditSpread(symbol + PUTSPREAD_SHORT, symbol + PUTSPREAD_LONG,
                 sCur, lCur, reason);
         recordExit(symbol + "_PUTSPREAD", today);
+        AuditLog.get().logEvent("PREMIUM_CLOSE",
+                String.format("strategy=PUT_SPREAD|symbol=%s|reason=%s|pnl=%.2f|credit=%.2f|closeCost=%.2f",
+                        symbol, reason, pnl, credit, closeCost));
         log.accept(String.format("%s PUT CREDIT SPREAD closed: %s | P&L $%.0f", symbol, reason, pnl));
     }
 
@@ -327,6 +331,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         optExec.closeCreditSpread(symbol + CALLSPREAD_SHORT, symbol + CALLSPREAD_LONG,
                 sCur, lCur, reason);
         recordExit(symbol + "_CALLSPREAD", today);
+        AuditLog.get().logEvent("PREMIUM_CLOSE",
+                String.format("strategy=CALL_SPREAD|symbol=%s|reason=%s|pnl=%.2f|credit=%.2f|closeCost=%.2f",
+                        symbol, reason, pnl, credit, closeCost));
         log.accept(String.format("%s CALL CREDIT SPREAD closed: %s | P&L $%.0f", symbol, reason, pnl));
     }
 
@@ -384,6 +391,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                 symbol + IC_SHORTPUT, symbol + IC_LONGPUT,
                 scCur, lcCur, spCur, lpCur, reason);
         recordExit(symbol + "_IRONCONDOR", today);
+        AuditLog.get().logEvent("PREMIUM_CLOSE",
+                String.format("strategy=IRON_CONDOR|symbol=%s|reason=%s|pnl=%.2f|credit=%.2f|closeCost=%.2f",
+                        symbol, reason, pnl, credit, closeCost));
         log.accept(String.format("%s IRON CONDOR closed: %s | P&L $%.0f", symbol, reason, pnl));
     }
 
@@ -406,6 +416,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
         optExec.closePosition(symbol + CSP_PUT, curPrem, reason);
         recordExit(symbol + "_CSP", today);
+        AuditLog.get().logEvent("PREMIUM_CLOSE",
+                String.format("strategy=CSP|symbol=%s|reason=%s|pnl=%.2f|credit=%.2f|closeCost=%.2f",
+                        symbol, reason, pnl, credit, closeCost));
         log.accept(String.format("%s CSP closed: %s | P&L $%.0f", symbol, reason, pnl));
     }
 
@@ -436,6 +449,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
         optExec.closeCoveredCall(symbol + CC_CALL, curPrem, price, reason);
         recordExit(symbol + "_CC", today);
+        AuditLog.get().logEvent("PREMIUM_CLOSE",
+                String.format("strategy=COVERED_CALL|symbol=%s|reason=%s|pnl=%.2f|credit=%.2f|closeCost=%.2f",
+                        symbol, reason, pnl, credit, closeCost));
         log.accept(String.format("%s COVERED CALL closed: %s | option P&L $%.0f", symbol, reason, pnl));
     }
 
@@ -476,6 +492,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                 symbol, "PUT", shortK, longK, expiry, c,
                 shortPrem, longPrem, signalStr, featureCsv, "PUT SPREAD");
         if (opened) {
+            AuditLog.get().logEvent("PREMIUM_OPEN",
+                    String.format("strategy=PUT_SPREAD|symbol=%s|shortK=%.0f|longK=%.0f|exp=%s|qty=%d|credit=%.2f",
+                            symbol, shortK, longK, expiry, c, credit * 100 * c));
             log.accept(String.format("%s PUT CREDIT SPREAD K=%.0f/%.0f exp=%s x%d credit=$%.0f",
                     symbol, shortK, longK, expiry, c, credit * 100 * c));
         }
@@ -515,6 +534,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                 symbol, "CALL", shortK, longK, expiry, c,
                 shortPrem, longPrem, signalStr, featureCsv, "CALL SPREAD");
         if (opened) {
+            AuditLog.get().logEvent("PREMIUM_OPEN",
+                    String.format("strategy=CALL_SPREAD|symbol=%s|shortK=%.0f|longK=%.0f|exp=%s|qty=%d|credit=%.2f",
+                            symbol, shortK, longK, expiry, c, credit * 100 * c));
             log.accept(String.format("%s CALL CREDIT SPREAD K=%.0f/%.0f exp=%s x%d credit=$%.0f",
                     symbol, shortK, longK, expiry, c, credit * 100 * c));
         }
@@ -563,6 +585,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                 expiry, c, scPrem, lcPrem, spPrem, lpPrem,
                 signalStr, featureCsv);
         if (opened) {
+            AuditLog.get().logEvent("PREMIUM_OPEN",
+                    String.format("strategy=IRON_CONDOR|symbol=%s|shortPutK=%.0f|longPutK=%.0f|shortCallK=%.0f|longCallK=%.0f|exp=%s|qty=%d|credit=%.2f",
+                            symbol, shortPutK, longPutK, shortCallK, longCallK, expiry, c, credit * 100 * c));
             log.accept(String.format("%s IRON CONDOR puts=%.0f/%.0f calls=%.0f/%.0f exp=%s x%d credit=$%.0f",
                     symbol, shortPutK, longPutK, shortCallK, longCallK, expiry, c, credit * 100 * c));
         }
@@ -588,6 +613,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
         optExec.sellPutAs(symbol + CSP_PUT, symbol, K, expiry, c, prem, signalStr, featureCsv);
         if (account.getOptionsPositions().containsKey(symbol + CSP_PUT)) {
+            AuditLog.get().logEvent("PREMIUM_OPEN",
+                    String.format("strategy=CSP|symbol=%s|K=%.0f|exp=%s|qty=%d|credit=%.2f",
+                            symbol, K, expiry, c, prem * 100 * c));
             log.accept(String.format("%s CSP K=%.0f exp=%s x%d credit=$%.0f",
                     symbol, K, expiry, c, prem * 100 * c));
         }
@@ -613,6 +641,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         optExec.openCoveredCall(symbol + CC_CALL, symbol, price, callK,
                 expiry, maxContracts, prem, signalStr, featureCsv);
         if (account.getOptionsPositions().containsKey(symbol + CC_CALL)) {
+            AuditLog.get().logEvent("PREMIUM_OPEN",
+                    String.format("strategy=COVERED_CALL|symbol=%s|K=%.0f|exp=%s|prem=%.4f",
+                            symbol, callK, expiry, prem));
             log.accept(String.format("%s COVERED CALL K=%.0f exp=%s prem=$%.2f",
                     symbol, callK, expiry, prem));
         }
