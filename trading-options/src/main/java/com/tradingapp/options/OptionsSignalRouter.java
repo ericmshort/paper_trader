@@ -522,7 +522,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             else if (inDowntrend)
                 researchCallback.accept(symbol + " CALL skip: SPY downtrend");
             else if (isStrategyEnabled("LONG_CALL"))
-                tryOpenLongCall(symbol, price, K, expiry, T, sigma, signalStr, featureCsv, callKey, opts);
+                tryOpenLongCall(symbol, price, K, expiry, T, sigma, signalStr, featureCsv, callKey, buySignals, sellSignals, opts);
 
         } else if (extremeBearish && !hasDirectional && !hasMultiLeg && canEnterBear) {
             if (!putsAllowed)
@@ -546,7 +546,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             else if (sellSignals < putMin)
                 researchCallback.accept(symbol + " PUT skip: need " + putMin + "+ signals in " + marketRegime + " (have " + sellSignals + ")");
             else if (isStrategyEnabled("LONG_PUT"))
-                tryOpenLongPut(symbol, price, K, expiry, T, sigma, signalStr, featureCsv, putKey, sellSignals, opts);
+                tryOpenLongPut(symbol, price, K, expiry, T, sigma, signalStr, featureCsv, putKey, buySignals, sellSignals, opts);
 
         } else if (mixedStrong && !hasDirectional && !hasMultiLeg && (canEnterBull || canEnterBear)) {
             if (callsAllowed && putsAllowed && isZeroDteDay() && isStrategyEnabled("ZERO_DTE"))
@@ -856,7 +856,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
     private void tryOpenLongCall(String symbol, double price, double K, LocalDate expiry,
                                  double T, double sigma, String signalStr, String featureCsv,
-                                 String callKey, Map<String, OptionsPosition> opts) {
+                                 String callKey, int buySignals, int sellSignals,
+                                 Map<String, OptionsPosition> opts) {
         if (sessionStopLossed.contains(callKey)) {
             researchCallback.accept(symbol + " CALL skip: stop-loss cooldown");
             return;
@@ -879,6 +880,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         int contracts = Math.min(maxContractsPerTrade, (int) (account.getBalance() * positionBudgetFrac / (premium * 100)));
         if (contracts < 1) return;
 
+        AuditLog.get().logSignal(symbol, price, buySignals, sellSignals,
+                "DECISION=OPTIONS_BUY_CALL|" + signalStr);
         optExec.buyCall(symbol, K, expiry, contracts, premium, signalStr, featureCsv);
         lastAnyCloseTime.put(symbol, clock.get());
         GreeksResult g = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, true);
@@ -890,7 +893,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
 
     private void tryOpenLongPut(String symbol, double price, double K, LocalDate expiry,
                                 double T, double sigma, String signalStr, String featureCsv,
-                                String putKey, int sellSignals, Map<String, OptionsPosition> opts) {
+                                String putKey, int buySignals, int sellSignals,
+                                Map<String, OptionsPosition> opts) {
         if (sessionStopLossed.contains(putKey)) {
             researchCallback.accept(symbol + " PUT skip: stop-loss cooldown");
             return;
@@ -916,6 +920,8 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         int contracts = Math.min(maxContractsPerTrade, (int) (optionsBudget / (premium * 100)));
         if (contracts < 1) return;
 
+        AuditLog.get().logSignal(symbol, price, buySignals, sellSignals,
+                "DECISION=OPTIONS_BUY_PUT|" + signalStr);
         optExec.buyPut(symbol, K, expiry, contracts, premium, signalStr, featureCsv);
         lastAnyCloseTime.put(symbol, clock.get());
         GreeksResult g = bsEngine.greeks(price, K, RISK_FREE_RATE, T, sigma, false);

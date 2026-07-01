@@ -454,6 +454,8 @@ public class TradingLoop implements Runnable {
                 if (trailingStop.check(symbol, price) && hasPosition) {
                     // Trailing stop always fires regardless of hold time — it's a loss-protection rule.
                     Position pos = account.getPositions().get(symbol);
+                    AuditLog.get().logSignal(symbol, price, buys, sells,
+                            "DECISION=STOCK_SELL_TRAILING_STOP|" + signalStr);
                     brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr,
                             String.format("Trailing stop: %.0f%% drawdown from peak", trailingStop.getTrailingStopPct() * 100));
                     account.removePosition(symbol);
@@ -473,6 +475,8 @@ public class TradingLoop implements Runnable {
                                 + heldMinutes + "/" + minHoldMinutes + "min)");
                     } else {
                         Position pos = account.getPositions().get(symbol);
+                        AuditLog.get().logSignal(symbol, price, buys, sells,
+                                "DECISION=STOCK_SELL_SIGNAL|" + signalStr);
                         brokerClient.submitSell(symbol, pos.getQuantity(), price, signalStr,
                                 "Signals: " + sells + "/" + sellSignals.size() + " SELL");
                         account.removePosition(symbol);
@@ -562,6 +566,8 @@ public class TradingLoop implements Runnable {
                             String entryReason = orbStandaloneEntry && weightedBuys < SIGNAL_THRESHOLD
                                     ? "ORB breakout (standalone)"
                                     : "Signals: " + buys + "/" + signals.size() + " BUY";
+                            AuditLog.get().logSignal(symbol, price, buys, sells,
+                                    "DECISION=STOCK_BUY|" + signalStr);
                             brokerClient.submitBuy(symbol, shares, price, signalStr,
                                     entryReason, featureCsv);
                             entryTimes.put(symbol, now);
@@ -580,7 +586,6 @@ public class TradingLoop implements Runnable {
                                 && s.getDirection() == SignalResult.Direction.BUY));
                 researchCallback.accept(time + " | " + symbol + " $" + String.format("%.2f", price)
                         + " | " + signalStr + " | BUY=" + buys + " SELL=" + sells);
-                AuditLog.get().logSignal(symbol, price, buys, sells, signalStr);
             }
             // Gap 5: liquidate all equity positions at 15:45 to avoid overnight gap risk
             if (avoidOvernightHolds && !time.isBefore(PRE_CLOSE_CUTOFF)) {

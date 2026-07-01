@@ -493,8 +493,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                 shortPrem, longPrem, signalStr, featureCsv, "PUT SPREAD");
         if (opened) {
             AuditLog.get().logEvent("PREMIUM_OPEN",
-                    String.format("strategy=PUT_SPREAD|symbol=%s|shortK=%.0f|longK=%.0f|exp=%s|qty=%d|credit=%.2f",
-                            symbol, shortK, longK, expiry, c, credit * 100 * c));
+                    String.format("strategy=PUT_SPREAD|symbol=%s|shortK=%.0f|longK=%.0f|exp=%s|qty=%d|credit=%.2f|signals=%s",
+                            symbol, shortK, longK, expiry, c, credit * 100 * c,
+                            signalStr != null ? signalStr.replace('|', '/') : ""));
             log.accept(String.format("%s PUT CREDIT SPREAD K=%.0f/%.0f exp=%s x%d credit=$%.0f",
                     symbol, shortK, longK, expiry, c, credit * 100 * c));
         }
@@ -535,8 +536,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                 shortPrem, longPrem, signalStr, featureCsv, "CALL SPREAD");
         if (opened) {
             AuditLog.get().logEvent("PREMIUM_OPEN",
-                    String.format("strategy=CALL_SPREAD|symbol=%s|shortK=%.0f|longK=%.0f|exp=%s|qty=%d|credit=%.2f",
-                            symbol, shortK, longK, expiry, c, credit * 100 * c));
+                    String.format("strategy=CALL_SPREAD|symbol=%s|shortK=%.0f|longK=%.0f|exp=%s|qty=%d|credit=%.2f|signals=%s",
+                            symbol, shortK, longK, expiry, c, credit * 100 * c,
+                            signalStr != null ? signalStr.replace('|', '/') : ""));
             log.accept(String.format("%s CALL CREDIT SPREAD K=%.0f/%.0f exp=%s x%d credit=$%.0f",
                     symbol, shortK, longK, expiry, c, credit * 100 * c));
         }
@@ -586,8 +588,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                 signalStr, featureCsv);
         if (opened) {
             AuditLog.get().logEvent("PREMIUM_OPEN",
-                    String.format("strategy=IRON_CONDOR|symbol=%s|shortPutK=%.0f|longPutK=%.0f|shortCallK=%.0f|longCallK=%.0f|exp=%s|qty=%d|credit=%.2f",
-                            symbol, shortPutK, longPutK, shortCallK, longCallK, expiry, c, credit * 100 * c));
+                    String.format("strategy=IRON_CONDOR|symbol=%s|shortPutK=%.0f|longPutK=%.0f|shortCallK=%.0f|longCallK=%.0f|exp=%s|qty=%d|credit=%.2f|signals=%s",
+                            symbol, shortPutK, longPutK, shortCallK, longCallK, expiry, c, credit * 100 * c,
+                            signalStr != null ? signalStr.replace('|', '/') : ""));
             log.accept(String.format("%s IRON CONDOR puts=%.0f/%.0f calls=%.0f/%.0f exp=%s x%d credit=$%.0f",
                     symbol, shortPutK, longPutK, shortCallK, longCallK, expiry, c, credit * 100 * c));
         }
@@ -614,8 +617,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         optExec.sellPutAs(symbol + CSP_PUT, symbol, K, expiry, c, prem, signalStr, featureCsv);
         if (account.getOptionsPositions().containsKey(symbol + CSP_PUT)) {
             AuditLog.get().logEvent("PREMIUM_OPEN",
-                    String.format("strategy=CSP|symbol=%s|K=%.0f|exp=%s|qty=%d|credit=%.2f",
-                            symbol, K, expiry, c, prem * 100 * c));
+                    String.format("strategy=CSP|symbol=%s|K=%.0f|exp=%s|qty=%d|credit=%.2f|signals=%s",
+                            symbol, K, expiry, c, prem * 100 * c,
+                            signalStr != null ? signalStr.replace('|', '/') : ""));
             log.accept(String.format("%s CSP K=%.0f exp=%s x%d credit=$%.0f",
                     symbol, K, expiry, c, prem * 100 * c));
         }
@@ -642,8 +646,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                 expiry, maxContracts, prem, signalStr, featureCsv);
         if (account.getOptionsPositions().containsKey(symbol + CC_CALL)) {
             AuditLog.get().logEvent("PREMIUM_OPEN",
-                    String.format("strategy=COVERED_CALL|symbol=%s|K=%.0f|exp=%s|prem=%.4f",
-                            symbol, callK, expiry, prem));
+                    String.format("strategy=COVERED_CALL|symbol=%s|K=%.0f|exp=%s|prem=%.4f|signals=%s",
+                            symbol, callK, expiry, prem,
+                            signalStr != null ? signalStr.replace('|', '/') : ""));
             log.accept(String.format("%s COVERED CALL K=%.0f exp=%s prem=$%.2f",
                     symbol, callK, expiry, prem));
         }
