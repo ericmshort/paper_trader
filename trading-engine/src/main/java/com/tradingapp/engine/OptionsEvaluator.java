@@ -43,4 +43,11 @@ public interface OptionsEvaluator {
      * prices rather than values from the previous tick.
      */
     default void markPositionsToMarket(String symbol, double price) {}
+
+    /**
+     * Block or unblock new position entries. Exits continue to run regardless.
+     * Used by TradingLoop during the startup grace period to prevent phantom entries
+     * while broker sync is still stabilizing.
+     */
+    default void setNewEntryBlocked(boolean blocked) {}
 }

@@ -57,6 +57,7 @@ public class Account {
 
     public double getPremiumCashBalance() { return premiumCashBalance; }
     public synchronized void addPremiumCash(double amount) { premiumCashBalance += amount; }
+    public synchronized void resetPremiumCash() { premiumCashBalance = 0.0; }
 
     /**
      * Returns the options cost-basis adjustment for NON-premium positions only.
@@ -71,7 +72,7 @@ public class Account {
                 .sum();
     }
 
-    private static boolean isPremiumKey(String key) {
+    public static boolean isPremiumKey(String key) {
         return key.contains("_PUTSPREAD_") || key.contains("_CALLSPREAD_")
             || key.contains("_IRONCONDOR_") || key.contains("_CSP_")
             || key.endsWith("_CC_CALL");

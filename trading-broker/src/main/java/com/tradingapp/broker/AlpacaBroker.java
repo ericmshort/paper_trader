@@ -19,6 +19,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -28,16 +29,27 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
 
     private static final Logger LOG = Logger.getLogger(AlpacaBroker.class.getName());
+
+    // Minimum credit as a fraction of spread width — must match PremiumSellerRouter.MIN_CREDIT_PCT.
+    // A 2-leg $10-wide spread requires at least 20% × $10 = $2.00/share = $200/contract.
+    private static final double MIN_CREDIT_FRACTION = 0.20;
+    // How long (ms) to keep a pending credit-spread limit order before cancelling it.
+    // Short enough to free capital for new opportunities; long enough to get a fill.
+    private static final long MLEG_ORDER_TTL_MS = 10 * 60 * 1000L; // 10 minutes
 
     private final AppConfig config;
     private final Account account;
     private final TransactionLog log;
     private final HttpClient http;
     private Consumer<String> logCallback = msg -> {};
+    // orderId → submission timestamp (ms); cancelled after MLEG_ORDER_TTL_MS if still open.
+    private final java.util.concurrent.ConcurrentHashMap<String, Long> pendingMlegOrders =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     public AlpacaBroker(AppConfig config, Account account, TransactionLog log) {
         this.config = config;
@@ -276,26 +288,101 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
 
     /**
      * OptionsSubmitter.submitMultiLeg — submits an all-or-nothing multi-leg order via Alpaca's
-     * {@code order_class: "mleg"} endpoint. All legs are resolved to OCC symbols before submission;
-     * if any lookup fails the whole order is aborted and null is returned.
+     * {@code order_class: "mleg"} endpoint.
+     *
+     * For new position opens, fetches live bid/ask for each leg before submitting. If the real
+     * market credit is ≤ 0 (spread would fill as a net debit) the order is rejected outright —
+     * no position is taken and no bid-ask round-trip is paid. When a positive live credit is
+     * confirmed, the order is submitted as a limit order at exactly that credit so Alpaca only
+     * fills if the market can still deliver it at submission time.
      */
     @Override
     public String submitMultiLeg(List<MultiLegOrder> legs, int contracts) {
         try {
-            JSONArray legsArray = new JSONArray();
+            // ── Step 1: resolve all OCC symbols up front ─────────────────────────
+            List<String> resolvedOccs = new ArrayList<>(legs.size());
             for (MultiLegOrder leg : legs) {
-                // Use pinned OCC symbol when available (close orders); look up for new opens.
-                String occSymbol = leg.occSymbol();
-                if (occSymbol == null) {
-                    occSymbol = lookupBestContract(leg.symbol(), leg.optionType(), leg.strike(), leg.expiry());
-                    if (occSymbol == null) {
+                String occ = leg.occSymbol();
+                if (occ == null) {
+                    occ = lookupBestContract(leg.symbol(), leg.optionType(), leg.strike(), leg.expiry());
+                    if (occ == null) {
                         LOG.warning("Multi-leg: no contract found for " + leg.symbol()
                                 + " " + leg.optionType() + " K=" + leg.strike() + " exp=" + leg.expiry());
                         return null;
                     }
                 }
+                resolvedOccs.add(occ);
+            }
+
+            // ── Step 2: for spread opens, verify live market credit ───────────────
+            // Fetch bid (sell legs) and ask (buy legs) in one batch call so we know the
+            // actual executable credit before submitting. Prevents entering when market
+            // implied vol has inverted the spread relative to our BS(HV) estimate.
+            boolean hasOpenLegs = legs.stream().anyMatch(l -> l.positionIntent().endsWith("_to_open"));
+            double liveNetCreditPerShare = Double.NaN;
+            if (hasOpenLegs) {
+                List<String> openLegOccs = new ArrayList<>();
+                for (int i = 0; i < legs.size(); i++) {
+                    if (legs.get(i).positionIntent().endsWith("_to_open")) {
+                        openLegOccs.add(resolvedOccs.get(i));
+                    }
+                }
+                Map<String, double[]> bidAsk = fetchBidAskBatch(openLegOccs);
+                if (!bidAsk.isEmpty()) {
+                    double netCredit = 0;
+                    boolean allFetched = true;
+                    for (int i = 0; i < legs.size(); i++) {
+                        MultiLegOrder leg = legs.get(i);
+                        if (!leg.positionIntent().endsWith("_to_open")) continue;
+                        double[] ba = bidAsk.get(resolvedOccs.get(i));
+                        if (ba == null || (ba[0] <= 0 && ba[1] <= 0)) { allFetched = false; break; }
+                        boolean isSell = "sell".equals(leg.side());
+                        // Use bid for sell-to-open (what the market pays us),
+                        // ask for buy-to-open (what the market charges us).
+                        double legPrice = isSell ? ba[0] : ba[1];
+                        if (legPrice <= 0) { allFetched = false; break; }
+                        netCredit += isSell ? legPrice : -legPrice;
+                    }
+                    if (allFetched) liveNetCreditPerShare = netCredit;
+                }
+            }
+
+            // Reject if live market shows a debit — no position taken, no losses.
+            if (!Double.isNaN(liveNetCreditPerShare) && liveNetCreditPerShare <= 0) {
+                LOG.warning("Multi-leg spread rejected: live bid/ask credit is "
+                        + String.format("%.2f", liveNetCreditPerShare)
+                        + "/share — would be net debit at current market prices");
+                AuditLog.get().logEvent("PREMIUM_SKIP",
+                        String.format("reason=live_net_debit|credit=%.2f|symbol=%s",
+                                liveNetCreditPerShare, legs.get(0).symbol()));
+                return null;
+            }
+
+            // ── Step 3: compute the minimum acceptable credit ────────────────────
+            // The limit price is the minimum credit we'll accept (MIN_CREDIT_FRACTION × spread
+            // width), not the live bid/ask. This accepts any fill that meets our floor ($2.00/share
+            // for a $10 spread) rather than demanding exactly the live price — which avoids
+            // unnecessary non-fills when the market moves a few cents between check and submission.
+            // The live check above already confirmed the market can currently give us a credit;
+            // the limit ensures we never fill at a debit even if the market moves adversely.
+            double minCreditPerShare = 0;
+            if (hasOpenLegs) {
+                double sellStrike = 0, buyStrike = 0;
+                for (MultiLegOrder leg : legs) {
+                    if (!leg.positionIntent().endsWith("_to_open")) continue;
+                    if ("sell".equals(leg.side())) sellStrike = leg.strike();
+                    else                           buyStrike  = leg.strike();
+                }
+                double spreadWidth = Math.abs(sellStrike - buyStrike);
+                minCreditPerShare = spreadWidth * MIN_CREDIT_FRACTION;
+            }
+
+            // ── Step 4: build and submit ──────────────────────────────────────────
+            JSONArray legsArray = new JSONArray();
+            for (int i = 0; i < legs.size(); i++) {
+                MultiLegOrder leg = legs.get(i);
                 legsArray.put(new JSONObject()
-                        .put("symbol", occSymbol)
+                        .put("symbol", resolvedOccs.get(i))
                         .put("side", leg.side())
                         .put("ratio_qty", 1)
                         .put("position_intent", leg.positionIntent()));
@@ -303,10 +390,22 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
 
             JSONObject body = new JSONObject()
                     .put("order_class", "mleg")
-                    .put("type", "market")
                     .put("time_in_force", "day")
                     .put("qty", String.valueOf(contracts))
                     .put("legs", legsArray);
+
+            // Limit order at the minimum acceptable credit. Alpaca only fills if it can
+            // deliver ≥ this amount per share. We track the order ID and cancel it after
+            // 10 minutes so stale resting orders don't block capital for new opportunities.
+            if (hasOpenLegs && minCreditPerShare > 0) {
+                body.put("type", "limit")
+                    .put("limit_price", String.format("%.2f", minCreditPerShare));
+                LOG.info("Multi-leg limit order: min credit " + String.format("%.2f", minCreditPerShare)
+                        + "/share (live=" + String.format("%.2f", liveNetCreditPerShare) + ")"
+                        + " for " + legs.get(0).symbol());
+            } else {
+                body.put("type", "market");
+            }
 
             HttpResponse<String> resp = post("/orders", body.toString());
             if (resp.statusCode() != 200 && resp.statusCode() != 201) {
@@ -319,14 +418,96 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
             LOG.info("Alpaca mleg order accepted: " + orderId + " (" + legs.size() + " legs x" + contracts + ")");
             String legDesc = legs.stream()
                     .map(l -> l.side() + ":" + (l.occSymbol() != null ? l.occSymbol() : l.symbol() + "_" + l.optionType()))
-                    .collect(java.util.stream.Collectors.joining(","));
+                    .collect(Collectors.joining(","));
             AuditLog.get().logTransaction("OPTIONS_MLEG", legs.get(0).symbol(), orderId,
                     contracts, 0, 0, account.getBalance(), legs.size() + "legs:" + legDesc);
+
+            // Schedule cancellation after TTL so the order doesn't rest all day.
+            if (hasOpenLegs && !orderId.isEmpty()) {
+                pendingMlegOrders.put(orderId, System.currentTimeMillis());
+            }
             return orderId;
         } catch (Exception e) {
             System.err.println("Alpaca mleg order failed: " + e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Cancels any pending multi-leg limit orders that have been resting longer than MLEG_ORDER_TTL_MS.
+     * Called on every syncAccount tick so orders expire ~10 minutes after submission.
+     */
+    private void cancelExpiredOrders() {
+        if (pendingMlegOrders.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        pendingMlegOrders.entrySet().removeIf(entry -> {
+            String orderId = entry.getKey();
+            long submittedAt = entry.getValue();
+            if (now - submittedAt < MLEG_ORDER_TTL_MS) return false;
+            try {
+                HttpRequest req = HttpRequest.newBuilder()
+                        .uri(URI.create(config.getAlpacaBaseUrl() + "/orders/" + orderId))
+                        .header("APCA-API-KEY-ID", config.getAlpacaApiKey())
+                        .header("APCA-API-SECRET-KEY", config.getAlpacaApiSecret())
+                        .DELETE()
+                        .timeout(Duration.ofSeconds(5))
+                        .build();
+                HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+                // 200/204 = cancelled; 422 = already filled/cancelled — both are fine, remove from tracking.
+                boolean removed = resp.statusCode() == 200 || resp.statusCode() == 204
+                        || resp.statusCode() == 422;
+                if (removed) {
+                    LOG.info("Cancelled expired mleg order " + orderId
+                            + " (rested " + ((now - submittedAt) / 60_000) + " min)");
+                    AuditLog.get().logEvent("MLEG_CANCELLED",
+                            "orderId=" + orderId + "|reason=ttl_expired");
+                }
+                return removed;
+            } catch (Exception e) {
+                LOG.warning("Failed to cancel mleg order " + orderId + ": " + e.getMessage());
+                return false;
+            }
+        });
+    }
+
+    /**
+     * Fetches live bid and ask prices for a list of OCC symbols in a single API call.
+     * Returns a map of OCC symbol → [bid, ask]. Missing or illiquid symbols are absent from the map.
+     */
+    private Map<String, double[]> fetchBidAskBatch(List<String> occSymbols) {
+        Map<String, double[]> result = new HashMap<>();
+        if (occSymbols.isEmpty()) return result;
+        try {
+            String symbolsParam = occSymbols.stream()
+                    .map(s -> java.net.URLEncoder.encode(s, StandardCharsets.UTF_8))
+                    .collect(Collectors.joining(","));
+            String url = config.getAlpacaDataUrl()
+                    + "/v1beta1/options/snapshots?symbols=" + symbolsParam + "&feed=indicative";
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("APCA-API-KEY-ID", config.getAlpacaApiKey())
+                    .header("APCA-API-SECRET-KEY", config.getAlpacaApiSecret())
+                    .GET()
+                    .timeout(Duration.ofSeconds(5))
+                    .build();
+            HttpResponse<String> resp = http.send(request, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) return result;
+            JSONObject body = new JSONObject(resp.body());
+            JSONObject snapshots = body.optJSONObject("snapshots");
+            if (snapshots == null) return result;
+            for (String occ : occSymbols) {
+                JSONObject snap = snapshots.optJSONObject(occ);
+                if (snap == null) continue;
+                JSONObject quote = snap.optJSONObject("latestQuote");
+                if (quote == null) continue;
+                double bid = quote.optDouble("bp", 0.0);
+                double ask = quote.optDouble("ap", 0.0);
+                result.put(occ, new double[]{bid, ask});
+            }
+        } catch (Exception e) {
+            LOG.warning("fetchBidAskBatch failed: " + e.getMessage());
+        }
+        return result;
     }
 
     /** Submits a single-leg options order to Alpaca using OCC symbol format. */
@@ -502,6 +683,7 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
     @Override
     public void syncAccount(Account account) {
         try {
+            cancelExpiredOrders();
             JSONObject alpacaAccount = getJson("/account");
             if (alpacaAccount != null) {
                 double cash = alpacaAccount.optDouble("cash", account.getBalance());

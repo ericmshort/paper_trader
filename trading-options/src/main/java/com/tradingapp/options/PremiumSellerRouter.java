@@ -90,6 +90,11 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     // Exits for any open position still run regardless.
     private java.util.Set<String> allowlist = new java.util.HashSet<>();
 
+    // When true, all new entries are blocked (exits still run). Set by TradingLoop during the
+    // startup grace period while broker sync stabilizes — prevents phantom spreads from opening
+    // into a still-empty position book before Alpaca returns real positions.
+    private volatile boolean newEntryBlocked = false;
+
     public PremiumSellerRouter(BlackScholesEngine bsEngine, OptionsOrderExecutor optExec,
                                Account account, PriceHistory priceHistory,
                                Consumer<String> log) {
@@ -115,6 +120,8 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     public void setAllowlist(java.util.Set<String> symbols) {
         this.allowlist = new java.util.HashSet<>(symbols);
     }
+
+    public void setNewEntryBlocked(boolean v) { this.newEntryBlocked = v; }
 
     /** Load persisted exit dates from <dataDir>/premium-exit-dates.properties, discarding any not from today. */
     public void restoreExitDates(String dataDir) {
@@ -210,6 +217,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
         // Skip new entries while daily loss limit is active
         if (account.isDailyLossHalted()) return;
+
+        // Skip new entries during startup grace period (exits above still run).
+        if (newEntryBlocked) return;
 
         // Skip new entries for symbols not in the allowlist (exits above still run).
         if (!allowlist.isEmpty() && !allowlist.contains(symbol)) return;
@@ -380,9 +390,12 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         boolean putStop  = price < spPos.getStrike();
         boolean target   = credit > 0 && pnl >= credit * PROFIT_TARGET;
         boolean expiring = dte < CLOSE_DTE;
-        if (!callStop && !putStop && !target && !expiring) return;
+        // If verified fills produced a net debit, this condor can never profit — exit immediately.
+        boolean netDebit = credit <= 0;
+        if (!callStop && !putStop && !target && !expiring && !netDebit) return;
 
-        String reason = callStop  ? pricestop(price, scPos.getStrike(), true)
+        String reason = netDebit  ? String.format("Net debit on fill ($%.0f) — exit immediately", credit)
+                      : callStop  ? pricestop(price, scPos.getStrike(), true)
                       : putStop   ? pricestop(price, spPos.getStrike(), false)
                       : expiring  ? "DTE < " + CLOSE_DTE
                       : profitMsg(pnl);
@@ -684,11 +697,15 @@ public class PremiumSellerRouter implements OptionsEvaluator {
      * Returns an exit reason string when an exit condition is triggered, or null to hold.
      * isCall=true means check if price rose above the short strike (call stop).
      * isCall=false means check if price fell below the short strike (put stop).
+     *
+     * A non-positive credit means actual Alpaca fills produced a net debit — the spread
+     * can never be profitable. Exit immediately rather than waiting for a price stop.
      */
     private String exitReason(double price, double shortStrike, boolean isCall,
                               double credit, double pnl, long dte) {
+        if (credit <= 0) return String.format("Net debit on fill ($%.0f) — exit immediately", credit);
         boolean stopHit  = isCall ? price > shortStrike : price < shortStrike;
-        boolean target   = credit > 0 && pnl >= credit * PROFIT_TARGET;
+        boolean target   = pnl >= credit * PROFIT_TARGET;
         boolean expiring = dte < CLOSE_DTE;
         if (!stopHit && !target && !expiring) return null;
         if (expiring) return "DTE < " + CLOSE_DTE;

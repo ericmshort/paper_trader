@@ -280,6 +280,9 @@ public class OptionsOrderExecutor {
 
         // Negative contracts marks this as a short position; closePosition math stays correct.
         OptionsPosition pos = new OptionsPosition(symbol, optionType, strike, expiry, -contracts, fillPremium);
+        // Paper trading has no async fill to wait for — mark verified immediately so exit
+        // checks aren't suppressed. In live trading, AlpacaBroker.syncAccount() sets this.
+        if (submitter == null) pos.setPurchaseVerified(true);
         account.addOptionsPosition(posKey, pos);
 
         TransactionRecord rec = ts(new TransactionRecord(symbol, action, contracts, fillPremium, fee,
@@ -322,6 +325,7 @@ public class OptionsOrderExecutor {
         if (PremiumSellerRouter.isPremiumKey(posKey)) account.addPremiumCash(-totalCost);
 
         OptionsPosition pos = new OptionsPosition(symbol, optionType, strike, expiry, contracts, fillPremium);
+        if (submitter == null) pos.setPurchaseVerified(true);
         account.addOptionsPosition(posKey, pos);
 
         TransactionRecord rec = ts(new TransactionRecord(symbol, action, contracts, fillPremium, fee,

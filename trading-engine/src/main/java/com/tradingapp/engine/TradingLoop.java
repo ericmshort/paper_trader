@@ -64,6 +64,8 @@ public class TradingLoop implements Runnable {
     private final Supplier<ZonedDateTime> clock;
     private final OptionsEvaluator optionsEvaluator;
     private OptionsEvaluator premiumSellerEvaluator = null;
+    private int startupGraceTicks = 0;
+    private static final int STARTUP_GRACE_TICKS = 2;
     private final SignalWeightEvaluator weightEvaluator;
     private final Runnable afterMarketCallback;
     private LocalDate lastTrainingDate;
@@ -256,6 +258,17 @@ public class TradingLoop implements Runnable {
             }
             if (!today.equals(lastDayTrackingDate)) {
                 lastDayTrackingDate = today;
+                // Re-seed premiumCashBalance from positions carried over from prior sessions.
+                // On day-start and restarts, balance already reflects premiums collected previously,
+                // but premiumCashBalance resets to 0 on each JVM start. Without re-seeding,
+                // (balance - premiumCash) is too high, so even a flat day looks like a gain.
+                account.resetPremiumCash();
+                for (Map.Entry<String, OptionsPosition> pe : account.getOptionsPositions().entrySet()) {
+                    if (Account.isPremiumKey(pe.getKey())) {
+                        account.addPremiumCash(-pe.getValue().getPremiumPaid()
+                                * pe.getValue().getContracts() * 100);
+                    }
+                }
                 // Credit spreads (premium seller positions) are exempt from the daily loss limit.
                 // Their cash flows are tracked in premiumCashBalance so that
                 // (balance - premiumCash) + nonPremiumOptAdj strips them out entirely.
@@ -272,6 +285,19 @@ public class TradingLoop implements Runnable {
                 prevOrbBuy.clear();
                 prevVwapSide.clear();
                 circuitBreakerFired = false;
+                // Block new premium entries until broker sync has stabilized. The first sync
+                // at market open often returns 0 positions while Alpaca's API warms up, causing
+                // PremiumSellerRouter to open phantom spreads into an empty book.
+                startupGraceTicks = 0;
+                if (premiumSellerEvaluator != null) premiumSellerEvaluator.setNewEntryBlocked(true);
+            }
+            // Increment the grace counter on each successful sync tick; unblock entries after
+            // STARTUP_GRACE_TICKS ticks so real positions have time to propagate from Alpaca.
+            if (startupGraceTicks < STARTUP_GRACE_TICKS) {
+                startupGraceTicks++;
+                if (startupGraceTicks >= STARTUP_GRACE_TICKS && premiumSellerEvaluator != null) {
+                    premiumSellerEvaluator.setNewEntryBlocked(false);
+                }
             }
             List<QuoteModel> quotes = dataClient.getQuotes(watchList);
 
