@@ -103,7 +103,6 @@ public class DashboardController implements Initializable {
     @FXML private TableColumn<PremiumSellerRow, String> prmColExpiry;
     @FXML private TableColumn<PremiumSellerRow, String> prmColDte;
     @FXML private TableColumn<PremiumSellerRow, String> prmColPremium;
-    @FXML private TableColumn<PremiumSellerRow, String> prmColMax;
     @FXML private TableColumn<PremiumSellerRow, String> prmColMaxLoss;
     @FXML private TableColumn<PremiumSellerRow, String> prmColPnl;
     @FXML private TableColumn<PremiumSellerRow, String> prmColPct;
@@ -616,7 +615,6 @@ public class DashboardController implements Initializable {
                 setTextFill(row.getMaxProfitRaw() >= 0 ? Color.GREEN : Color.RED);
             }
         });
-        prmColMax.setCellValueFactory(new PropertyValueFactory<>("maxProfit"));
         prmColMaxLoss.setCellValueFactory(new PropertyValueFactory<>("maxLoss"));
         prmColPnl.setCellValueFactory(new PropertyValueFactory<>("currentPnl"));
         prmColPct.setCellValueFactory(new PropertyValueFactory<>("pctCaptured"));

@@ -198,7 +198,6 @@
                             <TableColumn fx:id="prmColExpiry"       text="Expiry"   prefWidth="110"/>
                             <TableColumn fx:id="prmColDte"          text="DTE"      prefWidth="55"/>
                             <TableColumn fx:id="prmColPremium"      text="Premium Collected" prefWidth="125"/>
-                            <TableColumn fx:id="prmColMax"          text="Max Profit"        prefWidth="100"/>
                             <TableColumn fx:id="prmColMaxLoss"      text="Max Loss"          prefWidth="100"/>
                             <TableColumn fx:id="prmColPnl"          text="P&amp;L"           prefWidth="100"/>
                             <TableColumn fx:id="prmColPct"          text="Captured Pct"      prefWidth="110"/>
