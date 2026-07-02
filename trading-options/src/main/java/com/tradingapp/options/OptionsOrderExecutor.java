@@ -771,14 +771,10 @@ public class OptionsOrderExecutor {
 
     private void tagLastNRecords(String groupId, int n) {
         try {
-            List<TransactionRecord> recent = transactionLog.findAll();
-            int tagged = 0;
+            List<TransactionRecord> recent = transactionLog.findLastUntagged(n);
             for (TransactionRecord r : recent) {
-                if (r.getGroupId() == null) {
-                    r.setGroupId(groupId);
-                    transactionLog.updateGroupId(r.getId(), groupId);
-                    if (++tagged == n) break;
-                }
+                r.setGroupId(groupId);
+                transactionLog.updateGroupId(r.getId(), groupId);
             }
         } catch (Exception e) {
             LOG.warning("Failed to tag multi-leg records with groupId: " + e.getMessage());

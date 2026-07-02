@@ -119,19 +119,15 @@ public class ImprovementsBacktestRunner {
         VixCache vixCache = new VixCache();
         vixCache.load(startDate, endDate);
 
-        IntradayBacktestEngine engine = new IntradayBacktestEngine(
-                new IndicatorEngine(), new FeeCalculator()).setCollectEventLog(true);
-
         System.out.println("Running A: Baseline (production settings)...");
         long t0 = System.currentTimeMillis();
-        VariantResult baseline = runVariant(engine, watchlist, barsBySymbol, vixCache, cfg,
-                optAllowlist, false);
+        VariantResult baseline = runVariant(watchlist, barsBySymbol, vixCache, cfg, optAllowlist, false);
         System.out.printf("  done in %ds%n", (System.currentTimeMillis() - t0) / 1000);
 
+        // Fresh engine so variant A's event log is GC'd before variant B allocates
         System.out.println("Running B: Improved (all filters active)...");
         t0 = System.currentTimeMillis();
-        VariantResult improved = runVariant(engine, watchlist, barsBySymbol, vixCache, cfg,
-                optAllowlist, true);
+        VariantResult improved = runVariant(watchlist, barsBySymbol, vixCache, cfg, optAllowlist, true);
         System.out.printf("  done in %ds%n%n", (System.currentTimeMillis() - t0) / 1000);
 
         // ── Comparison table ──────────────────────────────────────────────────
@@ -162,13 +158,15 @@ public class ImprovementsBacktestRunner {
     // ── Simulation ────────────────────────────────────────────────────────────
 
     private static VariantResult runVariant(
-            IntradayBacktestEngine engine,
             List<String> watchlist,
             Map<String, List<IntradayBar>> barsBySymbol,
             VixCache vixCache,
             AppConfig cfg,
             Set<String> optAllowlist,
             boolean applyImprovements) throws Exception {
+
+        IntradayBacktestEngine engine = new IntradayBacktestEngine(
+                new IndicatorEngine(), new FeeCalculator());
 
         double maxExposure  = cfg.getMaxPortfolioExposurePct() / 100.0;
         double lossLimitPct = cfg.getDailyLossLimitPct();

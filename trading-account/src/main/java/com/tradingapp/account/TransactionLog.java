@@ -169,6 +169,38 @@ public class TransactionLog {
         }
     }
 
+    /** Returns the most-recent n records that have no groupId assigned, newest first. */
+    public List<TransactionRecord> findLastUntagged(int n) {
+        String sql = "SELECT * FROM transactions WHERE group_id IS NULL ORDER BY timestamp DESC, id DESC LIMIT ?";
+        List<TransactionRecord> records = new ArrayList<>();
+        try (Connection conn = connect();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, n);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    TransactionRecord r = new TransactionRecord();
+                    r.setId(rs.getLong("id"));
+                    r.setTimestamp(rs.getLong("timestamp"));
+                    r.setSymbol(rs.getString("symbol"));
+                    r.setAction(TransactionRecord.TransactionAction.valueOf(rs.getString("action")));
+                    r.setQuantity(rs.getInt("quantity"));
+                    r.setPricePerUnit(rs.getDouble("price_per_unit"));
+                    r.setFeeCharged(rs.getDouble("fee_charged"));
+                    r.setBalanceAfter(rs.getDouble("balance_after"));
+                    r.setReason(rs.getString("reason"));
+                    r.setSignals(rs.getString("signals"));
+                    r.setFeatures(rs.getString("features"));
+                    r.setExternalId(rs.getString("external_id"));
+                    r.setGroupId(rs.getString("group_id"));
+                    records.add(r);
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to query last untagged records", e);
+        }
+        return records;
+    }
+
     public List<TransactionRecord> findAll() {
         String sql = "SELECT * FROM transactions ORDER BY timestamp DESC";
         List<TransactionRecord> records = new ArrayList<>();
