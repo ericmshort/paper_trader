@@ -1041,13 +1041,6 @@ public class DashboardController implements Initializable {
         List<PremiumSellerRow> premiumRows = buildPremiumRows();
         double premiumTotalPnl = premiumRows.stream().mapToDouble(PremiumSellerRow::getPnlRaw).sum();
 
-        closedTrades = reconcileClosedTrades(closedTrades, brokerPv, optTotalUnrealized, stkTotalUnrealized, premiumTotalPnl);
-        realizedPnl  = closedTrades.stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
-        wins         = (int) closedTrades.stream().filter(t -> t.getPnlRaw() >= 0).count();
-        losses       = (int) closedTrades.stream().filter(t -> t.getPnlRaw() <  0).count();
-        int adjTotal = wins + losses;
-        winRate      = adjTotal > 0 ? (wins * 100.0 / adjTotal) : 0.0;
-
         return new UiSnapshot(history, availableCash, stockHoldings, optionHoldings, totalPortfolio,
                 optionsCashDeployed, optionRows, optTotalUnrealized, stockRows, stkTotalUnrealized,
                 totalUnrealizedPnl, wins, losses, winRate, realizedPnl, account.isTradingHalted(),
