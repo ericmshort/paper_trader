@@ -71,6 +71,7 @@ public class SettingsController implements Initializable {
     @FXML private PasswordField claudeApiKeyField;
     @FXML private TextField trailingStopField;
     @FXML private TextField maxLossPerTradeField;
+    @FXML private CheckBox  circuitBreakerEnabledCheck;
     @FXML private TextField circuitBreakerField;
     @FXML private TextArea  stockWatchlistArea;
     @FXML private TextArea  optionsWatchlistArea;
@@ -164,6 +165,10 @@ public class SettingsController implements Initializable {
         putsDisabledField.setText(String.join(",", cfg.getOptionsPutsDisabled()));
         trailingStopField.setText(String.format("%.0f", cfg.getTrailingStopPct() * 100));
         maxLossPerTradeField.setText(String.format("%.2f", cfg.getMaxLossPerTradePct() * 100));
+        circuitBreakerEnabledCheck.setSelected(cfg.isCircuitBreakerEnabled());
+        circuitBreakerField.setDisable(!cfg.isCircuitBreakerEnabled());
+        circuitBreakerEnabledCheck.setOnAction(e ->
+                circuitBreakerField.setDisable(!circuitBreakerEnabledCheck.isSelected()));
         circuitBreakerField.setText(String.format("%.1f", cfg.getCircuitBreakerPct() * 100));
         stockWatchlistArea.setText(String.join(", ", cfg.getStockWatchlist()));
         optionsWatchlistArea.setText(String.join(", ", cfg.getOptionsWatchlist()));
@@ -460,9 +465,10 @@ public class SettingsController implements Initializable {
             double pct = Double.parseDouble(maxLossPerTradeField.getText().strip());
             cfg.setMaxLossPerTradePct(Math.min(1.0, Math.max(0.1, pct)) / 100.0);
         } catch (NumberFormatException ignored) {}
+        cfg.setCircuitBreakerEnabled(circuitBreakerEnabledCheck.isSelected());
         try {
             double pct = Double.parseDouble(circuitBreakerField.getText().strip());
-            cfg.setCircuitBreakerPct(Math.min(10, Math.max(0, pct)) / 100.0);
+            cfg.setCircuitBreakerPct(Math.min(10, Math.max(0.1, pct)) / 100.0);
         } catch (NumberFormatException ignored) {}
         cfg.setStockWatchlist(new java.util.ArrayList<>(parseSymbolSet(stockWatchlistArea.getText())));
         Set<String> optWatchlist = parseSymbolSet(optionsWatchlistArea.getText());

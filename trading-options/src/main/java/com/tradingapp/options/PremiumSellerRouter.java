@@ -298,16 +298,21 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         // ── 2. New entries (once per day per symbol per strategy) ─────────────
         boolean inUptrend = uptrendSupplier == null || uptrendSupplier.getAsBoolean();
 
-        // Extract MACD value and sell-signal presence from raw signals for entry filters.
+        // Extract MACD value, sell-signal presence, and RSI overbought from raw signals.
         double macdValue = Double.NaN;
         boolean hasSellSignal = false;
+        boolean rsiOverbought = false;
         for (SignalResult sr : rawSignals) {
             if ("MACD".equals(sr.getIndicatorName())) macdValue = sr.getValue();
             if (sr.getDirection() == SignalResult.Direction.SELL) hasSellSignal = true;
+            if ("RSI".equals(sr.getIndicatorName()) && sr.getDirection() == SignalResult.Direction.SELL)
+                rsiOverbought = true;
         }
 
-        // Put Credit Spread / CSP: bullish or neutral — require uptrend (SPY above regime MA)
-        if (buys >= sells && sells < 2 && inUptrend) {
+        // Put Credit Spread / CSP: bullish or neutral — require uptrend (SPY above regime MA).
+        // RSI overbought (>70) blocks bullish put entries: an overextended stock is prone to a
+        // sharp reversal that can blow through the short put strike.
+        if (buys >= sells && sells < 2 && inUptrend && !rsiOverbought) {
             // Optional MACD momentum filter: skip PCS when MACD is negative (downward momentum).
             boolean macdOk = !pcsRequireNonNegativeMacd || Double.isNaN(macdValue) || macdValue >= 0;
             if (macdOk) {

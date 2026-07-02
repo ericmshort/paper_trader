@@ -98,6 +98,7 @@ public class AppConfig {
     private double trailingStopPct = 0.02;
     private double maxLossPerTradePct = 0.005;
     private double circuitBreakerPct = 0.02;
+    private boolean circuitBreakerEnabled = true;
     // IV surge guard: block options entry when recent vol > N× long-term vol (default 1.5×).
     private double ivSurgeThreshold = 1.5;
     private List<String> stockWatchlist = new ArrayList<>(Arrays.asList(
@@ -270,6 +271,8 @@ public class AppConfig {
                 config.circuitBreakerPct = Double.parseDouble(
                         props.getProperty("risk.circuit_breaker_pct", "0.02"));
             } catch (NumberFormatException ignored) {}
+            config.circuitBreakerEnabled = Boolean.parseBoolean(
+                    props.getProperty("risk.circuit_breaker_enabled", "true"));
             try {
                 config.ivSurgeThreshold = Double.parseDouble(
                         props.getProperty("options.iv_surge_threshold", "1.5"));
@@ -334,6 +337,7 @@ public class AppConfig {
             props.setProperty("risk.trailing_stop_pct", String.valueOf(trailingStopPct));
             props.setProperty("risk.max_loss_per_trade_pct", String.valueOf(maxLossPerTradePct));
             props.setProperty("risk.circuit_breaker_pct", String.valueOf(circuitBreakerPct));
+            props.setProperty("risk.circuit_breaker_enabled", String.valueOf(circuitBreakerEnabled));
             props.setProperty("options.iv_surge_threshold", String.valueOf(ivSurgeThreshold));
             props.setProperty("stock.watchlist", String.join(",", stockWatchlist));
             props.setProperty("options.watchlist", String.join(",", optionsWatchlist));
@@ -478,6 +482,8 @@ public class AppConfig {
 
     public double getCircuitBreakerPct() { return circuitBreakerPct; }
     public void setCircuitBreakerPct(double pct) { this.circuitBreakerPct = pct; }
+    public boolean isCircuitBreakerEnabled() { return circuitBreakerEnabled; }
+    public void setCircuitBreakerEnabled(boolean v) { this.circuitBreakerEnabled = v; }
 
     public List<String> getStockWatchlist() { return stockWatchlist; }
     public void setStockWatchlist(List<String> symbols) { this.stockWatchlist = new ArrayList<>(symbols); }

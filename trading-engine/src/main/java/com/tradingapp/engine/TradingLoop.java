@@ -295,7 +295,8 @@ public class TradingLoop implements Runnable {
             // STARTUP_GRACE_TICKS ticks so real positions have time to propagate from Alpaca.
             if (startupGraceTicks < STARTUP_GRACE_TICKS) {
                 startupGraceTicks++;
-                if (startupGraceTicks >= STARTUP_GRACE_TICKS && premiumSellerEvaluator != null) {
+                if (startupGraceTicks >= STARTUP_GRACE_TICKS && premiumSellerEvaluator != null
+                        && !account.isDailyLossHalted()) {
                     premiumSellerEvaluator.setNewEntryBlocked(false);
                 }
             }

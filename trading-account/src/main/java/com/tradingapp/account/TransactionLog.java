@@ -316,7 +316,7 @@ public class TransactionLog {
         }
 
         for (Map.Entry<String, OptionsPosition> e : openOptions.entrySet()) {
-            account.addOptionsPosition(e.getKey(), e.getValue());
+            account.restoreOptionsPosition(e.getKey(), e.getValue());
         }
 
         account.addRealizedPnL(realizedPnL);

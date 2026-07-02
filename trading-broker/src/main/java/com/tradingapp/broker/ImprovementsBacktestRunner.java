@@ -201,18 +201,23 @@ public class ImprovementsBacktestRunner {
         OptionsOrderExecutor premExec = new OptionsOrderExecutor(new Account(), null);
         PremiumSellerRouter premRouter = new PremiumSellerRouter(
                 bsPrem, premExec, new Account(), new PriceHistory(), premLog::add);
-        premRouter.setEnabledStrategies(Set.of(
-                PremiumSellerRouter.STRATEGY_PUT_CREDIT_SPREAD,
-                PremiumSellerRouter.STRATEGY_CALL_CREDIT_SPREAD));
+        // Baseline always enables both PCS+CCS; improved uses config (allows disabling CCS via app.properties)
+        if (applyImprovements && !cfg.getPremiumEnabledStrategies().isEmpty()) {
+            premRouter.setEnabledStrategies(cfg.getPremiumEnabledStrategies());
+        } else {
+            premRouter.setEnabledStrategies(Set.of(
+                    PremiumSellerRouter.STRATEGY_PUT_CREDIT_SPREAD,
+                    PremiumSellerRouter.STRATEGY_CALL_CREDIT_SPREAD));
+        }
         premRouter.setMaxPortfolioExposure(cfg.getMaxPortfolioExposurePct() / 100.0);
 
         if (applyImprovements) {
-            premRouter.setMinEntryTime(9, 45);          // no entries in first 15 min
-            premRouter.setMaxConcurrentSpreads(6);      // cap simultaneous positions
-            premRouter.setSectorConcentrationLimit(2);  // max 2 per sector
-            premRouter.setPcsRequireNonNegativeMacd(true);  // PCS only with bullish MACD
-            premRouter.setCcsRequireSellSignal(true);   // CCS only with directional signal
-            premRouter.setUseShortExpiry(true);         // nearest monthly expiry
+            premRouter.setMinEntryTime(9, 45);
+            premRouter.setMaxConcurrentSpreads(6);
+            premRouter.setSectorConcentrationLimit(2);
+            premRouter.setPcsRequireNonNegativeMacd(true);
+            premRouter.setCcsRequireSellSignal(true);
+            premRouter.setUseShortExpiry(true);
         }
 
         OptionsEvaluator optEval = new CompositeEvaluator(intradayRouter, premRouter);

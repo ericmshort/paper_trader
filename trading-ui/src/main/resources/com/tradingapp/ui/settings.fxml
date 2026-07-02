@@ -145,10 +145,12 @@
 
     <HBox spacing="12" alignment="CENTER_LEFT">
         <Label text="Circuit Breaker:" style="-fx-text-fill: #e0e0e0;" prefWidth="140"/>
+        <CheckBox fx:id="circuitBreakerEnabledCheck" text="Enable"
+                  style="-fx-text-fill: #e0e0e0;"/>
         <TextField fx:id="circuitBreakerField" prefWidth="60"
                    style="-fx-control-inner-background: #16213e; -fx-text-fill: #e0e0e0;"
                    promptText="2.0"/>
-        <Label text="\% daily loss — auto-liquidate all stocks + halt trading (0 = disabled)"
+        <Label text="\% daily loss — auto-liquidate all stocks + halt trading"
                style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
     </HBox>
 

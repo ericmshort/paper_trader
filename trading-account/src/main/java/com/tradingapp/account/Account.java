@@ -154,6 +154,14 @@ public class Account {
         optionAddTimestamps.put(key, System.currentTimeMillis());
     }
 
+    /** Restores a position from persistent state without marking it as recently added.
+     *  Unlike addOptionsPosition, this does NOT update optionAddTimestamps, so BrokerSync
+     *  can evict it immediately if Alpaca doesn't recognise it (e.g. stale ghost positions
+     *  from a previous paper-account session). */
+    public synchronized void restoreOptionsPosition(String key, OptionsPosition pos) {
+        optionsPositions.put(key, pos);
+    }
+
     public void removeOptionsPosition(String key) {
         optionsPositions.remove(key);
         // Preserve the timestamp so isOptionRecentlyAdded still returns true during the 90s

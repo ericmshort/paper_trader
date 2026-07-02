@@ -208,7 +208,8 @@ public class DashboardController implements Initializable {
                     tradingLoop.setEarningsBlackoutDays(cfg.getEarningsBlackoutDays());
                     tradingLoop.setTrailingStopPct(cfg.getTrailingStopPct());
                     tradingLoop.setMaxLossPerTradePct(cfg.getMaxLossPerTradePct());
-                    tradingLoop.setCircuitBreakerPct(cfg.getCircuitBreakerPct());
+                    tradingLoop.setCircuitBreakerPct(
+                            cfg.isCircuitBreakerEnabled() ? cfg.getCircuitBreakerPct() : 0.0);
                 }
                 if (optionsRouter != null) {
                     optionsRouter.setMaxPortfolioExposure(cfg.getMaxPortfolioExposurePct() / 100.0);
@@ -427,7 +428,8 @@ public class DashboardController implements Initializable {
         tradingLoop.setStockTradingEnabled(appConfig.isStockTradingEnabled());
         tradingLoop.setTrailingStopPct(appConfig.getTrailingStopPct());
         tradingLoop.setMaxLossPerTradePct(appConfig.getMaxLossPerTradePct());
-        tradingLoop.setCircuitBreakerPct(appConfig.getCircuitBreakerPct());
+        tradingLoop.setCircuitBreakerPct(
+                appConfig.isCircuitBreakerEnabled() ? appConfig.getCircuitBreakerPct() : 0.0);
         tradingLoop.setMaxConcurrentStockPositions(8);
         tradingLoop.setRegimeMaDays(5);
         if (!appConfig.getOptionsSymbolAllowlist().isEmpty()) {

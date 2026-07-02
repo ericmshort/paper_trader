@@ -373,9 +373,14 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                 // its brokerOccSymbol is unknown and cannot be added to the skip set.
                 // Defer the halt close this tick so the broker can confirm the position and
                 // provide its OCC symbol before we build the skip set.
+                // Only block for positions added in THIS session (recently added) — ghosts
+                // restored from transactions.db that Alpaca never confirmed will never become
+                // verified, and blocking on them causes a permanent HALT_CLOSE_DEFERRED loop.
+                // Positions not recently added will be evicted by BrokerSync on the next tick.
                 boolean anyPremiumUnverified = account.getOptionsPositions().entrySet().stream()
                         .filter(e -> PremiumSellerRouter.isPremiumKey(e.getKey()))
-                        .anyMatch(e -> !e.getValue().isPurchaseVerified());
+                        .anyMatch(e -> !e.getValue().isPurchaseVerified()
+                                    && account.isOptionRecentlyAdded(e.getKey()));
                 if (anyPremiumUnverified) {
                     AuditLog.get().logEvent("HALT_CLOSE_DEFERRED", "reason=premium_unverified|symbol=" + symbol);
                     researchCallback.accept(symbol + " HALT close deferred: waiting for Alpaca to confirm new premium position(s)");
