@@ -1433,6 +1433,16 @@ public class DashboardController implements Initializable {
         int plusDollar = reason.indexOf(": +$");
         if (plusDollar >= 0) return parseReasonDouble(reason, plusDollar + 4);
 
+        // "Net debit on fill ($-50) — exit immediately" → -50.0
+        int netDebitIdx = reason.indexOf("($-");
+        if (netDebitIdx >= 0) {
+            int end = reason.indexOf(")", netDebitIdx);
+            if (end > netDebitIdx + 2) {
+                try { return Double.parseDouble(reason.substring(netDebitIdx + 2, end)); }
+                catch (NumberFormatException ignored) {}
+            }
+        }
+
         // Legacy format with embedded credit/cost fields
         int creditIdx = reason.indexOf("credit=");
         if (creditIdx < 0) return Double.NaN;
