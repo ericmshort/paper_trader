@@ -1,6 +1,7 @@
 package com.tradingapp.engine;
 
 import com.tradingapp.account.Account;
+import com.tradingapp.account.AuditLog;
 import com.tradingapp.account.Position;
 import com.tradingapp.account.SafetyStop;
 import com.tradingapp.account.TransactionLog;
@@ -92,6 +93,8 @@ public class IntradayBacktestEngine {
             java.util.function.Consumer<TradingLoop> loopConfig,
             java.util.function.Function<LocalDate, Set<String>> dailyWatchlistProvider) throws Exception {
 
+        AuditLog.muteForCurrentThread();
+        try {
         File tmpDb = File.createTempFile("backtest", ".db");
         tmpDb.deleteOnExit();
         TransactionLog txLog = new TransactionLog(tmpDb.getAbsolutePath());
@@ -203,6 +206,9 @@ public class IntradayBacktestEngine {
 
         return new IntradayBacktestResult(equityCurve, totalReturnPct, maxDrawdownPct,
                 wins, losses, totalTrades, eventLog, finalBalance, trades);
+        } finally {
+            AuditLog.unmuteForCurrentThread();
+        }
     }
 
     private TreeMap<LocalDate, TreeMap<ZonedDateTime, List<IntradayBar>>> groupBars(

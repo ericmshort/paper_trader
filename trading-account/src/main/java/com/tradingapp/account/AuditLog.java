@@ -29,6 +29,12 @@ public class AuditLog {
             System.getProperty("user.home"), ".tradingapp", "day-trader");
 
     private volatile boolean initialized = false;
+    // Per-thread mute flag: backtest threads suppress writes so their synthetic
+    // trades don't pollute the real audit log alongside live trading events.
+    private static final ThreadLocal<Boolean> MUTED = ThreadLocal.withInitial(() -> false);
+
+    public static void muteForCurrentThread()   { MUTED.set(true);  }
+    public static void unmuteForCurrentThread() { MUTED.set(false); }
 
     private AuditLog() {
         LOGGER.setUseParentHandlers(false);
@@ -64,6 +70,7 @@ public class AuditLog {
     }
 
     private void write(String line) {
+        if (MUTED.get()) return;
         ensureInit();
         if (!initialized) return;
         LOGGER.info(Instant.now() + "|" + line);
