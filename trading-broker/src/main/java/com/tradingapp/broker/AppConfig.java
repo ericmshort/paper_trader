@@ -61,6 +61,18 @@ public class AppConfig {
     private boolean premiumSellerEnabled = false;
     private Set<String> premiumEnabledStrategies = new LinkedHashSet<>();
     private int premiumSellerMaxContracts = 15;
+    // Block new premium entries before this ET time (null = no delay; 09:45 avoids open slippage).
+    private LocalTime premiumMinEntryTime = null;
+    // Max concurrent open PCS+CCS positions (0 = unlimited).
+    private int premiumMaxConcurrentSpreads = 0;
+    // Max positions per sector (0 = unlimited).
+    private int premiumSectorConcentrationLimit = 0;
+    // Require non-negative MACD before opening a PCS.
+    private boolean premiumPcsRequireNonNegMacd = false;
+    // Require at least one SELL signal before opening a CCS.
+    private boolean premiumCcsRequireSellSignal = false;
+    // Use nearest monthly expiry for all premium spreads (lower DTE, faster theta).
+    private boolean premiumUseShortExpiry = false;
     // When false, equity (stock) buys are disabled; only options trades execute.
     private boolean stockTradingEnabled = true;
     // Fraction of entry premium at which an options position is stop-lossed (default 0.50 = 50%).
@@ -154,6 +166,25 @@ public class AppConfig {
             }
             config.premiumSellerMaxContracts = Integer.parseInt(
                     props.getProperty("premium.seller.max_contracts", "15"));
+            String premMinEntryRaw = props.getProperty("premium.min_entry_time", "");
+            if (!premMinEntryRaw.isBlank()) {
+                try { config.premiumMinEntryTime = LocalTime.parse(premMinEntryRaw); }
+                catch (DateTimeParseException ignored) {}
+            }
+            try {
+                config.premiumMaxConcurrentSpreads = Integer.parseInt(
+                        props.getProperty("premium.max_concurrent_spreads", "0"));
+            } catch (NumberFormatException ignored) {}
+            try {
+                config.premiumSectorConcentrationLimit = Integer.parseInt(
+                        props.getProperty("premium.sector_concentration_limit", "0"));
+            } catch (NumberFormatException ignored) {}
+            config.premiumPcsRequireNonNegMacd = Boolean.parseBoolean(
+                    props.getProperty("premium.pcs_require_nonneg_macd", "false"));
+            config.premiumCcsRequireSellSignal = Boolean.parseBoolean(
+                    props.getProperty("premium.ccs_require_sell_signal", "false"));
+            config.premiumUseShortExpiry = Boolean.parseBoolean(
+                    props.getProperty("premium.use_short_expiry", "false"));
             String allowlistRaw = props.getProperty("options.symbol.allowlist", "");
             if (!allowlistRaw.isBlank()) {
                 config.optionsSymbolAllowlist = Arrays.stream(allowlistRaw.split(","))
@@ -277,6 +308,12 @@ public class AppConfig {
             props.setProperty("premium.seller.enabled", String.valueOf(premiumSellerEnabled));
             props.setProperty("premium.strategies", String.join(",", premiumEnabledStrategies));
             props.setProperty("premium.seller.max_contracts", String.valueOf(premiumSellerMaxContracts));
+            props.setProperty("premium.min_entry_time", premiumMinEntryTime != null ? premiumMinEntryTime.toString() : "");
+            props.setProperty("premium.max_concurrent_spreads", String.valueOf(premiumMaxConcurrentSpreads));
+            props.setProperty("premium.sector_concentration_limit", String.valueOf(premiumSectorConcentrationLimit));
+            props.setProperty("premium.pcs_require_nonneg_macd", String.valueOf(premiumPcsRequireNonNegMacd));
+            props.setProperty("premium.ccs_require_sell_signal", String.valueOf(premiumCcsRequireSellSignal));
+            props.setProperty("premium.use_short_expiry", String.valueOf(premiumUseShortExpiry));
             props.setProperty("options.symbol.allowlist", String.join(",", optionsSymbolAllowlist));
             props.setProperty("options.calls.disabled", String.join(",", optionsCallsDisabled));
             props.setProperty("options.puts.disabled",  String.join(",", optionsPutsDisabled));
@@ -369,6 +406,18 @@ public class AppConfig {
     public void setPremiumEnabledStrategies(Set<String> s) { this.premiumEnabledStrategies = new LinkedHashSet<>(s); }
     public int getPremiumSellerMaxContracts() { return premiumSellerMaxContracts; }
     public void setPremiumSellerMaxContracts(int v) { this.premiumSellerMaxContracts = Math.max(1, v); }
+    public LocalTime getPremiumMinEntryTime() { return premiumMinEntryTime; }
+    public void setPremiumMinEntryTime(LocalTime t) { this.premiumMinEntryTime = t; }
+    public int getPremiumMaxConcurrentSpreads() { return premiumMaxConcurrentSpreads; }
+    public void setPremiumMaxConcurrentSpreads(int v) { this.premiumMaxConcurrentSpreads = v; }
+    public int getPremiumSectorConcentrationLimit() { return premiumSectorConcentrationLimit; }
+    public void setPremiumSectorConcentrationLimit(int v) { this.premiumSectorConcentrationLimit = v; }
+    public boolean isPremiumPcsRequireNonNegMacd() { return premiumPcsRequireNonNegMacd; }
+    public void setPremiumPcsRequireNonNegMacd(boolean v) { this.premiumPcsRequireNonNegMacd = v; }
+    public boolean isPremiumCcsRequireSellSignal() { return premiumCcsRequireSellSignal; }
+    public void setPremiumCcsRequireSellSignal(boolean v) { this.premiumCcsRequireSellSignal = v; }
+    public boolean isPremiumUseShortExpiry() { return premiumUseShortExpiry; }
+    public void setPremiumUseShortExpiry(boolean v) { this.premiumUseShortExpiry = v; }
     public int getDowntrendPutMinSignals() { return downtrendPutMinSignals; }
     public void setDowntrendPutMinSignals(int n) { this.downtrendPutMinSignals = n; }
 

@@ -332,6 +332,18 @@ public class DashboardController implements Initializable {
         premiumSellerRouter.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
         premiumSellerRouter.setMaxContracts(appConfig.getPremiumSellerMaxContracts());
         premiumSellerRouter.setAllowlist(appConfig.getOptionsSymbolAllowlist());
+        if (appConfig.getPremiumMinEntryTime() != null) {
+            premiumSellerRouter.setMinEntryTime(
+                appConfig.getPremiumMinEntryTime().getHour(),
+                appConfig.getPremiumMinEntryTime().getMinute());
+        }
+        if (appConfig.getPremiumMaxConcurrentSpreads() > 0)
+            premiumSellerRouter.setMaxConcurrentSpreads(appConfig.getPremiumMaxConcurrentSpreads());
+        if (appConfig.getPremiumSectorConcentrationLimit() > 0)
+            premiumSellerRouter.setSectorConcentrationLimit(appConfig.getPremiumSectorConcentrationLimit());
+        premiumSellerRouter.setPcsRequireNonNegativeMacd(appConfig.isPremiumPcsRequireNonNegMacd());
+        premiumSellerRouter.setCcsRequireSellSignal(appConfig.isPremiumCcsRequireSellSignal());
+        premiumSellerRouter.setUseShortExpiry(appConfig.isPremiumUseShortExpiry());
         String dataDir = new java.io.File(transactionLog.getDbPath()).getParent();
         premiumSellerRouter.restoreExitDates(dataDir);
 
