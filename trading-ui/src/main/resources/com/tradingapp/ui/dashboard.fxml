@@ -164,12 +164,12 @@
                             <TableColumn fx:id="optColSymbol" text="Symbol" prefWidth="80"/>
                             <TableColumn fx:id="optColType" text="Type" prefWidth="60"/>
                             <TableColumn fx:id="optColStrike" text="Strike" prefWidth="90"/>
+                            <TableColumn fx:id="optColStockPrice" text="Stock Price" prefWidth="100"/>
                             <TableColumn fx:id="optColExpiry" text="Expiry" prefWidth="110"/>
                             <TableColumn fx:id="optColContracts" text="Qty" prefWidth="50"/>
                             <TableColumn fx:id="optColCost" text="Cost / Credit" prefWidth="120"/>
                             <TableColumn fx:id="optColCurrentValue" text="Current Value" prefWidth="120"/>
                             <TableColumn fx:id="optColPnl" text="Current P&amp;L" prefWidth="120"/>
-                            <TableColumn fx:id="optColStockPrice" text="Stock Price" prefWidth="100"/>
                         </columns>
                     </TableView>
                     <Separator/>
