@@ -169,6 +169,7 @@
                             <TableColumn fx:id="optColCost" text="Cost / Credit" prefWidth="120"/>
                             <TableColumn fx:id="optColCurrentValue" text="Current Value" prefWidth="120"/>
                             <TableColumn fx:id="optColPnl" text="Current P&amp;L" prefWidth="120"/>
+                            <TableColumn fx:id="optColStockPrice" text="Stock Price" prefWidth="100"/>
                         </columns>
                     </TableView>
                     <Separator/>
@@ -194,7 +195,7 @@
                             <TableColumn fx:id="prmColStrategy"     text="Strategy" prefWidth="145"/>
                             <TableColumn fx:id="prmColLowStrike"    text="Low K"    prefWidth="75"/>
                             <TableColumn fx:id="prmColHighStrike"   text="High K"   prefWidth="75"/>
-                            <TableColumn fx:id="prmColCurrentPrice" text="Stock $"  prefWidth="75"/>
+                            <TableColumn fx:id="prmColCurrentPrice" text="Stock Price" prefWidth="90"/>
                             <TableColumn fx:id="prmColExpiry"       text="Expiry"   prefWidth="110"/>
                             <TableColumn fx:id="prmColDte"          text="DTE"      prefWidth="55"/>
                             <TableColumn fx:id="prmColPremium"      text="Premium Collected" prefWidth="125"/>

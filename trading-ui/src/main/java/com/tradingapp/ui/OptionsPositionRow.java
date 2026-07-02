@@ -10,18 +10,20 @@ public class OptionsPositionRow {
     private final String cost;
     private final String currentValue;
     private final String pnl;
+    private final String stockPrice;
 
     /**
      * @param costRaw          -premiumPaid * 100 * contracts (negative = paid, positive = collected)
      * @param currentValueRaw  currentPremium * 100 * contracts (positive = asset, negative = liability)
      */
     public OptionsPositionRow(String symbol, String type, String strike, String expiry,
-                              int contracts, double costRaw, double currentValueRaw) {
+                              int contracts, double costRaw, double currentValueRaw, String stockPrice) {
         this.symbol = symbol;
         this.type = type;
         this.strike = strike;
         this.expiry = expiry;
         this.contracts = contracts;
+        this.stockPrice = stockPrice;
 
         this.cost = costRaw >= 0
                 ? String.format("+$%.2f", costRaw)
@@ -45,4 +47,5 @@ public class OptionsPositionRow {
     public String getCost() { return cost; }
     public String getCurrentValue() { return currentValue; }
     public String getPnl() { return pnl; }
+    public String getStockPrice() { return stockPrice; }
 }

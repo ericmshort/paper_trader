@@ -95,6 +95,7 @@ public class DashboardController implements Initializable {
     @FXML private TableColumn<OptionsPositionRow, String> optColCost;
     @FXML private TableColumn<OptionsPositionRow, String> optColCurrentValue;
     @FXML private TableColumn<OptionsPositionRow, String> optColPnl;
+    @FXML private TableColumn<OptionsPositionRow, String> optColStockPrice;
     @FXML private TableView<PremiumSellerRow> premiumTable;
     @FXML private TableColumn<PremiumSellerRow, String> prmColSymbol;
     @FXML private TableColumn<PremiumSellerRow, String> prmColStrategy;
@@ -588,6 +589,7 @@ public class DashboardController implements Initializable {
         optColCost.setCellValueFactory(new PropertyValueFactory<>("cost"));
         optColCurrentValue.setCellValueFactory(new PropertyValueFactory<>("currentValue"));
         optColPnl.setCellValueFactory(new PropertyValueFactory<>("pnl"));
+        optColStockPrice.setCellValueFactory(new PropertyValueFactory<>("stockPrice"));
         optColPnl.setCellFactory(col -> new TableCell<>() {
             @Override
             protected void updateItem(String value, boolean empty) {
@@ -815,11 +817,13 @@ public class DashboardController implements Initializable {
                 double costRaw = -pos.getPremiumPaid() * 100.0 * pos.getContracts();
                 double currentValueRaw = currentPrem * 100.0 * pos.getContracts();
                 totalUnrealized += costRaw + currentValueRaw;
+                List<Double> sp = priceHistory.getPrices(pos.getSymbol());
+                String spStr = sp.isEmpty() ? "—" : String.format("$%.2f", sp.get(sp.size() - 1));
                 rows.add(new OptionsPositionRow(
                         pos.getSymbol(), pos.getType(),
                         String.format("$%.2f", pos.getStrike()),
                         pos.getExpiry().toString(),
-                        Math.abs(pos.getContracts()), costRaw, currentValueRaw));
+                        Math.abs(pos.getContracts()), costRaw, currentValueRaw, spStr));
             } else {
                 OptionsPosition first = legs.get(0).getValue();
                 String symbol  = first.getSymbol();
@@ -842,8 +846,10 @@ public class DashboardController implements Initializable {
                     currentValueRaw += currentPrem * 100.0 * pos.getContracts();
                 }
                 totalUnrealized += costRaw + currentValueRaw;
+                List<Double> sp = priceHistory.getPrices(symbol);
+                String spStr = sp.isEmpty() ? "—" : String.format("$%.2f", sp.get(sp.size() - 1));
                 rows.add(new OptionsPositionRow(symbol, type, strike, expiry,
-                        contracts, costRaw, currentValueRaw));
+                        contracts, costRaw, currentValueRaw, spStr));
             }
         }
         return totalUnrealized;
