@@ -394,6 +394,9 @@ public class TransactionLog {
         int e = reason.indexOf("exp=");
         if (e < 0) return null;
         String val = reason.substring(e + 4).trim();
+        // Truncate to the date portion (yyyy-MM-dd = 10 chars); trailing text like " (SHORT)"
+        // or " (LONG)" causes LocalDate.parse to throw, falling through to the +1yr fallback.
+        if (val.length() > 10) val = val.substring(0, 10);
         try { return LocalDate.parse(val); } catch (Exception ex) { return null; }
     }
 
