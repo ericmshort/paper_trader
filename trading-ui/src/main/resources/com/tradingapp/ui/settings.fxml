@@ -337,6 +337,41 @@
                style="-fx-font-size: 11px; -fx-text-fill: #888888;"/>
     </HBox>
 
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Min Entry Time:" style="-fx-text-fill: #e0e0e0;" prefWidth="180"/>
+        <TextField fx:id="premiumMinEntryField" prefWidth="60"
+                   style="-fx-background-color: #16213e; -fx-text-fill: #e0e0e0; -fx-border-color: #333366; -fx-border-radius: 4;"
+                   promptText="09:45"/>
+        <Label text="ET — skip new premium entries before this time (HH:mm, leave blank for market open)"
+               style="-fx-font-size: 11px; -fx-text-fill: #888888;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Max Concurrent Spreads:" style="-fx-text-fill: #e0e0e0;" prefWidth="180"/>
+        <TextField fx:id="premiumMaxSpreadsField" prefWidth="60"
+                   style="-fx-background-color: #16213e; -fx-text-fill: #e0e0e0; -fx-border-color: #333366; -fx-border-radius: 4;"
+                   promptText="6"/>
+        <Label text="max open PCS+CCS positions at once (0 = unlimited)"
+               style="-fx-font-size: 11px; -fx-text-fill: #888888;"/>
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Sector Cap:" style="-fx-text-fill: #e0e0e0;" prefWidth="180"/>
+        <TextField fx:id="premiumSectorCapField" prefWidth="60"
+                   style="-fx-background-color: #16213e; -fx-text-fill: #e0e0e0; -fx-border-color: #333366; -fx-border-radius: 4;"
+                   promptText="2"/>
+        <Label text="max positions per sector (semis, health, finance, tech…) (0 = unlimited)"
+               style="-fx-font-size: 11px; -fx-text-fill: #888888;"/>
+    </HBox>
+
+    <HBox spacing="20" alignment="CENTER_LEFT">
+        <CheckBox fx:id="premiumPcsMacdCheck" text="PCS: require non-negative MACD" style="-fx-text-fill: #e0e0e0;"/>
+        <CheckBox fx:id="premiumCcsSellSignalCheck" text="CCS: require ≥1 sell signal" style="-fx-text-fill: #e0e0e0;"/>
+    </HBox>
+
+    <CheckBox fx:id="premiumShortExpiryCheck" text="Use nearest monthly expiry (shorter DTE, faster theta decay)"
+              style="-fx-text-fill: #e0e0e0;"/>
+
     <Separator/>
 
     <!-- Actions -->
