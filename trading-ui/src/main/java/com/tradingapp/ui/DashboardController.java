@@ -1125,7 +1125,7 @@ public class DashboardController implements Initializable {
         optionsCashDeployedLabel.setText(String.format("Options Reserved: $%,.2f", s.optionsCashDeployed()));
         optionsTable.setItems(FXCollections.observableArrayList(s.optionRows()));
         stockPositionsTable.setItems(FXCollections.observableArrayList(s.stockRows()));
-        unrealizedPnlLabel.setText(formatUnrealizedPnl("Total P&L", s.totalUnrealizedPnl()));
+        unrealizedPnlLabel.setText(formatUnrealizedPnl("Realized P&L", s.realizedPnl()));
         optionsTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total P&L", s.optTotalUnrealized()));
         stockTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", s.stkTotalUnrealized()));
         winsLabel.setText("Wins: " + s.wins());
@@ -1167,7 +1167,7 @@ public class DashboardController implements Initializable {
         availableCashLabel.setText(String.format("Cash: $%,.2f", availableCash));
         optionsCashDeployedLabel.setText(String.format("Options Reserved: $%,.2f", computeOptionsCashDeployed()));
         pnlButton.setText(String.format("P&L: $%,.2f", realizedPnl));
-        unrealizedPnlLabel.setText(formatUnrealizedPnl("Total P&L", unrealizedPnl));
+        unrealizedPnlLabel.setText(formatUnrealizedPnl("Realized P&L", realizedPnl));
 
         if (account.isTradingHalted()) {
             haltedLabel.setText("⛔ TRADING HALTED — portfolio exhausted");
