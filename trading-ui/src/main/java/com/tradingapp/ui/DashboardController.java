@@ -1596,7 +1596,7 @@ public class DashboardController implements Initializable {
     }
 
     private void showPnlBreakdown() {
-        List<ClosedTradeRecord> trades = computeReconciledClosedTrades();
+        List<ClosedTradeRecord> trades = computeClosedTrades();
 
         TableView<ClosedTradeRecord> table = new TableView<>();
         table.setStyle("-fx-background-color: #1a1a2e;");
