@@ -394,12 +394,12 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                     .put("qty", String.valueOf(contracts))
                     .put("legs", legsArray);
 
-            // Limit order at the minimum acceptable credit. Alpaca only fills if it can
-            // deliver ≥ this amount per share. We track the order ID and cancel it after
-            // 10 minutes so stale resting orders don't block capital for new opportunities.
+            // Limit order at the minimum acceptable credit. Alpaca's mleg API uses signed
+            // limit_price: positive = max net debit, negative = min net credit. We negate
+            // minCreditPerShare so Alpaca only fills if it can deliver ≥ that credit.
             if (hasOpenLegs && minCreditPerShare > 0) {
                 body.put("type", "limit")
-                    .put("limit_price", String.format("%.2f", minCreditPerShare));
+                    .put("limit_price", String.format("%.2f", -minCreditPerShare));
                 LOG.info("Multi-leg limit order: min credit " + String.format("%.2f", minCreditPerShare)
                         + "/share (live=" + String.format("%.2f", liveNetCreditPerShare) + ")"
                         + " for " + legs.get(0).symbol());
