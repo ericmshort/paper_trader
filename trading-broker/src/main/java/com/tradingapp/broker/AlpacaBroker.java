@@ -1060,7 +1060,33 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
 
     @Override
     public boolean hasPendingOrderForSymbol(String symbol) {
-        return pendingMlegSymbols.containsValue(symbol);
+        if (pendingMlegSymbols.containsValue(symbol)) return true;
+        // pendingMlegSymbols is session-local; also query Alpaca for orders from prior sessions.
+        try {
+            JSONArray openOrders = getJsonArray("/orders?status=open&limit=100");
+            if (openOrders == null) return false;
+            String upperSymbol = symbol.toUpperCase();
+            for (int i = 0; i < openOrders.length(); i++) {
+                JSONObject o = openOrders.getJSONObject(i);
+                if (!"mleg".equals(o.optString("order_class", ""))) continue;
+                JSONArray legArr = o.optJSONArray("legs");
+                if (legArr == null) continue;
+                for (int j = 0; j < legArr.length(); j++) {
+                    String legSym = legArr.getJSONObject(j).optString("symbol", "").toUpperCase();
+                    // OCC format: {UNDERLYING}{YYMMDD}... — underlying ends where digits begin
+                    if (legSym.startsWith(upperSymbol)
+                            && legSym.length() > upperSymbol.length()
+                            && Character.isDigit(legSym.charAt(upperSymbol.length()))) {
+                        LOG.info("hasPendingOrderForSymbol: found open Alpaca mleg order for "
+                                + symbol + ": " + o.optString("id"));
+                        return true;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOG.warning("hasPendingOrderForSymbol: failed to query Alpaca open orders: " + e.getMessage());
+        }
+        return false;
     }
 
     public JSONObject testConnection() {
