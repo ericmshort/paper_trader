@@ -705,6 +705,8 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                 double portfolioValue = alpacaAccount.optDouble("portfolio_value",
                         alpacaAccount.optDouble("equity", -1.0));
                 if (portfolioValue > 0) account.setBrokerPortfolioValue(portfolioValue);
+                account.setLongMarketValue(alpacaAccount.optDouble("long_market_value", 0.0));
+                account.setShortMarketValue(alpacaAccount.optDouble("short_market_value", 0.0));
             }
 
             JSONArray positions = getJsonArray("/positions");

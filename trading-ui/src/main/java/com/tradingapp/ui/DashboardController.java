@@ -991,15 +991,15 @@ public class DashboardController implements Initializable {
     private record UiSnapshot(
             List<TransactionRecord> history,
             double availableCash,
-            double stockHoldings,
-            double optionHoldings,
+            double longMarketValue,
+            double shortMarketValue,
             double totalPortfolio,
-            double optionsCashDeployed,
+            double optionsBuyingPower,
             List<OptionsPositionRow> optionRows,
             double optTotalUnrealized,
             List<StockPositionRow> stockRows,
             double stkTotalUnrealized,
-            double totalUnrealizedPnl,
+            double dayPnl,
             int wins,
             int losses,
             double winRate,
@@ -1014,9 +1014,21 @@ public class DashboardController implements Initializable {
     private UiSnapshot computeUiSnapshot() {
         List<TransactionRecord> history = collapseMultiLegHistory(transactionLog.findAll());
         double availableCash = account.getBalance();
-        double stockHoldings = computeStockHoldings();
-        double optionHoldings = computeOptionHoldings();
-        double optionsCashDeployed = computeOptionsCashDeployed();
+
+        // Use Alpaca's authoritative market values when available; fall back to local computation
+        // before the first broker sync completes. long_market_value = stocks + long option legs at
+        // current market price. short_market_value = negative (cost to buy back short legs).
+        double lmv = account.getLongMarketValue();
+        double smv = account.getShortMarketValue();
+        if (!account.isBrokerSyncComplete()) {
+            lmv = computeStockHoldings(); // local fallback: stock positions only
+            smv = 0.0;
+        }
+
+        // options_buying_power reflects margin consumed by open short legs — the real number
+        // available to deploy into new trades. Falls back to cash if not yet synced.
+        double optionsBuyingPower = account.getBuyingPower() > 0
+                ? account.getBuyingPower() : availableCash;
 
         List<OptionsPositionRow> optionRows = new ArrayList<>();
         double optTotalUnrealized = buildOptionsRows(optionRows);
@@ -1032,24 +1044,21 @@ public class DashboardController implements Initializable {
         double realizedPnl = closedTrades.stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
 
         // Prefer Alpaca's own portfolio_value from /account — it's the authoritative number
-        // that matches their UI display and eliminates local pricing discrepancies.
-        // Fall back to local computation before the first sync tick completes.
+        // that matches their UI and satisfies: equity = cash + long_market_value + short_market_value.
         double brokerPv = account.getBrokerPortfolioValue();
-        double totalPortfolio = brokerPv > 0 ? brokerPv : availableCash + stockHoldings + optionHoldings;
+        double totalPortfolio = brokerPv > 0 ? brokerPv : availableCash + lmv + smv;
 
-        // Derive total unrealized P&L from Alpaca's authoritative portfolio value so it
-        // stays consistent with the total portfolio figure (brokerPv - starting = total P&L).
-        // Fall back to local computation when Alpaca data isn't available yet.
-        double totalUnrealizedPnl = brokerPv > 0
-                ? brokerPv - Account.STARTING_BALANCE
-                : optTotalUnrealized + stkTotalUnrealized;
+        // Day P&L = equity vs prior close — authoritative daily gain/loss matching Alpaca's UI.
+        // NaN signals "not yet available" (shown as "—" in the label).
+        double lastEquity = account.getLastEquity();
+        double dayPnl = (brokerPv > 0 && lastEquity > 0) ? brokerPv - lastEquity : Double.NaN;
 
         List<PremiumSellerRow> premiumRows = buildPremiumRows();
         double premiumTotalPnl = premiumRows.stream().mapToDouble(PremiumSellerRow::getPnlRaw).sum();
 
-        return new UiSnapshot(history, availableCash, stockHoldings, optionHoldings, totalPortfolio,
-                optionsCashDeployed, optionRows, optTotalUnrealized, stockRows, stkTotalUnrealized,
-                totalUnrealizedPnl, wins, losses, winRate, realizedPnl, account.isTradingHalted(),
+        return new UiSnapshot(history, availableCash, lmv, smv, totalPortfolio,
+                optionsBuyingPower, optionRows, optTotalUnrealized, stockRows, stkTotalUnrealized,
+                dayPnl, wins, losses, winRate, realizedPnl, account.isTradingHalted(),
                 account.isDailyLossHalted(), premiumRows, premiumTotalPnl);
     }
 
@@ -1117,20 +1126,37 @@ public class DashboardController implements Initializable {
                         premPnl >= 0 ? "+" : "-",
                         Math.abs(premPnl)));
         tradeHistoryTable.setItems(FXCollections.observableArrayList(s.history()));
-        totalPortfolioLabel.setText(String.format("Total Portfolio: $%,.2f", s.totalPortfolio()));
-        stockHoldingsLabel.setText(String.format("Stocks: $%,.2f", s.stockHoldings()));
-        optionHoldingsLabel.setText(String.format("Options: $%,.2f", s.optionHoldings()));
+        totalPortfolioLabel.setText(String.format("Equity: $%,.2f", s.totalPortfolio()));
+        stockHoldingsLabel.setText(String.format("Long Positions: $%,.2f", s.longMarketValue()));
+        double smv = s.shortMarketValue();
+        optionHoldingsLabel.setText(smv == 0.0
+                ? "Short Liability: $0.00"
+                : String.format("Short Liability: -$%,.2f", Math.abs(smv)));
+        optionHoldingsLabel.setStyle(smv < -0.01
+                ? "-fx-font-size: 14px; -fx-text-fill: #ff8844;"
+                : "-fx-font-size: 14px; -fx-text-fill: #e0e0e0;");
         availableCashLabel.setText(String.format("Cash: $%,.2f", s.availableCash()));
-        optionsCashDeployedLabel.setText(String.format("Options Reserved: $%,.2f", s.optionsCashDeployed()));
+        optionsCashDeployedLabel.setText(String.format("Options BP: $%,.2f", s.optionsBuyingPower()));
         optionsTable.setItems(FXCollections.observableArrayList(s.optionRows()));
         stockPositionsTable.setItems(FXCollections.observableArrayList(s.stockRows()));
-        unrealizedPnlLabel.setText(formatUnrealizedPnl("Realized P&L", s.realizedPnl()));
+        double dayPnl = s.dayPnl();
+        if (Double.isNaN(dayPnl)) {
+            unrealizedPnlLabel.setText("Day P&L: —");
+            unrealizedPnlLabel.setStyle("-fx-font-size: 14px; -fx-text-fill: #e0e0e0;");
+        } else {
+            unrealizedPnlLabel.setText(dayPnl >= 0
+                    ? String.format("Day P&L: +$%,.2f", dayPnl)
+                    : String.format("Day P&L: -$%,.2f", Math.abs(dayPnl)));
+            unrealizedPnlLabel.setStyle(dayPnl >= 0
+                    ? "-fx-font-size: 14px; -fx-text-fill: #00ff88;"
+                    : "-fx-font-size: 14px; -fx-text-fill: #ff4444;");
+        }
         optionsTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total P&L", s.optTotalUnrealized()));
         stockTotalUnrealizedLabel.setText(formatUnrealizedPnl("Total Unrealized P&L", s.stkTotalUnrealized()));
         winsLabel.setText("Wins: " + s.wins());
         lossesLabel.setText("Losses: " + s.losses());
         winRateLabel.setText(String.format("Win Rate: %.1f%%", s.winRate()));
-        pnlButton.setText(String.format("P&L: $%,.2f", s.realizedPnl()));
+        pnlButton.setText(String.format("Realized P&L: $%,.2f", s.realizedPnl()));
         equitySeries.getData().add(new XYChart.Data<>(tickCount++, s.totalPortfolio()));
         if (equitySeries.getData().size() > 200) equitySeries.getData().remove(0);
         if (s.tradingHalted()) {
@@ -1151,22 +1177,37 @@ public class DashboardController implements Initializable {
 
     public void refreshBalance() {
         double availableCash = account.getBalance();
-        double stockHoldings = computeStockHoldings();
-        double optionHoldings = computeOptionHoldings();
+        double lmv = account.isBrokerSyncComplete() ? account.getLongMarketValue() : computeStockHoldings();
+        double smv = account.isBrokerSyncComplete() ? account.getShortMarketValue() : 0.0;
         double realizedPnl = computeClosedTrades().stream().mapToDouble(ClosedTradeRecord::getPnlRaw).sum();
         double brokerPv = account.getBrokerPortfolioValue();
-        double totalPortfolio = brokerPv > 0 ? brokerPv : availableCash + stockHoldings + optionHoldings;
-        double unrealizedPnl = brokerPv > 0
-                ? brokerPv - Account.STARTING_BALANCE
-                : computeStockUnrealizedPnL() + computeOptionsUnrealizedPnL();
+        double totalPortfolio = brokerPv > 0 ? brokerPv : availableCash + lmv + smv;
+        double optionsBuyingPower = account.getBuyingPower() > 0 ? account.getBuyingPower() : availableCash;
+        double lastEquity = account.getLastEquity();
+        double dayPnl = (brokerPv > 0 && lastEquity > 0) ? brokerPv - lastEquity : Double.NaN;
 
-        totalPortfolioLabel.setText(String.format("Total Portfolio: $%,.2f", totalPortfolio));
-        stockHoldingsLabel.setText(String.format("Stocks: $%,.2f", stockHoldings));
-        optionHoldingsLabel.setText(String.format("Options: $%,.2f", optionHoldings));
+        totalPortfolioLabel.setText(String.format("Equity: $%,.2f", totalPortfolio));
+        stockHoldingsLabel.setText(String.format("Long Positions: $%,.2f", lmv));
+        optionHoldingsLabel.setText(smv == 0.0
+                ? "Short Liability: $0.00"
+                : String.format("Short Liability: -$%,.2f", Math.abs(smv)));
+        optionHoldingsLabel.setStyle(smv < -0.01
+                ? "-fx-font-size: 14px; -fx-text-fill: #ff8844;"
+                : "-fx-font-size: 14px; -fx-text-fill: #e0e0e0;");
         availableCashLabel.setText(String.format("Cash: $%,.2f", availableCash));
-        optionsCashDeployedLabel.setText(String.format("Options Reserved: $%,.2f", computeOptionsCashDeployed()));
-        pnlButton.setText(String.format("P&L: $%,.2f", realizedPnl));
-        unrealizedPnlLabel.setText(formatUnrealizedPnl("Realized P&L", realizedPnl));
+        optionsCashDeployedLabel.setText(String.format("Options BP: $%,.2f", optionsBuyingPower));
+        pnlButton.setText(String.format("Realized P&L: $%,.2f", realizedPnl));
+        if (Double.isNaN(dayPnl)) {
+            unrealizedPnlLabel.setText("Day P&L: —");
+            unrealizedPnlLabel.setStyle("-fx-font-size: 14px; -fx-text-fill: #e0e0e0;");
+        } else {
+            unrealizedPnlLabel.setText(dayPnl >= 0
+                    ? String.format("Day P&L: +$%,.2f", dayPnl)
+                    : String.format("Day P&L: -$%,.2f", Math.abs(dayPnl)));
+            unrealizedPnlLabel.setStyle(dayPnl >= 0
+                    ? "-fx-font-size: 14px; -fx-text-fill: #00ff88;"
+                    : "-fx-font-size: 14px; -fx-text-fill: #ff4444;");
+        }
 
         if (account.isTradingHalted()) {
             haltedLabel.setText("⛔ TRADING HALTED — portfolio exhausted");

@@ -13,6 +13,8 @@ public class Account {
     private volatile double buyingPower;
     private volatile double lastEquity;
     private volatile double brokerPortfolioValue = -1.0;
+    private volatile double longMarketValue = 0.0;
+    private volatile double shortMarketValue = 0.0;
     private final Map<String, Position> positions;
     private final Map<String, OptionsPosition> optionsPositions;
     private volatile double totalRealizedPnL;
@@ -38,6 +40,8 @@ public class Account {
     public double getBuyingPower() { return buyingPower; }
     public double getLastEquity() { return lastEquity; }
     public double getBrokerPortfolioValue() { return brokerPortfolioValue; }
+    public double getLongMarketValue() { return longMarketValue; }
+    public double getShortMarketValue() { return shortMarketValue; }
     public Map<String, Position> getPositions() { return Collections.unmodifiableMap(positions); }
     public Map<String, OptionsPosition> getOptionsPositions() { return Collections.unmodifiableMap(optionsPositions); }
     public double getTotalRealizedPnL() { return totalRealizedPnL; }
@@ -51,6 +55,8 @@ public class Account {
     public void setBuyingPower(double buyingPower) { this.buyingPower = buyingPower; }
     public void setLastEquity(double lastEquity) { this.lastEquity = lastEquity; }
     public void setBrokerPortfolioValue(double v) { this.brokerPortfolioValue = v; }
+    public void setLongMarketValue(double v) { this.longMarketValue = v; }
+    public void setShortMarketValue(double v) { this.shortMarketValue = v; }
     public void setTradingHalted(boolean tradingHalted) { this.tradingHalted = tradingHalted; }
 
     public synchronized void addRealizedPnL(double amount) { this.totalRealizedPnL += amount; }
@@ -181,6 +187,8 @@ public class Account {
         this.buyingPower = 0.0;
         this.lastEquity = 0.0;
         this.brokerPortfolioValue = -1.0;
+        this.longMarketValue = 0.0;
+        this.shortMarketValue = 0.0;
         this.positions.clear();
         this.optionsPositions.clear();
         this.totalRealizedPnL = 0.0;
