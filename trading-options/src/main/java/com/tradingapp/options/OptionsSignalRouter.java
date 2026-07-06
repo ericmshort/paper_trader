@@ -1153,7 +1153,10 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         OptionsChain chain = dataClient.getOptionsChain(symbol, expiry);
         OptionsQuote quote = isCall ? chain.getCall(strike) : chain.getPut(strike);
         if (quote == null || !quote.isValid() || quote.getBid() <= 0) return bsFallback;
-        return quote.getBid();
+        // Use BS price as a floor: market-open bids are often stale stubs (e.g. $0.01)
+        // that don't reflect intrinsic value. The fill will be at fair value, so we
+        // should not make stop-loss decisions based on an artificially low bid.
+        return Math.max(quote.getBid(), bsFallback);
     }
 
     private boolean isZeroDteDay() {
