@@ -54,6 +54,8 @@ public class AppConfig {
     private Set<String> optionsPutsDisabled    = new LinkedHashSet<>();
     // Minimum sell signals required to open a put during a confirmed SPY downtrend.
     private int downtrendPutMinSignals = 4;
+    // Minimum buy signals required before any bullish options entry fires (0 = strategy defaults).
+    private int minBuySignalsForEntry = 3;
     // Minimum opposing signals required on each of reversalMinConsecutive ticks to exit on reversal.
     private int reversalMinSignals = 5;
     // Close a winning options position when premium reaches this multiple of entry (e.g. 2.5 = 150% gain).
@@ -209,6 +211,10 @@ public class AppConfig {
                         props.getProperty("options.downtrend_put_min_signals", "4"));
             } catch (NumberFormatException ignored) {}
             try {
+                config.minBuySignalsForEntry = Integer.parseInt(
+                        props.getProperty("options.min_buy_signals_for_entry", "3"));
+            } catch (NumberFormatException ignored) {}
+            try {
                 config.reversalMinSignals = Integer.parseInt(
                         props.getProperty("options.reversal_min_signals", "5"));
             } catch (NumberFormatException ignored) {}
@@ -321,6 +327,7 @@ public class AppConfig {
             props.setProperty("options.calls.disabled", String.join(",", optionsCallsDisabled));
             props.setProperty("options.puts.disabled",  String.join(",", optionsPutsDisabled));
             props.setProperty("options.downtrend_put_min_signals", String.valueOf(downtrendPutMinSignals));
+            props.setProperty("options.min_buy_signals_for_entry", String.valueOf(minBuySignalsForEntry));
             props.setProperty("options.reversal_min_signals", String.valueOf(reversalMinSignals));
             props.setProperty("options.profit_target", String.valueOf(profitTarget));
             props.setProperty("stock.trading.enabled", String.valueOf(stockTradingEnabled));
@@ -424,6 +431,8 @@ public class AppConfig {
     public void setPremiumUseShortExpiry(boolean v) { this.premiumUseShortExpiry = v; }
     public int getDowntrendPutMinSignals() { return downtrendPutMinSignals; }
     public void setDowntrendPutMinSignals(int n) { this.downtrendPutMinSignals = n; }
+    public int getMinBuySignalsForEntry() { return minBuySignalsForEntry; }
+    public void setMinBuySignalsForEntry(int n) { this.minBuySignalsForEntry = n; }
 
     public int getReversalMinSignals() { return reversalMinSignals; }
     public void setReversalMinSignals(int n) { this.reversalMinSignals = n; }

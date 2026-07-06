@@ -60,6 +60,7 @@ public class SettingsController implements Initializable {
     @FXML private CheckBox premiumShortExpiryCheck;
     @FXML private TextField optionsStopLossField;
     @FXML private TextField downtrendPutMinSignalsField;
+    @FXML private TextField minBuySignalsForEntryField;
     @FXML private TextField entryStartTimeField;
     @FXML private TextField entryCutoffField;
     @FXML private TextField profitTargetField;
@@ -155,6 +156,7 @@ public class SettingsController implements Initializable {
         premiumShortExpiryCheck.setSelected(cfg.isPremiumUseShortExpiry());
         optionsStopLossField.setText(String.valueOf((int) Math.round(cfg.getOptionsStopLossFrac() * 100)));
         downtrendPutMinSignalsField.setText(String.valueOf(cfg.getDowntrendPutMinSignals()));
+        minBuySignalsForEntryField.setText(String.valueOf(cfg.getMinBuySignalsForEntry()));
         entryStartTimeField.setText(cfg.getOptionsEntryStartTime() != null ? cfg.getOptionsEntryStartTime().toString() : "");
         entryCutoffField.setText(cfg.getOptionsEntryCutoff() != null ? cfg.getOptionsEntryCutoff().toString() : "");
         profitTargetField.setText(String.valueOf(cfg.getProfitTarget()));
@@ -428,6 +430,10 @@ public class SettingsController implements Initializable {
         try {
             int n = Integer.parseInt(downtrendPutMinSignalsField.getText().strip());
             cfg.setDowntrendPutMinSignals(Math.min(6, Math.max(1, n)));
+        } catch (NumberFormatException ignored) {}
+        try {
+            int n = Integer.parseInt(minBuySignalsForEntryField.getText().strip());
+            cfg.setMinBuySignalsForEntry(Math.min(6, Math.max(0, n)));
         } catch (NumberFormatException ignored) {}
         String startTimeText = entryStartTimeField.getText().strip();
         if (!startTimeText.isBlank()) {

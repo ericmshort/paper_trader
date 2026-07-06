@@ -223,6 +223,7 @@ public class DashboardController implements Initializable {
                     optionsRouter.setProfitTarget(cfg.getProfitTarget());
                     optionsRouter.setReversalMinSignals(cfg.getReversalMinSignals());
                     optionsRouter.setDowntrendPutMinSignals(cfg.getDowntrendPutMinSignals());
+                    optionsRouter.setMinBuySignalsForEntry(cfg.getMinBuySignalsForEntry());
                     optionsRouter.setEntryCutoff(cfg.getOptionsEntryCutoff());
                     optionsRouter.setEntryStartTime(cfg.getOptionsEntryStartTime());
                     if (cfg.getOptionsForceCloseTime() != null) optionsRouter.setForceCloseTime(cfg.getOptionsForceCloseTime());
@@ -406,6 +407,7 @@ public class DashboardController implements Initializable {
         optionsRouter.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
         optionsRouter.setEnabledStrategies(appConfig.getEnabledStrategies());
         optionsRouter.setDowntrendPutMinSignals(appConfig.getDowntrendPutMinSignals());
+        optionsRouter.setMinBuySignalsForEntry(appConfig.getMinBuySignalsForEntry());
         optionsRouter.setReversalMinSignals(appConfig.getReversalMinSignals());
         optionsRouter.setProfitTarget(appConfig.getProfitTarget());
         tradingLoop.setAvoidOvernightHolds(appConfig.isAvoidOvernightHolds());
