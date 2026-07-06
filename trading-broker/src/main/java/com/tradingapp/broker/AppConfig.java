@@ -48,6 +48,9 @@ public class AppConfig {
             Arrays.asList("HIGH_DELTA_SCALP", "MOMENTUM_NEAR_TERM", "LONG_CALL", "LONG_PUT", "ZERO_DTE"));
     // If non-empty, only these symbols may trade options. Empty = all symbols allowed.
     private Set<String> optionsSymbolAllowlist = new LinkedHashSet<>();
+    // When non-empty, PremiumSellerRouter uses this list instead of optionsSymbolAllowlist.
+    // Allows lower-vol symbols for credit spreads separate from the directional options list.
+    private Set<String> premiumSymbolAllowlist = new LinkedHashSet<>();
     // Symbols in this set may trade puts but not calls.
     private Set<String> optionsCallsDisabled   = new LinkedHashSet<>();
     // Symbols in this set may trade calls but not puts.
@@ -194,6 +197,12 @@ public class AppConfig {
                         .map(String::strip).filter(s -> !s.isEmpty())
                         .collect(Collectors.toCollection(LinkedHashSet::new));
             }
+            String premiumAllowlistRaw = props.getProperty("premium.symbol.allowlist", "");
+            if (!premiumAllowlistRaw.isBlank()) {
+                config.premiumSymbolAllowlist = Arrays.stream(premiumAllowlistRaw.split(","))
+                        .map(String::strip).filter(s -> !s.isEmpty())
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
+            }
             String callsDisabledRaw = props.getProperty("options.calls.disabled", "");
             if (!callsDisabledRaw.isBlank()) {
                 config.optionsCallsDisabled = Arrays.stream(callsDisabledRaw.split(","))
@@ -324,6 +333,7 @@ public class AppConfig {
             props.setProperty("premium.ccs_require_sell_signal", String.valueOf(premiumCcsRequireSellSignal));
             props.setProperty("premium.use_short_expiry", String.valueOf(premiumUseShortExpiry));
             props.setProperty("options.symbol.allowlist", String.join(",", optionsSymbolAllowlist));
+            props.setProperty("premium.symbol.allowlist", String.join(",", premiumSymbolAllowlist));
             props.setProperty("options.calls.disabled", String.join(",", optionsCallsDisabled));
             props.setProperty("options.puts.disabled",  String.join(",", optionsPutsDisabled));
             props.setProperty("options.downtrend_put_min_signals", String.valueOf(downtrendPutMinSignals));
@@ -451,6 +461,12 @@ public class AppConfig {
 
     public Set<String> getOptionsSymbolAllowlist() { return optionsSymbolAllowlist; }
     public void setOptionsSymbolAllowlist(Set<String> symbols) { this.optionsSymbolAllowlist = new LinkedHashSet<>(symbols); }
+    public Set<String> getPremiumSymbolAllowlist() { return premiumSymbolAllowlist; }
+    public void setPremiumSymbolAllowlist(Set<String> symbols) { this.premiumSymbolAllowlist = new LinkedHashSet<>(symbols); }
+    /** Returns premiumSymbolAllowlist if configured, otherwise falls back to optionsSymbolAllowlist. */
+    public Set<String> getEffectivePremiumAllowlist() {
+        return premiumSymbolAllowlist.isEmpty() ? optionsSymbolAllowlist : premiumSymbolAllowlist;
+    }
 
     public Set<String> getOptionsCallsDisabled() { return optionsCallsDisabled; }
     public void setOptionsCallsDisabled(Set<String> symbols) { this.optionsCallsDisabled = new LinkedHashSet<>(symbols); }

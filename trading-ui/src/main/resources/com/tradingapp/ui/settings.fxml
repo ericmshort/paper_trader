@@ -375,6 +375,15 @@
                style="-fx-font-size: 11px; -fx-text-fill: #888888;"/>
     </HBox>
 
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Credit Spread Symbols:" style="-fx-text-fill: #e0e0e0;" prefWidth="180"/>
+        <TextField fx:id="premiumSymbolAllowlistField" prefWidth="340"
+                   style="-fx-background-color: #16213e; -fx-text-fill: #e0e0e0; -fx-border-color: #333366; -fx-border-radius: 4;"
+                   promptText="e.g. WMT,PG,XOM  (leave blank to use Options Watchlist)"/>
+    </HBox>
+    <Label text="Separate symbol list for PCS/CCS/IC. If blank, uses the Options Watchlist above. Use lower-vol names for better spread win rates."
+           style="-fx-font-size: 11px; -fx-text-fill: #888888;" wrapText="true" maxWidth="520"/>
+
     <HBox spacing="20" alignment="CENTER_LEFT">
         <CheckBox fx:id="premiumPcsMacdCheck" text="PCS: require non-negative MACD" style="-fx-text-fill: #e0e0e0;"/>
         <CheckBox fx:id="premiumCcsSellSignalCheck" text="CCS: require ≥1 sell signal" style="-fx-text-fill: #e0e0e0;"/>

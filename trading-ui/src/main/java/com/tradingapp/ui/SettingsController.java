@@ -52,6 +52,7 @@ public class SettingsController implements Initializable {
     @FXML private CheckBox premiumPcsCheck;
     @FXML private CheckBox premiumCcsCheck;
     @FXML private TextField premiumMaxContractsField;
+    @FXML private TextField premiumSymbolAllowlistField;
     @FXML private TextField premiumMinEntryField;
     @FXML private TextField premiumMaxSpreadsField;
     @FXML private TextField premiumSectorCapField;
@@ -148,6 +149,7 @@ public class SettingsController implements Initializable {
         premiumPcsCheck.setSelected(premStrats.contains(com.tradingapp.options.PremiumSellerRouter.STRATEGY_PUT_CREDIT_SPREAD));
         premiumCcsCheck.setSelected(premStrats.contains(com.tradingapp.options.PremiumSellerRouter.STRATEGY_CALL_CREDIT_SPREAD));
         premiumMaxContractsField.setText(String.valueOf(cfg.getPremiumSellerMaxContracts()));
+        premiumSymbolAllowlistField.setText(String.join(",", cfg.getPremiumSymbolAllowlist()));
         premiumMinEntryField.setText(cfg.getPremiumMinEntryTime() != null ? cfg.getPremiumMinEntryTime().toString() : "");
         premiumMaxSpreadsField.setText(String.valueOf(cfg.getPremiumMaxConcurrentSpreads()));
         premiumSectorCapField.setText(String.valueOf(cfg.getPremiumSectorConcentrationLimit()));
@@ -401,6 +403,7 @@ public class SettingsController implements Initializable {
         }
         try {
             cfg.setPremiumMaxConcurrentSpreads(Math.max(0, Integer.parseInt(premiumMaxSpreadsField.getText().strip())));
+        cfg.setPremiumSymbolAllowlist(parseSymbolSet(premiumSymbolAllowlistField.getText()));
         } catch (NumberFormatException ignored) {}
         try {
             cfg.setPremiumSectorConcentrationLimit(Math.max(0, Integer.parseInt(premiumSectorCapField.getText().strip())));
@@ -517,6 +520,7 @@ public class SettingsController implements Initializable {
         premiumMaxContractsField.setDisable(!enabled);
         premiumMinEntryField.setDisable(!enabled);
         premiumMaxSpreadsField.setDisable(!enabled);
+        premiumSymbolAllowlistField.setDisable(!enabled);
         premiumSectorCapField.setDisable(!enabled);
         premiumPcsMacdCheck.setDisable(!enabled);
         premiumCcsSellSignalCheck.setDisable(!enabled);

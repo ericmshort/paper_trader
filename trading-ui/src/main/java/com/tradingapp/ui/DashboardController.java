@@ -334,7 +334,7 @@ public class DashboardController implements Initializable {
         }
         premiumSellerRouter.setMaxPortfolioExposure(appConfig.getMaxPortfolioExposurePct() / 100.0);
         premiumSellerRouter.setMaxContracts(appConfig.getPremiumSellerMaxContracts());
-        premiumSellerRouter.setAllowlist(appConfig.getOptionsSymbolAllowlist());
+        premiumSellerRouter.setAllowlist(appConfig.getEffectivePremiumAllowlist());
         if (appConfig.getPremiumMinEntryTime() != null) {
             premiumSellerRouter.setMinEntryTime(
                 appConfig.getPremiumMinEntryTime().getHour(),
