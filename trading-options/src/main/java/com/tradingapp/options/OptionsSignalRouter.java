@@ -750,6 +750,12 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         OptionsPosition pos = opts.get(posKey);
         if (pos == null) return;
 
+        // Prevent re-firing while a close order is in-flight: broker sync may re-add the
+        // position on the next tick before Alpaca confirms the fill. Skip for 60 seconds.
+        ZonedDateTime epoch = ZonedDateTime.of(2000, 1, 1, 0, 0, 0, 0, ET);
+        if (Duration.between(lastDirectionalCloseTime.getOrDefault(posKey, epoch),
+                clock.get()).toSeconds() < 60) return;
+
         LocalDate virtualDate = clock.get().toLocalDate();
         double T     = bsEngine.timeToExpiry(pos.getExpiry());
         double sigma = computeVol(symbol);
