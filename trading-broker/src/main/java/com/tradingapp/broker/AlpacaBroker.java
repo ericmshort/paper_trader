@@ -50,6 +50,9 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
     // orderId → submission timestamp (ms); cancelled after MLEG_ORDER_TTL_MS if still open.
     private final java.util.concurrent.ConcurrentHashMap<String, Long> pendingMlegOrders =
             new java.util.concurrent.ConcurrentHashMap<>();
+    // orderId → underlying symbol; used to block duplicate spread opens while an order is in-flight.
+    private final java.util.concurrent.ConcurrentHashMap<String, String> pendingMlegSymbols =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     public AlpacaBroker(AppConfig config, Account account, TransactionLog log) {
         this.config = config;
@@ -425,6 +428,7 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
             // Schedule cancellation after TTL so the order doesn't rest all day.
             if (hasOpenLegs && !orderId.isEmpty()) {
                 pendingMlegOrders.put(orderId, System.currentTimeMillis());
+                pendingMlegSymbols.put(orderId, legs.get(0).symbol());
             }
             return orderId;
         } catch (Exception e) {
@@ -461,6 +465,7 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
                             + " (rested " + ((now - submittedAt) / 60_000) + " min)");
                     AuditLog.get().logEvent("MLEG_CANCELLED",
                             "orderId=" + orderId + "|reason=ttl_expired");
+                    pendingMlegSymbols.remove(orderId);
                 }
                 return removed;
             } catch (Exception e) {
@@ -1049,6 +1054,11 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
             if (orders.length() < 500) break;
             after = orders.getJSONObject(orders.length() - 1).optString("submitted_at");
         }
+    }
+
+    @Override
+    public boolean hasPendingOrderForSymbol(String symbol) {
+        return pendingMlegSymbols.containsValue(symbol);
     }
 
     public JSONObject testConnection() {

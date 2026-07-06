@@ -190,6 +190,11 @@ public class OptionsOrderExecutor {
             return false;
         }
 
+        if (submitter != null && submitter.hasPendingOrderForSymbol(symbol)) {
+            LOG.warning(symbol + " credit-spread skip: pending order already in flight");
+            return false;
+        }
+
         String groupId = UUID.randomUUID().toString();
 
         // ── Attempt atomic multi-leg submission ───────────────────────────────

@@ -37,6 +37,15 @@ public interface OptionsSubmitter {
     }
 
     /**
+     * Returns true if there is already a pending (in-flight) multi-leg order for the given
+     * underlying symbol. Used to prevent opening a new spread while a close is still settling.
+     * The default returns false (no pending-order tracking in paper-trading implementations).
+     */
+    default boolean hasPendingOrderForSymbol(String symbol) {
+        return false;
+    }
+
+    /**
      * Submit a market order to buy stock shares.
      * Returns the broker order ID on success, or null if unsupported or rejected.
      * The default returns null (paper-trading path uses direct account manipulation).
