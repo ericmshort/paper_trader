@@ -50,9 +50,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     private static final ZoneId ET = ZoneId.of("America/New_York");
     private static final double RISK_FREE_RATE  = 0.04;
     private static final double SPREAD_WIDTH    = 10.0;   // $10 spread width
-    private static final double DELTA_TARGET    = 0.20;   // ~80% OTM short strike
     private static final double MIN_CREDIT_PCT  = 0.20;   // skip if credit < 20% of spread
-    private static final double PROFIT_TARGET   = 0.50;   // close at 50% of credit
+    private double deltaTarget   = 0.20;   // ~80% OTM short strike
+    private double profitTarget  = 0.50;   // close at 50% of credit
     private static final int    CLOSE_DTE       = 7;      // close when < 7 DTE
     // IV_PREMIUM removed: sigma is historical vol but BS(HV) ≈ Alpaca market price in practice.
     // Inflating premiumPaid by 15% caused exit checks to see a false >50% profit the moment
@@ -110,6 +110,10 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     // Minimum number of buy signals required to open a PCS (in addition to buys >= sells).
     // 0 = current behavior (no minimum; any tick where buys >= sells qualifies).
     private int pcsMinBuySignals = 0;
+
+    // When true, PCS entries are blocked unless SPY's current daily price > previous day's close.
+    // Stronger uptrend confirmation than the regime MA alone.
+    private boolean pcsRequireSpyDayUp = false;
 
     // When true, CCS entries require at least one SELL signal (directional confirmation).
     private boolean ccsRequireSellSignal = false;
@@ -169,6 +173,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     public void setPcsRequireNonNegativeMacd(boolean v) { this.pcsRequireNonNegativeMacd = v; }
     public void setCcsRequireSellSignal(boolean v) { this.ccsRequireSellSignal = v; }
     public void setPcsMinBuySignals(int min) { this.pcsMinBuySignals = min; }
+    public void setPcsRequireSpyDayUp(boolean v) { this.pcsRequireSpyDayUp = v; }
+    public void setPcsDeltaTarget(double delta) { this.deltaTarget = delta; }
+    public void setPcsProfitTarget(double frac) { this.profitTarget = frac; }
     public void setUseShortExpiry(boolean v) { this.useShortExpiry = v; }
 
     /** Load persisted exit dates from <dataDir>/premium-exit-dates.properties, discarding any not from today. */
@@ -318,9 +325,10 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         // RSI overbought (>70) blocks bullish put entries: an overextended stock is prone to a
         // sharp reversal that can blow through the short put strike.
         if (buys >= sells && sells < 2 && buys >= pcsMinBuySignals && inUptrend && !rsiOverbought) {
+            boolean spyDayOk = !pcsRequireSpyDayUp || isSpyUpOnDay();
             // Optional MACD momentum filter: skip PCS when MACD is negative (downward momentum).
             boolean macdOk = !pcsRequireNonNegativeMacd || Double.isNaN(macdValue) || macdValue >= 0;
-            if (macdOk) {
+            if (spyDayOk && macdOk) {
                 if (isEnabled(STRATEGY_PUT_CREDIT_SPREAD))
                     tryEnterPutSpread(symbol, price, sigma, today, signalStr, featureCsv);
                 if (isEnabled(STRATEGY_CASH_SECURED_PUT))
@@ -491,7 +499,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
         boolean callStop = price > scPos.getStrike();
         boolean putStop  = price < spPos.getStrike();
-        boolean target   = credit > 0 && pnl >= credit * PROFIT_TARGET;
+        boolean target   = credit > 0 && pnl >= credit * profitTarget;
         boolean expiring = dte < CLOSE_DTE;
         // If verified fills produced a net debit, this condor can never profit — exit immediately.
         boolean netDebit = credit <= 0;
@@ -554,7 +562,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         double pnl       = credit - closeCost;
 
         // Close on profit target, near expiry, or if stock materially above strike (likely assigned)
-        boolean target   = credit > 0 && pnl >= credit * PROFIT_TARGET;
+        boolean target   = credit > 0 && pnl >= credit * profitTarget;
         boolean expiring = dte < CLOSE_DTE;
         boolean assigned = price > pos.getStrike() * 1.02;
         if (!target && !expiring && !assigned) return;
@@ -808,7 +816,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                               double credit, double pnl, long dte) {
         if (credit <= 0) return String.format("Net debit on fill ($%.0f) — exit immediately", credit);
         boolean stopHit  = isCall ? price > shortStrike : price < shortStrike;
-        boolean target   = pnl >= credit * PROFIT_TARGET;
+        boolean target   = pnl >= credit * profitTarget;
         boolean expiring = dte < CLOSE_DTE;
         if (!stopHit && !target && !expiring) return null;
         if (expiring) return "DTE < " + CLOSE_DTE;
@@ -821,8 +829,8 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                 price, isCall ? ">" : "<", strike);
     }
 
-    private static String profitMsg(double pnl) {
-        return String.format("Profit target 50%%: +$%.0f", pnl);
+    private String profitMsg(double pnl) {
+        return String.format("Profit target %.0f%%: +$%.0f", profitTarget * 100, pnl);
     }
 
     private double bsCall(double S, double K, double T, double sigma) {
@@ -858,11 +866,17 @@ public class PremiumSellerRouter implements OptionsEvaluator {
                 : bsPut (S, pos.getStrike(), T, sigma);
     }
 
+    private boolean isSpyUpOnDay() {
+        List<Double> spyDaily = priceHistory.getDailyPrices("SPY");
+        if (spyDaily.size() < 2) return true;
+        return spyDaily.get(spyDaily.size() - 1) >= spyDaily.get(spyDaily.size() - 2);
+    }
+
     private double findOtmPutStrike(double S, double T, double sigma) {
         double K = bsEngine.roundStrike(S);
         for (int i = 0; i < 20; i++) {
             GreeksResult g = bsEngine.greeks(S, K, RISK_FREE_RATE, T, sigma, false);
-            if (Math.abs(g.delta) <= DELTA_TARGET) break;
+            if (Math.abs(g.delta) <= deltaTarget) break;
             K -= 5.0;
             if (K <= 0) return bsEngine.roundStrike(S * 0.85);
         }
@@ -873,7 +887,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         double K = bsEngine.roundStrike(S);
         for (int i = 0; i < 20; i++) {
             GreeksResult g = bsEngine.greeks(S, K, RISK_FREE_RATE, T, sigma, true);
-            if (g.delta <= DELTA_TARGET) break;
+            if (g.delta <= deltaTarget) break;
             K += 5.0;
         }
         return K;
