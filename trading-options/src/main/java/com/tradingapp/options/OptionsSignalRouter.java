@@ -105,6 +105,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     // Require this many consecutive same-direction ticks before opening a new position.
     // Default 1 (no confirmation). Set to 12 on live to match ~60s of 1-min bar consensus.
     private int entryConfirmationTicks        = 1;
+    private int minBuySignalsForEntry         = 0;
     // Per-trade position sizing: budget as a fraction of account balance (standard tier).
     // High-conviction strategies (HIGH_DELTA, NEARTERM_MOMENTUM) use 1.6× this value.
     private double positionBudgetFrac   = 0.05;
@@ -147,6 +148,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
     public void setPositionBudgetFrac(double frac)           { this.positionBudgetFrac = frac; }
     public void setMaxContractsPerTrade(int n)               { this.maxContractsPerTrade = n; }
     public void setEntryConfirmationTicks(int n)              { this.entryConfirmationTicks = n; }
+    public void setMinBuySignalsForEntry(int n)               { this.minBuySignalsForEntry = n; }
     public void setOvernightMinPremiumFrac(double frac)       { this.overnightMinPremiumFrac = frac; }
     public void setIvSurgeThreshold(double threshold)         { this.ivSurgeThreshold = threshold; }
     private boolean isStrategyEnabled(String name) { return enabledStrategies.isEmpty() || enabledStrategies.contains(name); }
@@ -500,12 +502,13 @@ public class OptionsSignalRouter implements OptionsEvaluator {
         }
 
         // ── 7. Entry (per-symbol options filters) ────────────────────────────
+        boolean bullishEntryAllowed = minBuySignalsForEntry == 0 || buySignals >= minBuySignalsForEntry;
         boolean optionsAllowed = optionsAllowlist.isEmpty() || optionsAllowlist.contains(symbol);
         if (!optionsAllowed) return;
         boolean callsAllowed = !callsDisabledSymbols.contains(symbol);
         boolean putsAllowed  = !putsDisabledSymbols.contains(symbol);
 
-        if (extremeBullish && !hasDirectional && !hasMultiLeg && canEnterBull) {
+        if (extremeBullish && !hasDirectional && !hasMultiLeg && canEnterBull && bullishEntryAllowed) {
             if (!callsAllowed)
                 researchCallback.accept(symbol + " CALL skip: calls disabled for symbol");
             else if (inDowntrend)
@@ -513,7 +516,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             else if (isStrategyEnabled("HIGH_DELTA_SCALP"))
                 tryOpenHighDeltaScalp(symbol, price, K, expiry, T, sigma, true, signalStr, featureCsv);
 
-        } else if (veryStrongBull && !hasDirectional && !hasMultiLeg && canEnterBull) {
+        } else if (veryStrongBull && !hasDirectional && !hasMultiLeg && canEnterBull && bullishEntryAllowed) {
             if (!callsAllowed)
                 researchCallback.accept(symbol + " CALL skip: calls disabled for symbol");
             else if (inDowntrend)
@@ -521,7 +524,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             else if (isStrategyEnabled("MOMENTUM_NEAR_TERM"))
                 tryOpenMomentumNearTerm(symbol, price, true, sigma, signalStr, featureCsv);
 
-        } else if (purelyBullish && !hasDirectional && !hasMultiLeg && canEnterBull) {
+        } else if (purelyBullish && !hasDirectional && !hasMultiLeg && canEnterBull && bullishEntryAllowed) {
             if (!callsAllowed)
                 researchCallback.accept(symbol + " CALL skip: calls disabled for symbol");
             else if (inDowntrend)
@@ -582,7 +585,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             LocalDate breakoutExpiry = bsEngine.selectNearTermExpiry();
             double breakoutT = bsEngine.timeToExpiry(breakoutExpiry);
             if (breakoutT <= 0) breakoutT = 5.0 / 365.0;
-            if (orbBuy && buySignals >= 2 && callsAllowed && !inDowntrend && canEnterBull) {
+            if (orbBuy && buySignals >= 2 && callsAllowed && !inDowntrend && canEnterBull && bullishEntryAllowed) {
                 tryOpenDirectional(symbol, price, true, breakoutCallKey, "OPENING-BREAKOUT",
                         breakoutExpiry, breakoutT, K, sigma, positionBudgetFrac, maxContractsPerTrade, signalStr, featureCsv);
             } else if (orbSell && sellSignals >= 2 && putsAllowed && sellSignals >= putMin && canEnterBear) {
@@ -610,7 +613,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             LocalDate stochExpiry = bsEngine.selectNearTermExpiry();
             double stochT = bsEngine.timeToExpiry(stochExpiry);
             if (stochT <= 0) stochT = 5.0 / 365.0;
-            if (stochBuy && buySignals >= 1 && callsAllowed && !inDowntrend && canEnterBull) {
+            if (stochBuy && buySignals >= 1 && callsAllowed && !inDowntrend && canEnterBull && bullishEntryAllowed) {
                 tryOpenDirectional(symbol, price, true, stochCallKey, "STOCH-REVERSAL",
                         stochExpiry, stochT, K, sigma, positionBudgetFrac, maxContractsPerTrade, signalStr, featureCsv);
             } else if (stochSell && sellSignals >= 1 && putsAllowed && sellSignals >= putMin && canEnterBear) {
@@ -635,7 +638,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
                     s -> "RELATIVE_STRENGTH".equals(s.getIndicatorName()) && s.getDirection() == com.tradingapp.engine.SignalResult.Direction.BUY);
             boolean rsSell = rawSignals.stream().anyMatch(
                     s -> "RELATIVE_STRENGTH".equals(s.getIndicatorName()) && s.getDirection() == com.tradingapp.engine.SignalResult.Direction.SELL);
-            if (rsBuy && buySignals >= 2 && callsAllowed && !inDowntrend && canEnterBull) {
+            if (rsBuy && buySignals >= 2 && callsAllowed && !inDowntrend && canEnterBull && bullishEntryAllowed) {
                 tryOpenDirectional(symbol, price, true, rsCallKey, "RS-DIVERGENCE",
                         expiry, T, K, sigma, positionBudgetFrac, maxContractsPerTrade, signalStr, featureCsv);
             } else if (rsSell && sellSignals >= 2 && putsAllowed && sellSignals >= putMin && canEnterBear) {
@@ -663,7 +666,7 @@ public class OptionsSignalRouter implements OptionsEvaluator {
             LocalDate macdExpiry = bsEngine.selectNearTermExpiry();
             double macdT = bsEngine.timeToExpiry(macdExpiry);
             if (macdT <= 0) macdT = 7.0 / 365.0;
-            if (macdBuy && buySignals >= 1 && callsAllowed && !inDowntrend && canEnterBull) {
+            if (macdBuy && buySignals >= 1 && callsAllowed && !inDowntrend && canEnterBull && bullishEntryAllowed) {
                 tryOpenDirectional(symbol, price, true, macdCallKey, "MACD-CROSSOVER",
                         macdExpiry, macdT, K, sigma, positionBudgetFrac, maxContractsPerTrade, signalStr, featureCsv);
             } else if (macdSell && sellSignals >= 1 && putsAllowed && sellSignals >= putMin && canEnterBear) {

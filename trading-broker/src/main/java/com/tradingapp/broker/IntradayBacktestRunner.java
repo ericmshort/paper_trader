@@ -530,6 +530,73 @@ public class IntradayBacktestRunner {
             appendHistorySummaries(cfg, List.of(stockResults[0], stockResults[1]), startDate, endDate);
             System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
             return;
+        } else if ("signal-compare".equals(mode)) {
+            // Full live config: compare return/drawdown/winrate at varying minimum buy-signal thresholds.
+            // 0 = current behavior (strategy-specific minimums), 2/3/4/5 = global bullish entry floor.
+            int[] sigThresholds = {0, 2, 3, 4, 5};
+            RunSummary[] sigResults = new RunSummary[sigThresholds.length];
+            Set<String> sigStrategies = disabledStrategies.isEmpty() ? cfg.getEnabledStrategies()
+                    : cfg.getEnabledStrategies().stream().filter(s -> !disabledStrategies.contains(s))
+                            .collect(Collectors.toSet());
+            for (int i = 0; i < sigThresholds.length; i++) {
+                int minBuys = sigThresholds[i];
+                String sigLabel = String.format("%-44s",
+                        minBuys == 0 ? "min buy signals: 0 (current)"
+                                     : "min buy signals: " + minBuys);
+                System.out.println("\n=== " + sigLabel.trim() + " ===");
+                BlackScholesEngine bsSig = new BlackScholesEngine();
+                bsSig.setVixProvider(vixCache::getVix, vixCache.baselineVix());
+                OptionsSignalRouter sigRouter = new OptionsSignalRouter(
+                        bsSig, new OptionsOrderExecutor(new Account(), null),
+                        new Account(), new PriceHistory(), msg -> {}, null);
+                sigRouter.setMaxPortfolioExposure(maxExposure);
+                sigRouter.setEnabledStrategies(sigStrategies);
+                if (backtestEntryStartTime != null) sigRouter.setEntryStartTime(backtestEntryStartTime);
+                if (cfg.getOptionsForceCloseTime() != null) sigRouter.setForceCloseTime(cfg.getOptionsForceCloseTime());
+                sigRouter.setPositionBudgetFrac(cfg.getPositionBudgetFrac());
+                sigRouter.setMaxContractsPerTrade(cfg.getMaxContractsPerTrade());
+                sigRouter.setStopLossFrac(cfg.getOptionsStopLossFrac());
+                sigRouter.setAvoidOvernightHolds(cfg.isAvoidOvernightHolds());
+                if (cfg.getOptionsEntryCutoff() != null) sigRouter.setEntryCutoff(cfg.getOptionsEntryCutoff());
+                sigRouter.setOptionsAllowlist(BASE_OPTS);
+                sigRouter.setCallsDisabledSymbols(CALLS_DISABLED);
+                sigRouter.setPutsDisabledSymbols(cfg.getOptionsPutsDisabled());
+                sigRouter.setDowntrendPutMinSignals(cfg.getDowntrendPutMinSignals());
+                sigRouter.setReversalMinSignals(5);
+                sigRouter.setReversalMinConsecutive(2);
+                sigRouter.setProfitTarget(cfg.getProfitTarget());
+                sigRouter.setEntryConfirmationTicks(Math.max(1, cfg.getEntryConfirmationTicks() / 12));
+                sigRouter.setOvernightMinPremiumFrac(cfg.getOvernightMinPremiumFrac());
+                sigRouter.setMinBuySignalsForEntry(minBuys);
+                long t0Sig = System.currentTimeMillis();
+                IntradayBacktestResult sigResult = engine.run(baseWatchlist, barsBySymbol, 100_000.0, sigRouter, msg -> {},
+                        Set.of(), loop -> {
+                            sigRouter.setUptrendSupplier(loop::isUptrend);
+                            loop.setStockTradingEnabled(false);
+                            loop.setMaxConcurrentStockPositions(10);
+                            loop.setAvoidOvernightHolds(false);
+                            loop.setDailyLossLimitPct(defaultLossLimitPct / 100.0);
+                            loop.setAccurateOptionsValuation(true);
+                            sigRouter.setClosePositionsOnHalt(true);
+                        });
+                System.out.printf("Done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
+                        (System.currentTimeMillis() - t0Sig) / 1000.0,
+                        sigResult.getTotalReturnPct(), sigResult.getMaxDrawdownPct(),
+                        sigResult.getTotalTrades(), sigResult.getWins(), sigResult.getLosses());
+                sigResults[i] = new RunSummary(sigLabel, sigStrategies,
+                        sigResult.getTotalReturnPct(), sigResult.getMaxDrawdownPct(),
+                        sigResult.getTotalTrades(), sigResult.getWins(), sigResult.getLosses());
+            }
+            System.out.printf("%n%-46s  %8s  %8s  %7s  %7s%n", "Min Buy Signals (full config)", "Return", "MaxDD", "Trades", "WinRate");
+            System.out.println("-".repeat(89));
+            for (RunSummary s : sigResults) {
+                double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
+                System.out.printf("%-46s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
+                        s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
+            }
+            appendHistorySummaries(cfg, Arrays.asList(sigResults), startDate, endDate);
+            System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
+            return;
         } else if ("pcs-signal-compare".equals(mode)) {
             // Compare PCS performance at varying minimum buy-signal thresholds:
             // 0 = any tick where buys >= sells qualifies (current behavior)
