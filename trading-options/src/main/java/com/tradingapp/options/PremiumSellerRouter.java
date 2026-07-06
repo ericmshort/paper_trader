@@ -107,6 +107,10 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     // When true, PCS entries require non-negative MACD value (upward momentum filter).
     private boolean pcsRequireNonNegativeMacd = false;
 
+    // Minimum number of buy signals required to open a PCS (in addition to buys >= sells).
+    // 0 = current behavior (no minimum; any tick where buys >= sells qualifies).
+    private int pcsMinBuySignals = 0;
+
     // When true, CCS entries require at least one SELL signal (directional confirmation).
     private boolean ccsRequireSellSignal = false;
 
@@ -164,6 +168,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     public void setSectorConcentrationLimit(int max) { this.maxPositionsPerSector = max; }
     public void setPcsRequireNonNegativeMacd(boolean v) { this.pcsRequireNonNegativeMacd = v; }
     public void setCcsRequireSellSignal(boolean v) { this.ccsRequireSellSignal = v; }
+    public void setPcsMinBuySignals(int min) { this.pcsMinBuySignals = min; }
     public void setUseShortExpiry(boolean v) { this.useShortExpiry = v; }
 
     /** Load persisted exit dates from <dataDir>/premium-exit-dates.properties, discarding any not from today. */
@@ -312,7 +317,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         // Put Credit Spread / CSP: bullish or neutral — require uptrend (SPY above regime MA).
         // RSI overbought (>70) blocks bullish put entries: an overextended stock is prone to a
         // sharp reversal that can blow through the short put strike.
-        if (buys >= sells && sells < 2 && inUptrend && !rsiOverbought) {
+        if (buys >= sells && sells < 2 && buys >= pcsMinBuySignals && inUptrend && !rsiOverbought) {
             // Optional MACD momentum filter: skip PCS when MACD is negative (downward momentum).
             boolean macdOk = !pcsRequireNonNegativeMacd || Double.isNaN(macdValue) || macdValue >= 0;
             if (macdOk) {

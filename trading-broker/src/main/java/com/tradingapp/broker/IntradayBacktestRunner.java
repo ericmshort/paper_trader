@@ -14,6 +14,7 @@ import com.tradingapp.engine.IntradayBar;
 import com.tradingapp.options.BlackScholesEngine;
 import com.tradingapp.options.OptionsOrderExecutor;
 import com.tradingapp.options.OptionsSignalRouter;
+import com.tradingapp.options.PremiumSellerRouter;
 
 import java.io.PrintWriter;
 import java.nio.file.Files;
@@ -527,6 +528,57 @@ public class IntradayBacktestRunner {
                         s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
             }
             appendHistorySummaries(cfg, List.of(stockResults[0], stockResults[1]), startDate, endDate);
+            System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
+            return;
+        } else if ("pcs-signal-compare".equals(mode)) {
+            // Compare PCS performance at varying minimum buy-signal thresholds:
+            // 0 = any tick where buys >= sells qualifies (current behavior)
+            // 2, 3, 4, 5 = progressively stricter entry bar
+            int[] thresholds = {0, 2, 3, 4, 5};
+            RunSummary[] pcsResults = new RunSummary[thresholds.length];
+            for (int i = 0; i < thresholds.length; i++) {
+                int minBuys = thresholds[i];
+                String pcsLabel = String.format("%-44s",
+                        minBuys == 0 ? "min buy signals: 0 (current)"
+                                     : "min buy signals: " + minBuys);
+                System.out.println("\n=== " + pcsLabel.trim() + " ===");
+                BlackScholesEngine bsPcs = new BlackScholesEngine();
+                bsPcs.setVixProvider(vixCache::getVix, vixCache.baselineVix());
+                PremiumSellerRouter psr = new PremiumSellerRouter(
+                        bsPcs, new OptionsOrderExecutor(new Account(), null),
+                        new Account(), new PriceHistory(), msg -> {});
+                psr.setEnabledStrategies(Set.of(PremiumSellerRouter.STRATEGY_PUT_CREDIT_SPREAD));
+                psr.setAllowlist(BASE_OPTS);
+                psr.setMaxPortfolioExposure(maxExposure);
+                psr.setPcsMinBuySignals(minBuys);
+                if (backtestEntryStartTime != null) psr.setMinEntryTime(
+                        backtestEntryStartTime.getHour(), backtestEntryStartTime.getMinute());
+                long t0Pcs = System.currentTimeMillis();
+                IntradayBacktestResult pcsResult = engine.run(baseWatchlist, barsBySymbol, 100_000.0, psr, msg -> {},
+                        Set.of(), loop -> {
+                            psr.setUptrendSupplier(loop::isUptrend);
+                            loop.setStockTradingEnabled(false);
+                            loop.setDailyLossLimitPct(defaultLossLimitPct / 100.0);
+                            loop.setAccurateOptionsValuation(true);
+                            loop.setMarketRegimeFilterEnabled(true);
+                        });
+                System.out.printf("Done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
+                        (System.currentTimeMillis() - t0Pcs) / 1000.0,
+                        pcsResult.getTotalReturnPct(), pcsResult.getMaxDrawdownPct(),
+                        pcsResult.getTotalTrades(), pcsResult.getWins(), pcsResult.getLosses());
+                pcsResults[i] = new RunSummary(pcsLabel,
+                        Set.of(PremiumSellerRouter.STRATEGY_PUT_CREDIT_SPREAD),
+                        pcsResult.getTotalReturnPct(), pcsResult.getMaxDrawdownPct(),
+                        pcsResult.getTotalTrades(), pcsResult.getWins(), pcsResult.getLosses());
+            }
+            System.out.printf("%n%-46s  %8s  %8s  %7s  %7s%n", "PCS Min Buy Signals", "Return", "MaxDD", "Trades", "WinRate");
+            System.out.println("-".repeat(89));
+            for (RunSummary s : pcsResults) {
+                double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
+                System.out.printf("%-46s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
+                        s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
+            }
+            appendHistorySummaries(cfg, Arrays.asList(pcsResults), startDate, endDate);
             System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
             return;
         } else if (newCandidates.isEmpty()) {
