@@ -597,6 +597,63 @@ public class IntradayBacktestRunner {
             appendHistorySummaries(cfg, Arrays.asList(sigResults), startDate, endDate);
             System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
             return;
+        } else if ("pcs-stop-compare".equals(mode)) {
+            // Compare per-tick price stops (current) vs end-of-day stops.
+            // EOD stop = only evaluate price breach after 15:45 ET; intraday dips that recover
+            // don't trigger an exit. Also sweeps profit target under EOD stop to find best combo.
+            record StopCase(String label, boolean eodStop, double profit) {}
+            List<StopCase> stopCases = List.of(
+                new StopCase("per-tick stop, profit=50% (baseline)", false, 0.50),
+                new StopCase("EOD stop,     profit=50%",             true,  0.50),
+                new StopCase("EOD stop,     profit=40%",             true,  0.40),
+                new StopCase("EOD stop,     profit=60%",             true,  0.60),
+                new StopCase("EOD stop,     profit=75%",             true,  0.75)
+            );
+            RunSummary[] stopResults = new RunSummary[stopCases.size()];
+            for (int i = 0; i < stopCases.size(); i++) {
+                StopCase sc = stopCases.get(i);
+                String stopLabel = String.format("%-44s", sc.label());
+                System.out.println("\n=== " + sc.label() + " ===");
+                BlackScholesEngine bsSc = new BlackScholesEngine();
+                bsSc.setVixProvider(vixCache::getVix, vixCache.baselineVix());
+                PremiumSellerRouter scPsr = new PremiumSellerRouter(
+                        bsSc, new OptionsOrderExecutor(new Account(), null),
+                        new Account(), new PriceHistory(), msg -> {});
+                scPsr.setEnabledStrategies(Set.of(PremiumSellerRouter.STRATEGY_PUT_CREDIT_SPREAD));
+                scPsr.setAllowlist(BASE_OPTS);
+                scPsr.setMaxPortfolioExposure(maxExposure);
+                scPsr.setPcsEodStopOnly(sc.eodStop());
+                scPsr.setPcsProfitTarget(sc.profit());
+                if (backtestEntryStartTime != null) scPsr.setMinEntryTime(
+                        backtestEntryStartTime.getHour(), backtestEntryStartTime.getMinute());
+                long t0Sc = System.currentTimeMillis();
+                IntradayBacktestResult stopResult = engine.run(baseWatchlist, barsBySymbol, 100_000.0, scPsr, msg -> {},
+                        Set.of(), loop -> {
+                            scPsr.setUptrendSupplier(loop::isUptrend);
+                            loop.setStockTradingEnabled(false);
+                            loop.setDailyLossLimitPct(defaultLossLimitPct / 100.0);
+                            loop.setAccurateOptionsValuation(true);
+                            loop.setMarketRegimeFilterEnabled(true);
+                        });
+                System.out.printf("Done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
+                        (System.currentTimeMillis() - t0Sc) / 1000.0,
+                        stopResult.getTotalReturnPct(), stopResult.getMaxDrawdownPct(),
+                        stopResult.getTotalTrades(), stopResult.getWins(), stopResult.getLosses());
+                stopResults[i] = new RunSummary(stopLabel,
+                        Set.of(PremiumSellerRouter.STRATEGY_PUT_CREDIT_SPREAD),
+                        stopResult.getTotalReturnPct(), stopResult.getMaxDrawdownPct(),
+                        stopResult.getTotalTrades(), stopResult.getWins(), stopResult.getLosses());
+            }
+            System.out.printf("%n%-46s  %8s  %8s  %7s  %7s%n", "Stop Config", "Return", "MaxDD", "Trades", "WinRate");
+            System.out.println("-".repeat(89));
+            for (RunSummary s : stopResults) {
+                double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
+                System.out.printf("%-46s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
+                        s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
+            }
+            appendHistorySummaries(cfg, Arrays.asList(stopResults), startDate, endDate);
+            System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
+            return;
         } else if ("pcs-param-compare".equals(mode)) {
             // Sweep three entry/exit parameters independently and combined to find the best
             // PCS configuration. Baseline = current defaults (delta=0.20, profit=50%, no SPY day filter).

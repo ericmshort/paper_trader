@@ -115,6 +115,11 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     // Stronger uptrend confirmation than the regime MA alone.
     private boolean pcsRequireSpyDayUp = false;
 
+    // When true, price stops are only evaluated after 15:45 ET (end-of-day).
+    // Prevents intraday dips that recover by close from closing spread positions as losses.
+    private boolean pcsEodStopOnly = false;
+    private static final java.time.LocalTime EOD_STOP_TIME = java.time.LocalTime.of(15, 45);
+
     // When true, CCS entries require at least one SELL signal (directional confirmation).
     private boolean ccsRequireSellSignal = false;
 
@@ -174,6 +179,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     public void setCcsRequireSellSignal(boolean v) { this.ccsRequireSellSignal = v; }
     public void setPcsMinBuySignals(int min) { this.pcsMinBuySignals = min; }
     public void setPcsRequireSpyDayUp(boolean v) { this.pcsRequireSpyDayUp = v; }
+    public void setPcsEodStopOnly(boolean v) { this.pcsEodStopOnly = v; }
     public void setPcsDeltaTarget(double delta) { this.deltaTarget = delta; }
     public void setPcsProfitTarget(double frac) { this.profitTarget = frac; }
     public void setUseShortExpiry(boolean v) { this.useShortExpiry = v; }
@@ -497,8 +503,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         double closeCost = ((scCur - lcCur) + (spCur - lpCur)) * 100 * contracts;
         double pnl       = credit - closeCost;
 
-        boolean callStop = price > scPos.getStrike();
-        boolean putStop  = price < spPos.getStrike();
+        boolean stopAllowed = isStopAllowed();
+        boolean callStop = stopAllowed && price > scPos.getStrike();
+        boolean putStop  = stopAllowed && price < spPos.getStrike();
         boolean target   = credit > 0 && pnl >= credit * profitTarget;
         boolean expiring = dte < CLOSE_DTE;
         // If verified fills produced a net debit, this condor can never profit — exit immediately.
@@ -812,10 +819,14 @@ public class PremiumSellerRouter implements OptionsEvaluator {
      * A non-positive credit means actual Alpaca fills produced a net debit — the spread
      * can never be profitable. Exit immediately rather than waiting for a price stop.
      */
+    private boolean isStopAllowed() {
+        return !pcsEodStopOnly || clock.get().toLocalTime().isAfter(EOD_STOP_TIME);
+    }
+
     private String exitReason(double price, double shortStrike, boolean isCall,
                               double credit, double pnl, long dte) {
         if (credit <= 0) return String.format("Net debit on fill ($%.0f) — exit immediately", credit);
-        boolean stopHit  = isCall ? price > shortStrike : price < shortStrike;
+        boolean stopHit  = isStopAllowed() && (isCall ? price > shortStrike : price < shortStrike);
         boolean target   = pnl >= credit * profitTarget;
         boolean expiring = dte < CLOSE_DTE;
         if (!stopHit && !target && !expiring) return null;
