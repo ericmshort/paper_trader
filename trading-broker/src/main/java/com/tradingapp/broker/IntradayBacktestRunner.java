@@ -599,6 +599,55 @@ public class IntradayBacktestRunner {
             appendHistorySummaries(cfg, Arrays.asList(sigResults), startDate, endDate);
             System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
             return;
+        } else if ("pcs-spread-compare".equals(mode)) {
+            // Compare PCS spread widths: $5, $10 (current), $15, $20.
+            // Wider spread = more credit but higher max loss. Short strike is unchanged.
+            // Uses the low-vol PCS symbol list if configured.
+            double[] widths = {5.0, 10.0, 15.0, 20.0};
+            RunSummary[] widthResults = new RunSummary[widths.length];
+            for (int i = 0; i < widths.length; i++) {
+                double w = widths[i];
+                String wLabel = String.format("%-44s", String.format("spread width $%.0f%s", w, w == 10.0 ? " (current)" : ""));
+                System.out.println("\n=== " + wLabel.trim() + " ===");
+                BlackScholesEngine bsW = new BlackScholesEngine();
+                bsW.setVixProvider(vixCache::getVix, vixCache.baselineVix());
+                PremiumSellerRouter wPsr = new PremiumSellerRouter(
+                        bsW, new OptionsOrderExecutor(new Account(), null),
+                        new Account(), new PriceHistory(), msg -> {});
+                wPsr.setEnabledStrategies(Set.of(PremiumSellerRouter.STRATEGY_PUT_CREDIT_SPREAD));
+                wPsr.setAllowlist(PCS_OPTS);
+                wPsr.setMaxPortfolioExposure(maxExposure);
+                wPsr.setPcsSpreadWidth(w);
+                if (backtestEntryStartTime != null) wPsr.setMinEntryTime(
+                        backtestEntryStartTime.getHour(), backtestEntryStartTime.getMinute());
+                long t0W = System.currentTimeMillis();
+                IntradayBacktestResult wResult = engine.run(baseWatchlist, barsBySymbol, 100_000.0, wPsr, msg -> {},
+                        Set.of(), loop -> {
+                            wPsr.setUptrendSupplier(loop::isUptrend);
+                            loop.setStockTradingEnabled(false);
+                            loop.setDailyLossLimitPct(defaultLossLimitPct / 100.0);
+                            loop.setAccurateOptionsValuation(true);
+                            loop.setMarketRegimeFilterEnabled(true);
+                        });
+                System.out.printf("Done in %.1fs  Return: %.2f%%  MaxDD: %.2f%%  Trades: %d (W:%d L:%d)%n",
+                        (System.currentTimeMillis() - t0W) / 1000.0,
+                        wResult.getTotalReturnPct(), wResult.getMaxDrawdownPct(),
+                        wResult.getTotalTrades(), wResult.getWins(), wResult.getLosses());
+                widthResults[i] = new RunSummary(wLabel,
+                        Set.of(PremiumSellerRouter.STRATEGY_PUT_CREDIT_SPREAD),
+                        wResult.getTotalReturnPct(), wResult.getMaxDrawdownPct(),
+                        wResult.getTotalTrades(), wResult.getWins(), wResult.getLosses());
+            }
+            System.out.printf("%n%-46s  %8s  %8s  %7s  %7s%n", "Spread Width", "Return", "MaxDD", "Trades", "WinRate");
+            System.out.println("-".repeat(89));
+            for (RunSummary s : widthResults) {
+                double wr = s.trades() > 0 ? 100.0 * s.wins() / s.trades() : 0.0;
+                System.out.printf("%-46s  %7.2f%%  %7.2f%%  %7d  %6.1f%%%n",
+                        s.label(), s.returnPct(), s.maxDd(), s.trades(), wr);
+            }
+            appendHistorySummaries(cfg, Arrays.asList(widthResults), startDate, endDate);
+            System.out.println("\nHistory appended to: " + Path.of(System.getProperty("user.home"), ".tradingapp", "backtest-history.tsv"));
+            return;
         } else if ("pcs-symbol-compare".equals(mode)) {
             // Compare PCS on all current symbols vs a curated lower-vol subset.
             // High-beta tech (AMD, CRWD, MRVL, SNOW, etc.) tend to produce too many stop-outs.

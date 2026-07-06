@@ -52,6 +52,7 @@ public class SettingsController implements Initializable {
     @FXML private CheckBox premiumPcsCheck;
     @FXML private CheckBox premiumCcsCheck;
     @FXML private TextField premiumMaxContractsField;
+    @FXML private TextField premiumSpreadWidthField;
     @FXML private TextField premiumSymbolAllowlistField;
     @FXML private TextField premiumMinEntryField;
     @FXML private TextField premiumMaxSpreadsField;
@@ -149,6 +150,7 @@ public class SettingsController implements Initializable {
         premiumPcsCheck.setSelected(premStrats.contains(com.tradingapp.options.PremiumSellerRouter.STRATEGY_PUT_CREDIT_SPREAD));
         premiumCcsCheck.setSelected(premStrats.contains(com.tradingapp.options.PremiumSellerRouter.STRATEGY_CALL_CREDIT_SPREAD));
         premiumMaxContractsField.setText(String.valueOf(cfg.getPremiumSellerMaxContracts()));
+        premiumSpreadWidthField.setText(String.valueOf((int) cfg.getPremiumPcsSpreadWidth()));
         premiumSymbolAllowlistField.setText(String.join(",", cfg.getPremiumSymbolAllowlist()));
         premiumMinEntryField.setText(cfg.getPremiumMinEntryTime() != null ? cfg.getPremiumMinEntryTime().toString() : "");
         premiumMaxSpreadsField.setText(String.valueOf(cfg.getPremiumMaxConcurrentSpreads()));
@@ -412,6 +414,10 @@ public class SettingsController implements Initializable {
         cfg.setPremiumCcsRequireSellSignal(premiumCcsSellSignalCheck.isSelected());
         cfg.setPremiumUseShortExpiry(premiumShortExpiryCheck.isSelected());
         try {
+            double w = Double.parseDouble(premiumSpreadWidthField.getText().strip());
+            cfg.setPremiumPcsSpreadWidth(Math.min(50, Math.max(5, w)));
+        } catch (NumberFormatException ignored) {}
+        try {
             int days = Integer.parseInt(earningsBlackoutField.getText().strip());
             cfg.setEarningsBlackoutDays(Math.max(0, days));
         } catch (NumberFormatException ignored) {}
@@ -518,6 +524,7 @@ public class SettingsController implements Initializable {
         premiumPcsCheck.setDisable(!enabled);
         premiumCcsCheck.setDisable(!enabled);
         premiumMaxContractsField.setDisable(!enabled);
+        premiumSpreadWidthField.setDisable(!enabled);
         premiumMinEntryField.setDisable(!enabled);
         premiumMaxSpreadsField.setDisable(!enabled);
         premiumSymbolAllowlistField.setDisable(!enabled);

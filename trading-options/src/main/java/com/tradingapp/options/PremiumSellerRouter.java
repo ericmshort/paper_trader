@@ -49,8 +49,8 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
     private static final ZoneId ET = ZoneId.of("America/New_York");
     private static final double RISK_FREE_RATE  = 0.04;
-    private static final double SPREAD_WIDTH    = 10.0;   // $10 spread width
     private static final double MIN_CREDIT_PCT  = 0.20;   // skip if credit < 20% of spread
+    private double spreadWidth   = 10.0;   // $10 spread width (distance between short and long strike)
     private double deltaTarget   = 0.20;   // ~80% OTM short strike
     private double profitTarget  = 0.50;   // close at 50% of credit
     private static final int    CLOSE_DTE       = 7;      // close when < 7 DTE
@@ -182,6 +182,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
     public void setPcsEodStopOnly(boolean v) { this.pcsEodStopOnly = v; }
     public void setPcsDeltaTarget(double delta) { this.deltaTarget = delta; }
     public void setPcsProfitTarget(double frac) { this.profitTarget = frac; }
+    public void setPcsSpreadWidth(double width) { this.spreadWidth = width; }
     public void setUseShortExpiry(boolean v) { this.useShortExpiry = v; }
 
     /** Load persisted exit dates from <dataDir>/premium-exit-dates.properties, discarding any not from today. */
@@ -604,18 +605,18 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         if (T <= 0) return;
 
         double shortK = findOtmPutStrike(price, T, sigma);
-        double longK  = bsEngine.roundStrike(shortK - SPREAD_WIDTH);
+        double longK  = bsEngine.roundStrike(shortK - spreadWidth);
         if (longK <= 0) return;
 
         double shortPrem = bsEngine.putPrice(price, shortK, RISK_FREE_RATE, T, sigma);
         double longPrem  = bsEngine.putPrice(price, longK,  RISK_FREE_RATE, T, sigma);
         double credit    = shortPrem - longPrem;
-        if (credit < SPREAD_WIDTH * MIN_CREDIT_PCT) {
+        if (credit < spreadWidth * MIN_CREDIT_PCT) {
             log.accept(symbol + " PUT SPREAD skip: credit $" + String.format("%.2f", credit * 100) + " < min");
             return;
         }
 
-        int c = creditContracts(account.getBalance(), SPREAD_WIDTH - credit);
+        int c = creditContracts(account.getBalance(), spreadWidth - credit);
         if (c < 1) return;
 
         boolean opened = optExec.openCreditSpread(
@@ -648,17 +649,17 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         if (T <= 0) return;
 
         double shortK = findOtmCallStrike(price, T, sigma);
-        double longK  = bsEngine.roundStrike(shortK + SPREAD_WIDTH);
+        double longK  = bsEngine.roundStrike(shortK + spreadWidth);
 
         double shortPrem = bsEngine.callPrice(price, shortK, RISK_FREE_RATE, T, sigma);
         double longPrem  = bsEngine.callPrice(price, longK,  RISK_FREE_RATE, T, sigma);
         double credit    = shortPrem - longPrem;
-        if (credit < SPREAD_WIDTH * MIN_CREDIT_PCT) {
+        if (credit < spreadWidth * MIN_CREDIT_PCT) {
             log.accept(symbol + " CALL SPREAD skip: credit $" + String.format("%.2f", credit * 100) + " < min");
             return;
         }
 
-        int c = creditContracts(account.getBalance(), SPREAD_WIDTH - credit);
+        int c = creditContracts(account.getBalance(), spreadWidth - credit);
         if (c < 1) return;
 
         boolean opened = optExec.openCreditSpread(
@@ -692,9 +693,9 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         if (T <= 0) return;
 
         double shortPutK  = findOtmPutStrike(price, T, sigma);
-        double longPutK   = bsEngine.roundStrike(shortPutK - SPREAD_WIDTH);
+        double longPutK   = bsEngine.roundStrike(shortPutK - spreadWidth);
         double shortCallK = findOtmCallStrike(price, T, sigma);
-        double longCallK  = bsEngine.roundStrike(shortCallK + SPREAD_WIDTH);
+        double longCallK  = bsEngine.roundStrike(shortCallK + spreadWidth);
         if (longPutK <= 0 || shortPutK >= shortCallK) return;
 
         double spPrem = bsEngine.putPrice (price, shortPutK,  RISK_FREE_RATE, T, sigma);
@@ -703,12 +704,12 @@ public class PremiumSellerRouter implements OptionsEvaluator {
         double lcPrem = bsEngine.callPrice(price, longCallK,  RISK_FREE_RATE, T, sigma);
 
         double credit = (spPrem - lpPrem) + (scPrem - lcPrem);
-        if (credit < SPREAD_WIDTH * MIN_CREDIT_PCT) {
+        if (credit < spreadWidth * MIN_CREDIT_PCT) {
             log.accept(symbol + " IRON CONDOR skip: credit $" + String.format("%.2f", credit * 100) + " < min");
             return;
         }
 
-        int c = creditContracts(account.getBalance(), SPREAD_WIDTH - credit);
+        int c = creditContracts(account.getBalance(), spreadWidth - credit);
         if (c < 1) return;
 
         boolean opened = optExec.openIronCondor(
@@ -789,7 +790,7 @@ public class PremiumSellerRouter implements OptionsEvaluator {
 
     /**
      * Total max-loss-at-risk across all open premium positions.
-     * For credit spreads the max loss is SPREAD_WIDTH × |contracts| × 100.
+     * For credit spreads the max loss is spreadWidth × |contracts| × 100.
      * Iron Condor counted once (one wing can breach at a time).
      * CSP counted at strike × |contracts| × 100 (full downside).
      */
@@ -800,10 +801,10 @@ public class PremiumSellerRouter implements OptionsEvaluator {
             OptionsPosition pos = e.getValue();
             int n = Math.abs(pos.getContracts());
             if (key.endsWith(PUTSPREAD_SHORT) || key.endsWith(CALLSPREAD_SHORT)) {
-                risk += SPREAD_WIDTH * n * 100;
+                risk += spreadWidth * n * 100;
             } else if (key.endsWith(IC_SHORTPUT)) {
                 // Count one IC wing only — max loss is the breached side, not both simultaneously
-                risk += SPREAD_WIDTH * n * 100;
+                risk += spreadWidth * n * 100;
             } else if (key.endsWith(CSP_PUT)) {
                 risk += pos.getStrike() * n * 100;
             }

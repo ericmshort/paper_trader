@@ -78,6 +78,7 @@ public class AppConfig {
     private boolean premiumCcsRequireSellSignal = false;
     // Use nearest monthly expiry for all premium spreads (lower DTE, faster theta).
     private boolean premiumUseShortExpiry = false;
+    private double premiumPcsSpreadWidth = 10.0;
     // When false, equity (stock) buys are disabled; only options trades execute.
     private boolean stockTradingEnabled = true;
     // Fraction of entry premium at which an options position is stop-lossed (default 0.50 = 50%).
@@ -191,6 +192,10 @@ public class AppConfig {
                     props.getProperty("premium.ccs_require_sell_signal", "false"));
             config.premiumUseShortExpiry = Boolean.parseBoolean(
                     props.getProperty("premium.use_short_expiry", "false"));
+            try {
+                config.premiumPcsSpreadWidth = Double.parseDouble(
+                        props.getProperty("premium.pcs_spread_width", "10.0"));
+            } catch (NumberFormatException ignored) {}
             String allowlistRaw = props.getProperty("options.symbol.allowlist", "");
             if (!allowlistRaw.isBlank()) {
                 config.optionsSymbolAllowlist = Arrays.stream(allowlistRaw.split(","))
@@ -332,6 +337,7 @@ public class AppConfig {
             props.setProperty("premium.pcs_require_nonneg_macd", String.valueOf(premiumPcsRequireNonNegMacd));
             props.setProperty("premium.ccs_require_sell_signal", String.valueOf(premiumCcsRequireSellSignal));
             props.setProperty("premium.use_short_expiry", String.valueOf(premiumUseShortExpiry));
+            props.setProperty("premium.pcs_spread_width", String.valueOf(premiumPcsSpreadWidth));
             props.setProperty("options.symbol.allowlist", String.join(",", optionsSymbolAllowlist));
             props.setProperty("premium.symbol.allowlist", String.join(",", premiumSymbolAllowlist));
             props.setProperty("options.calls.disabled", String.join(",", optionsCallsDisabled));
@@ -439,6 +445,8 @@ public class AppConfig {
     public void setPremiumCcsRequireSellSignal(boolean v) { this.premiumCcsRequireSellSignal = v; }
     public boolean isPremiumUseShortExpiry() { return premiumUseShortExpiry; }
     public void setPremiumUseShortExpiry(boolean v) { this.premiumUseShortExpiry = v; }
+    public double getPremiumPcsSpreadWidth() { return premiumPcsSpreadWidth; }
+    public void setPremiumPcsSpreadWidth(double w) { this.premiumPcsSpreadWidth = w; }
     public int getDowntrendPutMinSignals() { return downtrendPutMinSignals; }
     public void setDowntrendPutMinSignals(int n) { this.downtrendPutMinSignals = n; }
     public int getMinBuySignalsForEntry() { return minBuySignalsForEntry; }

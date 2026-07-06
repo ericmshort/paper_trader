@@ -347,6 +347,7 @@ public class DashboardController implements Initializable {
         premiumSellerRouter.setPcsRequireNonNegativeMacd(appConfig.isPremiumPcsRequireNonNegMacd());
         premiumSellerRouter.setCcsRequireSellSignal(appConfig.isPremiumCcsRequireSellSignal());
         premiumSellerRouter.setUseShortExpiry(appConfig.isPremiumUseShortExpiry());
+        premiumSellerRouter.setPcsSpreadWidth(appConfig.getPremiumPcsSpreadWidth());
         String dataDir = new java.io.File(transactionLog.getDbPath()).getParent();
         premiumSellerRouter.restoreExitDates(dataDir);
 
