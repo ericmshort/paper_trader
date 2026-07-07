@@ -711,6 +711,16 @@ public class AlpacaBroker implements BrokerClient, OptionsSubmitter {
 
             JSONArray positions = getJsonArray("/positions");
             if (positions != null) {
+                // Guard against a transient Alpaca empty-response (HTTP 200 with []) wiping
+                // all positions. If Alpaca returns 0 positions but we track any, skip this
+                // sync tick entirely — better to leave stale state than to evict real positions.
+                int trackedCount = account.getOptionsPositions().size() + account.getPositions().size();
+                if (positions.length() == 0 && trackedCount > 0) {
+                    LOG.warning("[BrokerSync] Alpaca returned 0 positions but we track " + trackedCount
+                            + " — skipping sync tick to avoid spurious eviction");
+                    return;
+                }
+
                 // Mark every in-memory position as unverified. Only positions confirmed
                 // by the broker will be re-verified; the rest are removed after the loop.
                 account.markAllUnverified();
